@@ -1,17 +1,17 @@
-"use client";
+'use client';
 
-import Link from "next/link";
-import { usePathname, useRouter } from "next/navigation";
-import { toast } from "sonner";
-import { Button } from "@/components/ui/button";
-import { createSupabaseBrowserClient } from "@/lib/supabase/client";
+import Link from 'next/link';
+import { usePathname, useRouter } from 'next/navigation';
+import { toast } from 'sonner';
+import { Button } from '@/components/ui/button';
+import { createSupabaseBrowserClient } from '@/lib/supabase/client';
 
 const NAV_ITEMS = [
-  { href: "/dashboard", label: "Dashboard" },
-  { href: "/sap-upload", label: "Carga SAP" },
-  { href: "/locations", label: "Localidades" },
-  { href: "/users", label: "Usuarios" },
-  { href: "/products", label: "Productos" },
+  { href: '/dashboard', label: 'Dashboard' },
+  { href: '/sap-upload', label: 'Carga SAP' },
+  { href: '/locations', label: 'Localidades' },
+  // { href: '/users', label: 'Usuarios' },
+  // { href: '/products', label: 'Productos' },
 ];
 
 export function AdminNav() {
@@ -21,9 +21,9 @@ export function AdminNav() {
   async function handleLogout() {
     const supabase = createSupabaseBrowserClient();
     await supabase.auth.signOut();
-    router.push("/login");
+    router.push('/login');
     router.refresh();
-    toast.success("Sesión cerrada");
+    toast.success('Sesión cerrada');
   }
 
   return (
@@ -31,7 +31,9 @@ export function AdminNav() {
       <div className="container mx-auto px-4 max-w-7xl">
         <div className="flex items-center justify-between h-14">
           <div className="flex items-center gap-1">
-            <span className="font-bold text-primary mr-4 text-lg font-[var(--font-heading)]">Panquecitas</span>
+            <span className="font-bold text-primary mr-4 text-lg">
+              Panquecitas
+            </span>
             <nav className="flex items-center gap-1">
               {NAV_ITEMS.map((item) => (
                 <Link
@@ -39,8 +41,8 @@ export function AdminNav() {
                   href={item.href}
                   className={`px-3 py-1.5 rounded-md text-sm font-medium transition-colors ${
                     pathname === item.href
-                      ? "bg-primary text-primary-foreground"
-                      : "text-muted-foreground hover:bg-accent hover:text-foreground"
+                      ? 'bg-primary text-primary-foreground'
+                      : 'text-muted-foreground hover:bg-accent hover:text-foreground'
                   }`}
                 >
                   {item.label}
