@@ -1,0 +1,58 @@
+"use client";
+
+import Link from "next/link";
+import { usePathname, useRouter } from "next/navigation";
+import { toast } from "sonner";
+import { Button } from "@/components/ui/button";
+import { createSupabaseBrowserClient } from "@/lib/supabase/client";
+
+const NAV_ITEMS = [
+  { href: "/dashboard", label: "Dashboard" },
+  { href: "/sap-upload", label: "Carga SAP" },
+  { href: "/locations", label: "Localidades" },
+  { href: "/users", label: "Usuarios" },
+  { href: "/products", label: "Productos" },
+];
+
+export function AdminNav() {
+  const pathname = usePathname();
+  const router = useRouter();
+
+  async function handleLogout() {
+    const supabase = createSupabaseBrowserClient();
+    await supabase.auth.signOut();
+    router.push("/login");
+    router.refresh();
+    toast.success("Sesión cerrada");
+  }
+
+  return (
+    <header className="bg-white border-b border-slate-200 sticky top-0 z-40">
+      <div className="container mx-auto px-4 max-w-7xl">
+        <div className="flex items-center justify-between h-14">
+          <div className="flex items-center gap-1">
+            <span className="font-bold text-primary mr-4 text-lg font-[var(--font-heading)]">Panquecitas</span>
+            <nav className="flex items-center gap-1">
+              {NAV_ITEMS.map((item) => (
+                <Link
+                  key={item.href}
+                  href={item.href}
+                  className={`px-3 py-1.5 rounded-md text-sm font-medium transition-colors ${
+                    pathname === item.href
+                      ? "bg-primary text-primary-foreground"
+                      : "text-muted-foreground hover:bg-accent hover:text-foreground"
+                  }`}
+                >
+                  {item.label}
+                </Link>
+              ))}
+            </nav>
+          </div>
+          <Button variant="ghost" size="sm" onClick={handleLogout}>
+            Cerrar sesión
+          </Button>
+        </div>
+      </div>
+    </header>
+  );
+}

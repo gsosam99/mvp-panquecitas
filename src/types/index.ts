@@ -1,0 +1,112 @@
+export type UserRole = "ADMIN" | "MERCADERISTA" | "PROMOTORA";
+export type LocationType = "SUPERMERCADO" | "ABASTO" | "BODEGA" | "OTRO";
+export type VariantType = "UNIDAD" | "BULTO";
+export type AuditZone = "BODEGA" | "ANAQUEL";
+
+export interface Profile {
+  id: string;
+  full_name: string;
+  role: UserRole;
+}
+
+export interface UserWithProfile {
+  id: string;
+  email: string;
+  full_name: string;
+  role: UserRole;
+  created_at: string;
+}
+
+export interface Location {
+  id: string;
+  name: string;
+  type: LocationType;
+  sap_code: string;
+  address: string | null;
+  region: string | null;
+  lat: number | null;
+  lng: number | null;
+}
+
+export interface Product {
+  id: string;
+  name: string;
+  brand: string;
+}
+
+export interface Variant {
+  id: string;
+  product_id: string;
+  name: string;
+  type: VariantType;
+  presentation_kg: number;
+  units_per_bulk: number;
+  product?: Product;
+}
+
+export interface SapSellInRecord {
+  id: string;
+  uploaded_by: string;
+  upload_batch_id: string;
+  location_id: string;
+  variant_id: string;
+  quantity_units: number;
+  date_of_sale: string;
+  location?: Location;
+  variant?: Variant;
+}
+
+export interface InventoryAudit {
+  id: string;
+  created_at: string;
+  user_id: string;
+  location_id: string;
+  variant_id: string;
+  zone: AuditZone;
+  quantity: number;
+  unit_price_observed: number | null;
+  calculated_value: number | null;
+  location?: Location;
+  variant?: Variant;
+}
+
+export interface PromotionActivity {
+  id: string;
+  created_at: string;
+  user_id: string;
+  location_id: string;
+  report_date: string;
+  samples_given: number;
+  conversions_tracked: number;
+  location?: Location;
+}
+
+export interface ParsedSapRow {
+  sap_code: string;
+  variant_name: string;
+  quantity: number;
+  date_of_sale: string;
+  location_id?: string;
+  variant_id?: string;
+}
+
+export interface ParseError {
+  row: number;
+  field: string;
+  message: string;
+}
+
+export interface SapParseResult {
+  valid: ParsedSapRow[];
+  errors: ParseError[];
+}
+
+export interface KpiData {
+  panSellInKg: number;
+  panquecitasSellInKg: number;
+  relativePct: number;
+  panquecitasInventoryKg: number;
+  promotoraSamples: number;
+  promotoraConversions: number;
+  conversionRate: number;
+}
