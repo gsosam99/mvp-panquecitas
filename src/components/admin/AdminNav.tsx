@@ -10,8 +10,8 @@ const NAV_ITEMS = [
   { href: '/dashboard', label: 'Dashboard' },
   { href: '/sap-upload', label: 'Carga SAP' },
   { href: '/locations', label: 'Localidades' },
-  // { href: '/users', label: 'Usuarios' },
-  // { href: '/products', label: 'Productos' },
+  { href: '/users', label: 'Usuarios' },
+  { href: '/products', label: 'Productos' },
 ];
 
 export function AdminNav() {

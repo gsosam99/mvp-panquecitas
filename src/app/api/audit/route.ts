@@ -8,6 +8,7 @@ interface AuditPayload {
   zone: AuditZone;
   quantity: number;
   unit_price_observed?: number;
+  unit_price?: number; // BODEGA: pass directly to skip DB lookup
 }
 
 export async function POST(req: Request) {
@@ -17,7 +18,7 @@ export async function POST(req: Request) {
     if (!user) return Response.json({ error: "No autenticado" }, { status: 401 });
 
     const body = await req.json() as AuditPayload;
-    const { location_id, variant_id, zone, quantity, unit_price_observed } = body;
+    const { location_id, variant_id, zone, quantity, unit_price_observed, unit_price } = body;
 
     if (!location_id || !variant_id || !zone || quantity === undefined) {
       return Response.json({ error: "Datos incompletos" }, { status: 400 });
@@ -26,7 +27,6 @@ export async function POST(req: Request) {
     let calculated_value: number | null = null;
 
     if (zone === "BODEGA") {
-      // Buscar unidades por bulto de la variante
       const { data: variantData } = await supabase
         .from("variants")
         .select("units_per_bulk")
@@ -36,13 +36,18 @@ export async function POST(req: Request) {
       const variant = variantData as { units_per_bulk: number } | null;
       if (!variant) return Response.json({ error: "Variante no encontrada" }, { status: 404 });
 
-      try {
-        calculated_value = await calcBodegaValue(location_id, variant_id, quantity);
-      } catch (err) {
-        if (err instanceof PriceCalculatorError) {
-          return Response.json({ error: err.message }, { status: 422 });
+      if (unit_price !== undefined && unit_price > 0) {
+        // Price passed directly from frontend (same-session ANAQUEL data)
+        calculated_value = unit_price * variant.units_per_bulk * quantity;
+      } else {
+        try {
+          calculated_value = await calcBodegaValue(location_id, variant_id, quantity);
+        } catch (err) {
+          if (err instanceof PriceCalculatorError) {
+            return Response.json({ error: err.message }, { status: 422 });
+          }
+          throw err;
         }
-        throw err;
       }
     }
 

@@ -27,6 +27,15 @@ export async function createSupabaseServerClient() {
   );
 }
 
+// Raw service-role client — no cookies, full auth.admin.* access
+export function createSupabaseServiceClient() {
+  return createClient(
+    process.env.NEXT_PUBLIC_SUPABASE_URL!,
+    process.env.SUPABASE_SERVICE_ROLE_KEY!,
+    { auth: { autoRefreshToken: false, persistSession: false } }
+  );
+}
+
 export async function createSupabaseAdminClient() {
   const cookieStore = await cookies();
   return createServerClient<Database>(

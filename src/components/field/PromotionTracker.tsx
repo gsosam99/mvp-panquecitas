@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useMemo } from "react";
+import { useState, useMemo, useEffect } from "react";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import type { Location } from "@/types";
@@ -21,12 +21,25 @@ interface CounterProps {
 }
 
 function Counter({ label, sublabel, emoji, value, max, onChange }: CounterProps) {
+  const [inputStr, setInputStr] = useState(value > 0 ? value.toString() : "");
+
+  useEffect(() => {
+    setInputStr(value > 0 ? value.toString() : "");
+  }, [value]);
+
+  function handleInputChange(raw: string) {
+    const cleaned = raw.replace(/\D/g, "");
+    setInputStr(cleaned);
+    const n = parseInt(cleaned, 10);
+    onChange(isNaN(n) ? 0 : Math.max(0, max !== undefined ? Math.min(max, n) : n));
+  }
+
   return (
     <div className="flex flex-col items-center">
       <span className="text-4xl mb-1">{emoji}</span>
       <p className="font-bold text-slate-900 text-center">{label}</p>
       <p className="text-xs text-slate-400 text-center mb-4">{sublabel}</p>
-      <div className="flex items-center gap-6">
+      <div className="flex items-center gap-4">
         <button
           onClick={() => onChange(Math.max(0, value - 1))}
           className="w-16 h-16 rounded-full border-2 border-slate-300 text-3xl font-bold text-slate-600 flex items-center justify-center hover:bg-slate-100 active:scale-95 transition-all disabled:opacity-40"
@@ -34,9 +47,15 @@ function Counter({ label, sublabel, emoji, value, max, onChange }: CounterProps)
         >
           −
         </button>
-        <span className="text-5xl font-bold text-slate-900 w-16 text-center tabular-nums">
-          {value}
-        </span>
+        <input
+          type="text"
+          inputMode="numeric"
+          pattern="[0-9]*"
+          value={inputStr}
+          placeholder="0"
+          onChange={(e) => handleInputChange(e.target.value)}
+          className="w-20 h-16 text-4xl font-bold text-slate-900 text-center bg-transparent border-b-2 border-slate-300 focus:border-slate-700 focus:outline-none tabular-nums"
+        />
         <button
           onClick={() => onChange(max !== undefined ? Math.min(max, value + 1) : value + 1)}
           className="w-16 h-16 rounded-full bg-slate-900 text-white text-3xl font-bold flex items-center justify-center hover:bg-slate-700 active:scale-95 transition-all disabled:opacity-40"
