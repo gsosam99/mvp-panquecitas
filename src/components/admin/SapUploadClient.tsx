@@ -14,8 +14,8 @@ interface UploadRecord {
 export function SapUploadClient() {
   const [history, setHistory] = useState<UploadRecord[]>([]);
 
-  function handleCommitSuccess(batchId: string, count: number) {
-    setHistory((prev) => [{ batchId, count, timestamp: new Date() }, ...prev]);
+  function handleCommitSuccess(batchId: string, count: number, locationsCount: number) {
+    setHistory((prev) => [{ batchId, count: count + locationsCount, timestamp: new Date() }, ...prev]);
   }
 
   return (
@@ -59,13 +59,17 @@ export function SapUploadClient() {
 
         <Card className="mt-4">
           <CardHeader>
-            <CardTitle>Formato esperado</CardTitle>
+            <CardTitle>Reporte SAP esperado</CardTitle>
           </CardHeader>
           <CardContent className="text-sm text-slate-600 space-y-1">
-            <p><code className="bg-slate-100 px-1 rounded text-xs">sap_code</code> — Código SAP de la localidad</p>
-            <p><code className="bg-slate-100 px-1 rounded text-xs">variant_name</code> — Nombre exacto de variante</p>
-            <p><code className="bg-slate-100 px-1 rounded text-xs">quantity</code> — Número entero positivo</p>
-            <p><code className="bg-slate-100 px-1 rounded text-xs">date_of_sale</code> — YYYY-MM-DD o DD/MM/YYYY</p>
+            <p className="font-mono text-xs bg-slate-100 px-2 py-1 rounded">N7_V_SD88_WEB_001</p>
+            <p className="text-xs text-slate-400 mt-2">El parser extrae automáticamente:</p>
+            <p>• <span className="font-medium">Localidades</span> — crea o actualiza en BD</p>
+            <p>• <span className="font-medium">Meses</span> — detecta columnas KGL dinámicamente</p>
+            <p>• <span className="font-medium">Categoría</span> — "Harina de Maíz" → Harina PAN</p>
+            <p className="text-xs text-amber-600 mt-2">
+              Panquecitas: el tag SAP se configurará cuando esté disponible.
+            </p>
           </CardContent>
         </Card>
       </div>

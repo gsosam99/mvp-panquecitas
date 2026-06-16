@@ -35,7 +35,7 @@ const Inner = dynamic(
               wrapperStyle={{ fontSize: 12 }}
             />
             <Bar dataKey="samples" fill="#cbd5e1" radius={[3, 3, 0, 0]} maxBarSize={32} />
-            <Bar dataKey="conversions" fill="#f59e0b" radius={[3, 3, 0, 0]} maxBarSize={32} />
+            <Bar dataKey="conversions" fill="#1a65bd" radius={[3, 3, 0, 0]} maxBarSize={32} />
           </BarChart>
         </ResponsiveContainer>
       );

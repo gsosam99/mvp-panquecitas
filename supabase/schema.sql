@@ -137,13 +137,15 @@ create policy "variants_admin_all" on public.variants
 create index idx_variants_product_id on public.variants(product_id);
 
 -- ─── SAP Sell-In Records ─────────────────────────────────────
+-- Todos los KPIs se miden en KG (no por SKU/variante).
+-- El reporte SAP entrega KG aggregados por cliente y mes, no por presentación.
 create table public.sap_sell_in_records (
   id               uuid primary key default gen_random_uuid(),
   uploaded_by      uuid not null references public.profiles(id),
   upload_batch_id  uuid not null,
   location_id      uuid not null references public.locations(id),
-  variant_id       uuid not null references public.variants(id),
-  quantity_units   int not null check (quantity_units > 0),
+  product_id       uuid not null references public.products(id),
+  quantity_kg      decimal(10,3) not null check (quantity_kg > 0),
   date_of_sale     date not null,
   created_at       timestamptz not null default now()
 );
@@ -162,7 +164,7 @@ create policy "sap_records_admin_delete" on public.sap_sell_in_records
   for delete using (public.is_admin());
 
 create index idx_sap_records_location_id on public.sap_sell_in_records(location_id);
-create index idx_sap_records_variant_id on public.sap_sell_in_records(variant_id);
+create index idx_sap_records_product_id on public.sap_sell_in_records(product_id);
 create index idx_sap_records_date_of_sale on public.sap_sell_in_records(date_of_sale);
 create index idx_sap_records_batch on public.sap_sell_in_records(upload_batch_id);
 
@@ -254,13 +256,8 @@ insert into public.variants (id, product_id, name, type, presentation_kg, units_
   ('20000000-0000-0000-0000-000000000003', '00000000-0000-0000-0000-000000000002', 'Panquecitas 0.4kg Unidad', 'UNIDAD', 0.4, 1),
   ('20000000-0000-0000-0000-000000000004', '00000000-0000-0000-0000-000000000002', 'Panquecitas 0.8kg Unidad', 'UNIDAD', 0.8, 1);
 
--- Localidades de ejemplo (se cargarán las reales con el primer Excel SAP)
-insert into public.locations (sap_code, name, type, region) values
-  ('SAP-001', 'Central Madeirense Las Mercedes',  'SUPERMERCADO', 'Caracas'),
-  ('SAP-002', 'Excelsior Gama Santa Eduvigis',    'SUPERMERCADO', 'Caracas'),
-  ('SAP-003', 'Bodega La Pastora',                'ABASTO',       'Caracas'),
-  ('SAP-004', 'Abasto Bicentenario Maracay',      'SUPERMERCADO', 'Aragua'),
-  ('SAP-005', 'Automercado Plaza Valencia',       'SUPERMERCADO', 'Carabobo');
+-- Localidades: se cargan automáticamente desde el Excel SAP (reporte N7_V_SD88_WEB_001)
+-- vía la página Admin > Carga SAP. El upsert usa sap_code como clave única.
 
 -- ============================================================
 -- GRANTS A ROLES DE API (OBLIGATORIO)

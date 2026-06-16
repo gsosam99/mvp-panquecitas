@@ -39,7 +39,7 @@ const Inner = dynamic(
             <Line
               type="monotone"
               dataKey="price_04"
-              stroke="#f59e0b"
+              stroke="#1a65bd"
               strokeWidth={2}
               dot={{ r: 3 }}
               connectNulls

@@ -49,11 +49,11 @@ export interface SapSellInRecord {
   uploaded_by: string;
   upload_batch_id: string;
   location_id: string;
-  variant_id: string;
-  quantity_units: number;
+  product_id: string;
+  quantity_kg: number;
   date_of_sale: string;
   location?: Location;
-  variant?: Variant;
+  product?: Product;
 }
 
 export interface InventoryAudit {
@@ -83,11 +83,13 @@ export interface PromotionActivity {
 
 export interface ParsedSapRow {
   sap_code: string;
-  variant_name: string;
-  quantity: number;
+  client_name: string;
+  client_type: LocationType;
+  region: string;
+  city: string;
+  category: string;
+  quantity_kg: number;
   date_of_sale: string;
-  location_id?: string;
-  variant_id?: string;
 }
 
 export interface ParseError {

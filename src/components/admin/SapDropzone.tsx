@@ -13,10 +13,10 @@ import {
   TableRow,
 } from "@/components/ui/table";
 import { Alert, AlertDescription } from "@/components/ui/alert";
-import type { ParsedSapRow, ParseError, SapParseResult } from "@/types";
+import type { ParsedSapRow, SapParseResult } from "@/types";
 
 interface SapDropzoneProps {
-  onCommitSuccess: (batchId: string, count: number) => void;
+  onCommitSuccess: (batchId: string, count: number, locationsCount: number) => void;
 }
 
 type UploadState = "idle" | "parsing" | "previewing" | "uploading" | "done";
@@ -32,10 +32,8 @@ export function SapDropzone({ onCommitSuccess }: SapDropzoneProps) {
       toast.error("Solo se aceptan archivos .xlsx o .xls");
       return;
     }
-
     setState("parsing");
     setFileName(file.name);
-
     try {
       const buffer = await file.arrayBuffer();
       const { parseSapExcel } = await import("@/lib/excel-parser");
@@ -63,34 +61,22 @@ export function SapDropzone({ onCommitSuccess }: SapDropzoneProps) {
   async function handleCommit() {
     if (!parseResult?.valid.length) return;
     setState("uploading");
-
     const batchId = crypto.randomUUID();
-
     try {
       const res = await fetch("/api/sap-upload", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ rows: parseResult.valid, batchId }),
       });
-
-      const data = await res.json() as { inserted?: number; error?: string; unmappedLocations?: string[]; unmappedVariants?: string[] };
-
+      const data = await res.json() as { inserted?: number; locations_upserted?: number; error?: string };
       if (!res.ok) {
-        if (data.unmappedLocations?.length || data.unmappedVariants?.length) {
-          const msgs = [];
-          if (data.unmappedLocations?.length) msgs.push(`Códigos SAP no encontrados: ${data.unmappedLocations.join(", ")}`);
-          if (data.unmappedVariants?.length) msgs.push(`Variantes no encontradas: ${data.unmappedVariants.join(", ")}`);
-          toast.error(msgs.join(" | "));
-        } else {
-          toast.error(data.error ?? "Error al guardar");
-        }
+        toast.error(data.error ?? "Error al guardar");
         setState("previewing");
         return;
       }
-
       setState("done");
-      onCommitSuccess(batchId, data.inserted ?? 0);
-      toast.success(`${data.inserted} registros cargados correctamente`);
+      onCommitSuccess(batchId, data.inserted ?? 0, data.locations_upserted ?? 0);
+      toast.success(`${data.inserted} registros de sell-in cargados · ${data.locations_upserted} localidades actualizadas`);
     } catch {
       toast.error("Error de conexión. Intenta de nuevo.");
       setState("previewing");
@@ -103,6 +89,15 @@ export function SapDropzone({ onCommitSuccess }: SapDropzoneProps) {
     setFileName("");
   }
 
+  // ── Stats helpers ────────────────────────────────────────────────────────────
+  function getStats(rows: ParsedSapRow[]) {
+    const uniqueClients = new Set(rows.map((r) => r.sap_code)).size;
+    const totalKg = rows.reduce((s, r) => s + r.quantity_kg, 0);
+    const months = [...new Set(rows.map((r) => r.date_of_sale.slice(0, 7)))].sort();
+    return { uniqueClients, totalKg, months };
+  }
+
+  // ── Idle / Parsing ───────────────────────────────────────────────────────────
   if (state === "idle" || state === "parsing") {
     return (
       <div
@@ -122,27 +117,35 @@ export function SapDropzone({ onCommitSuccess }: SapDropzoneProps) {
           onChange={handleFileInput}
         />
         {state === "parsing" ? (
-          <p className="text-slate-500">Procesando {fileName}…</p>
+          <p className="text-slate-500 animate-pulse">Procesando {fileName}…</p>
         ) : (
           <>
             <div className="text-4xl mb-3">📂</div>
             <p className="font-medium text-slate-700">Arrastra el Excel SAP aquí</p>
             <p className="text-sm text-slate-400 mt-1">o haz clic para seleccionar (.xlsx, .xls)</p>
-            <p className="text-xs text-slate-400 mt-2">Columnas requeridas: sap_code · variant_name · quantity · date_of_sale</p>
+            <p className="text-xs text-slate-400 mt-2">Reporte: N7_V_SD88_WEB_001 · columna "Categoria de productos (N)"</p>
           </>
         )}
       </div>
     );
   }
 
+  // ── Previewing / Uploading ───────────────────────────────────────────────────
   if ((state === "previewing" || state === "uploading") && parseResult) {
+    const { uniqueClients, totalKg, months } = getStats(parseResult.valid);
+
     return (
       <div className="space-y-4">
         <div className="flex items-center justify-between">
           <div>
             <h3 className="font-semibold text-slate-900">{fileName}</h3>
-            <div className="flex gap-2 mt-1">
-              <Badge variant="default">{parseResult.valid.length} válidas</Badge>
+            <div className="flex flex-wrap gap-2 mt-1">
+              <Badge variant="default">{parseResult.valid.length} registros</Badge>
+              <Badge variant="secondary">{uniqueClients} localidades</Badge>
+              <Badge variant="secondary">{totalKg.toLocaleString("es-VE", { maximumFractionDigits: 0 })} kg totales</Badge>
+              {months.length > 0 && (
+                <Badge variant="outline">{months[0]} → {months[months.length - 1]}</Badge>
+              )}
               {parseResult.errors.length > 0 && (
                 <Badge variant="destructive">{parseResult.errors.length} errores</Badge>
               )}
@@ -158,7 +161,7 @@ export function SapDropzone({ onCommitSuccess }: SapDropzoneProps) {
             <AlertDescription>
               <ul className="space-y-1 text-sm">
                 {parseResult.errors.slice(0, 5).map((err, i) => (
-                  <li key={i}>Fila {err.row} · {err.field}: {err.message}</li>
+                  <li key={i}>{err.field}: {err.message}</li>
                 ))}
                 {parseResult.errors.length > 5 && (
                   <li>…y {parseResult.errors.length - 5} errores más.</li>
@@ -174,27 +177,33 @@ export function SapDropzone({ onCommitSuccess }: SapDropzoneProps) {
               <Table>
                 <TableHeader>
                   <TableRow>
-                    <TableHead>Código SAP</TableHead>
-                    <TableHead>Variante</TableHead>
-                    <TableHead className="text-right">Cantidad</TableHead>
-                    <TableHead>Fecha</TableHead>
+                    <TableHead>Cód. SAP</TableHead>
+                    <TableHead>Cliente</TableHead>
+                    <TableHead>Tipo</TableHead>
+                    <TableHead>Municipio</TableHead>
+                    <TableHead>Mes</TableHead>
+                    <TableHead className="text-right">KG</TableHead>
                   </TableRow>
                 </TableHeader>
                 <TableBody>
-                  {parseResult.valid.slice(0, 50).map((row, i) => (
+                  {parseResult.valid.slice(0, 100).map((row, i) => (
                     <TableRow key={i}>
-                      <TableCell className="font-mono text-sm">{row.sap_code}</TableCell>
-                      <TableCell>{row.variant_name}</TableCell>
-                      <TableCell className="text-right">{row.quantity}</TableCell>
-                      <TableCell>{row.date_of_sale}</TableCell>
+                      <TableCell className="font-mono text-xs">{row.sap_code}</TableCell>
+                      <TableCell className="text-xs max-w-[180px] truncate">{row.client_name}</TableCell>
+                      <TableCell className="text-xs">{row.client_type}</TableCell>
+                      <TableCell className="text-xs">{row.region}</TableCell>
+                      <TableCell className="text-xs">{row.date_of_sale.slice(0, 7)}</TableCell>
+                      <TableCell className="text-right text-xs font-medium">
+                        {row.quantity_kg.toLocaleString("es-VE", { maximumFractionDigits: 1 })}
+                      </TableCell>
                     </TableRow>
                   ))}
                 </TableBody>
               </Table>
             </div>
-            {parseResult.valid.length > 50 && (
+            {parseResult.valid.length > 100 && (
               <p className="text-xs text-slate-400 text-center py-2 border-t">
-                Mostrando 50 de {parseResult.valid.length} filas
+                Mostrando 100 de {parseResult.valid.length} registros
               </p>
             )}
           </div>
@@ -208,13 +217,16 @@ export function SapDropzone({ onCommitSuccess }: SapDropzoneProps) {
             onClick={handleCommit}
             disabled={!parseResult.valid.length || state === "uploading"}
           >
-            {state === "uploading" ? "Guardando…" : `Confirmar ${parseResult.valid.length} registros`}
+            {state === "uploading"
+              ? "Cargando…"
+              : `Confirmar · ${uniqueClients} localidades · ${parseResult.valid.length} registros`}
           </Button>
         </div>
       </div>
     );
   }
 
+  // ── Done ─────────────────────────────────────────────────────────────────────
   return (
     <div className="text-center py-8">
       <div className="text-4xl mb-3">✅</div>

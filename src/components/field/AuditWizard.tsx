@@ -477,7 +477,7 @@ export function AuditWizard({ locations }: AuditWizardProps) {
                           }))
                         }
                         placeholder="0"
-                        className="w-full text-2xl font-bold text-center py-3 border-2 border-slate-200 rounded-xl bg-white text-slate-900 placeholder:text-slate-300 focus:outline-none focus:ring-2 focus:ring-amber-300 focus:border-amber-400"
+                        className="w-full text-2xl font-bold text-center py-3 border-2 border-slate-200 rounded-xl bg-white text-slate-900 placeholder:text-slate-300 focus:outline-none focus:ring-2 focus:ring-panquecitas/30 focus:border-panquecitas"
                       />
                     </div>
                     <div>
@@ -499,7 +499,7 @@ export function AuditWizard({ locations }: AuditWizardProps) {
                           }))
                         }
                         placeholder="0.00"
-                        className="w-full text-2xl font-bold text-center py-3 border-2 border-slate-200 rounded-xl bg-white text-slate-900 placeholder:text-slate-300 focus:outline-none focus:ring-2 focus:ring-amber-300 focus:border-amber-400"
+                        className="w-full text-2xl font-bold text-center py-3 border-2 border-slate-200 rounded-xl bg-white text-slate-900 placeholder:text-slate-300 focus:outline-none focus:ring-2 focus:ring-panquecitas/30 focus:border-panquecitas"
                       />
                       {preview && (
                         <p className="text-xs text-slate-400 text-center mt-1">{preview}</p>
@@ -581,7 +581,7 @@ export function AuditWizard({ locations }: AuditWizardProps) {
                           }))
                         }
                         placeholder="0"
-                        className="w-full text-2xl font-bold text-center py-3 border-2 border-slate-200 rounded-xl bg-white text-slate-900 placeholder:text-slate-300 focus:outline-none focus:ring-2 focus:ring-amber-300 focus:border-amber-400"
+                        className="w-full text-2xl font-bold text-center py-3 border-2 border-slate-200 rounded-xl bg-white text-slate-900 placeholder:text-slate-300 focus:outline-none focus:ring-2 focus:ring-panquecitas/30 focus:border-panquecitas"
                       />
                     </div>
                     <div>
@@ -603,7 +603,7 @@ export function AuditWizard({ locations }: AuditWizardProps) {
                           }))
                         }
                         placeholder="0"
-                        className="w-full text-2xl font-bold text-center py-3 border-2 border-slate-200 rounded-xl bg-white text-slate-900 placeholder:text-slate-300 focus:outline-none focus:ring-2 focus:ring-amber-300 focus:border-amber-400"
+                        className="w-full text-2xl font-bold text-center py-3 border-2 border-slate-200 rounded-xl bg-white text-slate-900 placeholder:text-slate-300 focus:outline-none focus:ring-2 focus:ring-panquecitas/30 focus:border-panquecitas"
                       />
                     </div>
                   </div>

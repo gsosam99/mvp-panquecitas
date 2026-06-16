@@ -18,11 +18,11 @@ export function FieldTopBar({ userName }: FieldTopBarProps) {
   }
 
   return (
-    <div className="flex items-center justify-between px-4 py-3 bg-amber-50 border-b border-amber-200 shrink-0">
-      <span className="text-sm font-medium text-amber-900">🥞 {userName}</span>
+    <div className="flex items-center justify-between px-4 py-3 bg-panquecitas border-b border-panquecitas shrink-0">
+      <span className="text-sm font-medium text-white">🥞 {userName}</span>
       <button
         onClick={handleLogout}
-        className="text-sm font-medium text-amber-700 hover:text-amber-900 transition-colors"
+        className="text-sm font-medium text-white/80 hover:text-white transition-colors"
       >
         Salir →
       </button>

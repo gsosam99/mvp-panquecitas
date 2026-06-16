@@ -8,8 +8,8 @@ interface DateFilter {
 }
 
 interface SellInRow {
-  quantity_units: number;
-  variants: { presentation_kg: number; product_id: string } | null;
+  quantity_kg: number;
+  product_id: string;
 }
 
 interface AuditRow {
@@ -29,21 +29,22 @@ export async function getKpiData(filter?: DateFilter): Promise<KpiData> {
   const to = filter?.to ?? new Date().toISOString().split("T")[0];
 
   // ── Sell-in PAN y Panquecitas ──────────────────────────────
-  const { data: sellInData } = await supabase
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const { data: sellInData } = await (supabase as any)
     .from("sap_sell_in_records")
-    .select("quantity_units, variants(presentation_kg, product_id)")
+    .select("quantity_kg, product_id")
     .gte("date_of_sale", from)
     .lte("date_of_sale", to);
 
   const sellIn = (sellInData ?? []) as SellInRow[];
 
   const panSellInKg = sellIn
-    .filter((r) => r.variants?.product_id === PRODUCT_IDS.HARINA_PAN)
-    .reduce((sum, r) => sum + r.quantity_units * (r.variants?.presentation_kg ?? 0), 0);
+    .filter((r) => r.product_id === PRODUCT_IDS.HARINA_PAN)
+    .reduce((sum, r) => sum + r.quantity_kg, 0);
 
   const panquecitasSellInKg = sellIn
-    .filter((r) => r.variants?.product_id === PRODUCT_IDS.PANQUECITAS)
-    .reduce((sum, r) => sum + r.quantity_units * (r.variants?.presentation_kg ?? 0), 0);
+    .filter((r) => r.product_id === PRODUCT_IDS.PANQUECITAS)
+    .reduce((sum, r) => sum + r.quantity_kg, 0);
 
   const relativePct = panSellInKg > 0
     ? Math.round((panquecitasSellInKg / panSellInKg) * 100 * 10) / 10
@@ -88,8 +89,8 @@ export async function getKpiData(filter?: DateFilter): Promise<KpiData> {
   };
 }
 
-export interface WeeklyPoint {
-  week: string;
+export interface MonthlyPoint {
+  month: string;
   pan_kg: number;
   panquecitas_kg: number;
 }
@@ -237,12 +238,35 @@ export async function getConversionByLocation(): Promise<ConversionLocation[]> {
     .sort((a, b) => b.rate - a.rate);
 }
 
-export async function getWeeklySellIn(weeks = 8): Promise<WeeklyPoint[]> {
+export async function getMonthlySellIn(months = 12): Promise<MonthlyPoint[]> {
   const supabase = await createSupabaseServerClient();
+  const since = new Date();
+  since.setMonth(since.getMonth() - months);
+  const sinceStr = since.toISOString().split("T")[0];
 
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  const { data } = await (supabase as any).rpc("weekly_sell_in", { weeks_back: weeks });
+  const { data } = await (supabase as any)
+    .from("sap_sell_in_records")
+    .select("date_of_sale, quantity_kg, product_id")
+    .gte("date_of_sale", sinceStr)
+    .order("date_of_sale");
 
   if (!data) return [];
-  return data as WeeklyPoint[];
+
+  const byMonth = new Map<string, { pan_kg: number; panquecitas_kg: number }>();
+  for (const row of data as { date_of_sale: string; quantity_kg: number; product_id: string }[]) {
+    const month = row.date_of_sale.slice(0, 7); // YYYY-MM
+    if (!byMonth.has(month)) byMonth.set(month, { pan_kg: 0, panquecitas_kg: 0 });
+    const entry = byMonth.get(month)!;
+    if (row.product_id === PRODUCT_IDS.HARINA_PAN) entry.pan_kg += row.quantity_kg;
+    else if (row.product_id === PRODUCT_IDS.PANQUECITAS) entry.panquecitas_kg += row.quantity_kg;
+  }
+
+  return Array.from(byMonth.entries())
+    .sort(([a], [b]) => a.localeCompare(b))
+    .map(([month, { pan_kg, panquecitas_kg }]) => ({
+      month,
+      pan_kg: Math.round(pan_kg * 10) / 10,
+      panquecitas_kg: Math.round(panquecitas_kg * 10) / 10,
+    }));
 }

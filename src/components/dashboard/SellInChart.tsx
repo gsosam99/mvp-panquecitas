@@ -1,14 +1,14 @@
 "use client";
 
 import dynamic from "next/dynamic";
-import type { WeeklyPoint } from "@/lib/kpi-queries";
+import type { MonthlyPoint } from "@/lib/kpi-queries";
 
 const SellInChartInner = dynamic(
   async () => {
     const {
       ResponsiveContainer,
-      LineChart,
-      Line,
+      BarChart,
+      Bar,
       XAxis,
       YAxis,
       CartesianGrid,
@@ -16,22 +16,22 @@ const SellInChartInner = dynamic(
       Legend,
     } = await import("recharts");
 
-    function SellInChartInnerComponent({ data }: { data: WeeklyPoint[] }) {
+    function SellInChartInnerComponent({ data }: { data: MonthlyPoint[] }) {
       const formatted = data.map((d) => ({
         ...d,
-        week: d.week.slice(5),
+        month: d.month, // already YYYY-MM, shown as-is
       }));
 
       return (
         <ResponsiveContainer width="100%" height={280}>
-          <LineChart data={formatted} margin={{ top: 5, right: 16, left: 0, bottom: 5 }}>
-            <CartesianGrid strokeDasharray="3 3" stroke="#f1f5f9" />
-            <XAxis dataKey="week" tick={{ fontSize: 11, fill: "#94a3b8" }} />
-            <YAxis tick={{ fontSize: 11, fill: "#94a3b8" }} unit=" kg" />
+          <BarChart data={formatted} margin={{ top: 5, right: 16, left: 0, bottom: 5 }}>
+            <CartesianGrid strokeDasharray="3 3" stroke="#f1f5f9" vertical={false} />
+            <XAxis dataKey="month" tick={{ fontSize: 11, fill: "#94a3b8" }} />
+            <YAxis tick={{ fontSize: 11, fill: "#94a3b8" }} unit=" kg" width={60} />
             <Tooltip
               contentStyle={{ fontSize: 12, borderRadius: 8, border: "1px solid #e2e8f0" }}
               formatter={(value, name) => [
-                `${Number(value ?? 0).toFixed(1)} kg`,
+                `${Number(value ?? 0).toLocaleString("es-VE", { maximumFractionDigits: 1 })} kg`,
                 String(name) === "pan_kg" ? "Harina PAN" : "Panquecitas",
               ]}
             />
@@ -39,23 +39,9 @@ const SellInChartInner = dynamic(
               formatter={(value: string) => (value === "pan_kg" ? "Harina PAN" : "Panquecitas")}
               wrapperStyle={{ fontSize: 12 }}
             />
-            <Line
-              type="monotone"
-              dataKey="pan_kg"
-              stroke="#0f172a"
-              strokeWidth={2}
-              dot={false}
-              activeDot={{ r: 4 }}
-            />
-            <Line
-              type="monotone"
-              dataKey="panquecitas_kg"
-              stroke="#f59e0b"
-              strokeWidth={2}
-              dot={false}
-              activeDot={{ r: 4 }}
-            />
-          </LineChart>
+            <Bar dataKey="pan_kg" fill="#f5c400" radius={[3, 3, 0, 0]} maxBarSize={48} />
+            <Bar dataKey="panquecitas_kg" fill="#1a65bd" radius={[3, 3, 0, 0]} maxBarSize={48} />
+          </BarChart>
         </ResponsiveContainer>
       );
     }
@@ -69,7 +55,7 @@ const SellInChartInner = dynamic(
 );
 
 interface SellInChartProps {
-  data: WeeklyPoint[];
+  data: MonthlyPoint[];
 }
 
 export function SellInChart({ data }: SellInChartProps) {

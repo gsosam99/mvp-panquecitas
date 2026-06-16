@@ -1,7 +1,7 @@
 import type { Metadata } from "next";
 import {
   getKpiData,
-  getWeeklySellIn,
+  getMonthlySellIn,
   getPriceTrend,
   getPromotoraDailyActivity,
   getConversionByLocation,
@@ -17,10 +17,10 @@ export const metadata: Metadata = { title: "Dashboard — Panquecitas" };
 export const revalidate = 300;
 
 export default async function DashboardPage() {
-  const [kpis, weeklyData, priceTrend, promotoraDaily, conversionByLoc] =
+  const [kpis, monthlyData, priceTrend, promotoraDaily, conversionByLoc] =
     await Promise.all([
       getKpiData(),
-      getWeeklySellIn(8),
+      getMonthlySellIn(12),
       getPriceTrend(30),
       getPromotoraDailyActivity(30),
       getConversionByLocation(),
@@ -36,34 +36,36 @@ export default async function DashboardPage() {
       </div>
 
       {/* ── KPI Cards ──────────────────────────────────────────────────── */}
-      <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-4 mb-6">
-        <div className="col-span-2 md:col-span-1 lg:col-span-2">
-          <KpiCard
-            title="% Relativo vs PAN"
-            value={`${kpis.relativePct}%`}
-            subtitle="Panquecitas / Harina PAN (Sell-in kg)"
-            highlight
-          />
-        </div>
+      <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-5 gap-4 mb-6">
+        <KpiCard
+          title="% Relativo vs PAN"
+          value={`${kpis.relativePct}%`}
+          subtitle="Panquecitas / Harina PAN (Sell-in kg)"
+          product="both"
+        />
         <KpiCard
           title="Sell-in Panquecitas"
           value={`${kpis.panquecitasSellInKg.toLocaleString("es-VE")} kg`}
           subtitle="Total acumulado SAP"
+          product="panquecitas"
         />
         <KpiCard
           title="Sell-in Harina PAN"
           value={`${kpis.panSellInKg.toLocaleString("es-VE")} kg`}
           subtitle="Benchmark SAP"
+          product="pan"
         />
         <KpiCard
           title="Inventario anaquel"
           value={`${kpis.panquecitasInventoryKg.toLocaleString("es-VE")} kg`}
           subtitle="Panquecitas auditado"
+          product="panquecitas"
         />
         <KpiCard
           title="Tasa de conversión"
           value={`${kpis.conversionRate}%`}
           subtitle={`${kpis.promotoraConversions} de ${kpis.promotoraSamples} muestras`}
+          product="panquecitas"
         />
       </div>
 
@@ -72,11 +74,11 @@ export default async function DashboardPage() {
       {/* ── Sell-in tendencia ──────────────────────────────────────────── */}
       <Card className="mb-6">
         <CardHeader>
-          <CardTitle>Sell-in semanal — Harina PAN vs Panquecitas</CardTitle>
+          <CardTitle>Sell-in mensual — Harina PAN vs Panquecitas</CardTitle>
         </CardHeader>
         <CardContent>
-          {weeklyData.length > 0 ? (
-            <SellInChart data={weeklyData} />
+          {monthlyData.length > 0 ? (
+            <SellInChart data={monthlyData} />
           ) : (
             <div className="h-[260px] flex items-center justify-center text-slate-400">
               <div className="text-center">
@@ -167,7 +169,7 @@ export default async function DashboardPage() {
                     </div>
                     <div className="h-2 bg-slate-100 rounded-full overflow-hidden">
                       <div
-                        className="h-full bg-amber-400 rounded-full transition-all"
+                        className="h-full bg-panquecitas rounded-full transition-all"
                         style={{ width: `${(loc.rate / maxConvRate) * 100}%` }}
                       />
                     </div>
@@ -206,7 +208,7 @@ export default async function DashboardPage() {
               <p className="text-sm text-slate-400 mt-1">Compras confirmadas</p>
             </div>
             <div>
-              <p className="text-3xl font-bold text-amber-600">{kpis.conversionRate}%</p>
+              <p className="text-3xl font-bold text-panquecitas">{kpis.conversionRate}%</p>
               <p className="text-sm text-slate-400 mt-1">Tasa de conversión</p>
             </div>
           </div>

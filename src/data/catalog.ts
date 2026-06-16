@@ -48,14 +48,9 @@ export const PANQUECITAS_FIELD_VARIANTS = [
   },
 ] as const;
 
-// Nombre de variante SAP → ID (para el parser de Excel)
-export const SAP_VARIANT_NAME_MAP: Record<string, string> = {
-  "PAN 1KG BULTO":  VARIANT_IDS.PAN_1KG_BULTO,
-  "PAN 2KG BULTO":  VARIANT_IDS.PAN_2KG_BULTO,
-  "PAN 1KG UNIDAD": VARIANT_IDS.PAN_1KG_UNIDAD,
-  "PAN 2KG UNIDAD": VARIANT_IDS.PAN_2KG_UNIDAD,
-  "PANQUECITAS 0.4KG BULTO":  VARIANT_IDS.PANQ_04KG_BULTO,
-  "PANQUECITAS 0.8KG BULTO":  VARIANT_IDS.PANQ_08KG_BULTO,
-  "PANQUECITAS 0.4KG UNIDAD": VARIANT_IDS.PANQ_04KG_UNIDAD,
-  "PANQUECITAS 0.8KG UNIDAD": VARIANT_IDS.PANQ_08KG_UNIDAD,
+// Mapeo de "Categoria de productos (N)" del SAP → product_id
+// Cuando se conozca el tag de Panquecitas en SAP, agregar aquí.
+export const SAP_CATEGORY_MAP: Record<string, string> = {
+  "Harina de Maíz": PRODUCT_IDS.HARINA_PAN,
+  // "TAG_PANQUECITAS": PRODUCT_IDS.PANQUECITAS,  ← agregar cuando esté disponible
 };
