@@ -85,13 +85,30 @@ export function AuditWizard({ locations }: AuditWizardProps) {
     }
   }, [currency, bcvRate, bcvLoading, bcvError]);
 
+  // Normalize decimal input: comma → period (iOS Spanish keyboard), strip non-numeric except one dot
+  function normalizeDecimal(raw: string): string {
+    const withPeriod = raw.replace(/,/g, ".");
+    let hasDecimal = false;
+    return withPeriod
+      .split("")
+      .filter((c) => {
+        if (c === ".") {
+          if (hasDecimal) return false;
+          hasDecimal = true;
+          return true;
+        }
+        return c >= "0" && c <= "9";
+      })
+      .join("");
+  }
+
   function effectiveRate(): number | null {
     if (currency === "USD") return null;
-    return bcvRate ?? (manualRate ? Number(manualRate) : null);
+    return bcvRate ?? (manualRate ? Number(normalizeDecimal(manualRate)) : null);
   }
 
   function toUsd(priceStr: string): number {
-    const price = Number(priceStr);
+    const price = Number(normalizeDecimal(priceStr));
     if (!price) return 0;
     const rate = effectiveRate();
     return currency === "USD" || !rate ? price : price / rate;
@@ -101,7 +118,9 @@ export function AuditWizard({ locations }: AuditWizardProps) {
     if (currency === "USD" || !priceStr) return null;
     const rate = effectiveRate();
     if (!rate) return null;
-    return `≈ $${(Number(priceStr) / rate).toFixed(2)} USD`;
+    const n = Number(normalizeDecimal(priceStr));
+    if (!n) return null;
+    return `≈ $${(n / rate).toFixed(2)} USD`;
   }
 
   const filteredLocations = useMemo(
@@ -126,11 +145,12 @@ export function AuditWizard({ locations }: AuditWizardProps) {
 
   const bodegaValid = useMemo(() => {
     const { v04, v08 } = state.bodega;
+    // Allow 0 — empty string means "not entered", "0" means "verified empty"
     return (
-      Number(v04.bultos) > 0 ||
-      Number(v04.unidades) > 0 ||
-      Number(v08.bultos) > 0 ||
-      Number(v08.unidades) > 0
+      v04.bultos !== "" ||
+      v04.unidades !== "" ||
+      v08.bultos !== "" ||
+      v08.unidades !== ""
     );
   }, [state.bodega]);
 
@@ -205,7 +225,7 @@ export function AuditWizard({ locations }: AuditWizardProps) {
       const usdPrice08 = toUsd(a08.price);
       const bodegaJobs: Promise<string | null>[] = [];
 
-      if (Number(b04.bultos) > 0) {
+      if (b04.bultos !== "") {
         bodegaJobs.push(
           submitOne({
             location_id: locId,
@@ -216,7 +236,7 @@ export function AuditWizard({ locations }: AuditWizardProps) {
           })
         );
       }
-      if (Number(b04.unidades) > 0) {
+      if (b04.unidades !== "") {
         bodegaJobs.push(
           submitOne({
             location_id: locId,
@@ -227,7 +247,7 @@ export function AuditWizard({ locations }: AuditWizardProps) {
           })
         );
       }
-      if (Number(b08.bultos) > 0) {
+      if (b08.bultos !== "") {
         bodegaJobs.push(
           submitOne({
             location_id: locId,
@@ -238,7 +258,7 @@ export function AuditWizard({ locations }: AuditWizardProps) {
           })
         );
       }
-      if (Number(b08.unidades) > 0) {
+      if (b08.unidades !== "") {
         bodegaJobs.push(
           submitOne({
             location_id: locId,
@@ -287,10 +307,10 @@ export function AuditWizard({ locations }: AuditWizardProps) {
             </p>
           )}
           <p className="font-semibold text-slate-700 text-xs uppercase tracking-wide pt-2">Bodega</p>
-          {Number(b04.bultos) > 0 && <p className="text-slate-600">400g — {b04.bultos} bultos</p>}
-          {Number(b04.unidades) > 0 && <p className="text-slate-600">400g — {b04.unidades} und</p>}
-          {Number(b08.bultos) > 0 && <p className="text-slate-600">800g — {b08.bultos} bultos</p>}
-          {Number(b08.unidades) > 0 && <p className="text-slate-600">800g — {b08.unidades} und</p>}
+          {b04.bultos !== "" && <p className="text-slate-600">400g — {b04.bultos} bultos</p>}
+          {b04.unidades !== "" && <p className="text-slate-600">400g — {b04.unidades} und</p>}
+          {b08.bultos !== "" && <p className="text-slate-600">800g — {b08.bultos} bultos</p>}
+          {b08.unidades !== "" && <p className="text-slate-600">800g — {b08.unidades} und</p>}
         </div>
         <Button onClick={handleReset} size="lg" className="w-full max-w-xs">
           Nueva auditoría
@@ -403,11 +423,12 @@ export function AuditWizard({ locations }: AuditWizardProps) {
                       </p>
                       <div className="flex items-center gap-2">
                         <input
-                          type="number"
+                          type="text"
                           inputMode="decimal"
+                          pattern="[0-9]*[.,]?[0-9]*"
                           placeholder="ej. 36.75"
                           value={manualRate}
-                          onChange={(e) => setManualRate(e.target.value)}
+                          onChange={(e) => setManualRate(normalizeDecimal(e.target.value))}
                           className="flex-1 text-sm px-3 py-2 border border-slate-300 rounded-lg bg-white text-slate-900 focus:outline-none focus:ring-1 focus:ring-slate-400"
                         />
                         <span className="text-xs text-slate-400 shrink-0">Bs. por $1</span>
@@ -464,17 +485,16 @@ export function AuditWizard({ locations }: AuditWizardProps) {
                         Precio {currency === "USD" ? "(USD)" : "(Bs.)"}
                       </label>
                       <input
-                        type="number"
+                        type="text"
                         inputMode="decimal"
-                        min="0"
-                        step="0.01"
+                        pattern="[0-9]*[.,]?[0-9]*"
                         value={entry.price}
                         onChange={(e) =>
                           setState((s) => ({
                             ...s,
                             anaquel: {
                               ...s.anaquel,
-                              [key]: { ...s.anaquel[key], price: e.target.value },
+                              [key]: { ...s.anaquel[key], price: normalizeDecimal(e.target.value) },
                             },
                           }))
                         }
@@ -506,7 +526,24 @@ export function AuditWizard({ locations }: AuditWizardProps) {
         {/* ── BODEGA ────────────────────────────────────────────────────── */}
         {step === "bodega" && (
           <div>
-            <h2 className="text-xl font-bold text-slate-900 mb-1">Bodega</h2>
+            <div className="flex items-start justify-between mb-1 gap-3">
+              <h2 className="text-xl font-bold text-slate-900">Bodega</h2>
+              <button
+                type="button"
+                onClick={() =>
+                  setState((s) => ({
+                    ...s,
+                    bodega: {
+                      v04: { bultos: "0", unidades: "0" },
+                      v08: { bultos: "0", unidades: "0" },
+                    },
+                  }))
+                }
+                className="shrink-0 text-xs font-medium text-slate-500 border border-slate-300 rounded-lg px-3 py-1.5 hover:bg-slate-50 active:bg-slate-100 transition-colors"
+              >
+                Sin stock en bodega
+              </button>
+            </div>
             <p className="text-slate-400 text-sm mb-6">
               Podés registrar bultos, unidades sueltas o ambos por variante.
             </p>
@@ -631,8 +668,8 @@ export function AuditWizard({ locations }: AuditWizardProps) {
               const e = state.bodega[key];
               const label = key === "v04" ? "400g" : "800g";
               const parts: string[] = [];
-              if (Number(e.bultos) > 0) parts.push(`${e.bultos} bultos`);
-              if (Number(e.unidades) > 0) parts.push(`${e.unidades} und`);
+              if (e.bultos !== "") parts.push(`${e.bultos} bultos`);
+              if (e.unidades !== "") parts.push(`${e.unidades} und`);
               if (!parts.length) return null;
               return (
                 <div
