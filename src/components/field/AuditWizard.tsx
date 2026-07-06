@@ -42,7 +42,7 @@ const STEPS: Step[] = ["location", "anaquel", "bodega", "summary"];
 const STEP_LABELS: Record<Step, string> = {
   location: "Localidad",
   anaquel: "Anaquel",
-  bodega: "Bodega",
+  bodega: "Depósito",
   summary: "Resumen",
 };
 
@@ -272,7 +272,7 @@ export function AuditWizard({ locations }: AuditWizardProps) {
 
       const bodegaErrors = (await Promise.all(bodegaJobs)).filter(Boolean);
       if (bodegaErrors.length > 0) {
-        toast.error(bodegaErrors[0] ?? "Error al guardar bodega");
+        toast.error(bodegaErrors[0] ?? "Error al guardar depósito");
         return;
       }
 
@@ -306,7 +306,7 @@ export function AuditWizard({ locations }: AuditWizardProps) {
               800g — {a08.quantity} und · ${toUsd(a08.price).toFixed(2)}
             </p>
           )}
-          <p className="font-semibold text-slate-700 text-xs uppercase tracking-wide pt-2">Bodega</p>
+          <p className="font-semibold text-slate-700 text-xs uppercase tracking-wide pt-2">Depósito</p>
           {b04.bultos !== "" && <p className="text-slate-600">400g — {b04.bultos} bultos</p>}
           {b04.unidades !== "" && <p className="text-slate-600">400g — {b04.unidades} und</p>}
           {b08.bultos !== "" && <p className="text-slate-600">800g — {b08.bultos} bultos</p>}
@@ -350,7 +350,7 @@ export function AuditWizard({ locations }: AuditWizardProps) {
         {/* ── LOCATION ──────────────────────────────────────────────────── */}
         {step === "location" && (
           <div>
-            <h2 className="text-xl font-bold text-slate-900 mb-4">¿En qué localidad estás?</h2>
+            <h2 className="text-xl font-bold text-slate-900 mb-4">Indica el cliente en el que estás</h2>
             <input
               type="search"
               placeholder="Buscar localidad…"
@@ -527,7 +527,7 @@ export function AuditWizard({ locations }: AuditWizardProps) {
         {step === "bodega" && (
           <div>
             <div className="flex items-start justify-between mb-1 gap-3">
-              <h2 className="text-xl font-bold text-slate-900">Bodega</h2>
+              <h2 className="text-xl font-bold text-slate-900">Depósito</h2>
               <button
                 type="button"
                 onClick={() =>
@@ -541,11 +541,11 @@ export function AuditWizard({ locations }: AuditWizardProps) {
                 }
                 className="shrink-0 text-xs font-medium text-slate-500 border border-slate-300 rounded-lg px-3 py-1.5 hover:bg-slate-50 active:bg-slate-100 transition-colors"
               >
-                Sin stock en bodega
+                Sin stock en depósito
               </button>
             </div>
             <p className="text-slate-400 text-sm mb-6">
-              Podés registrar bultos, unidades sueltas o ambos por variante.
+              Puedes registrar bultos, unidades sueltas o ambos por variante.
             </p>
 
             {(["v04", "v08"] as const).map((key) => {
@@ -662,7 +662,7 @@ export function AuditWizard({ locations }: AuditWizardProps) {
             })}
 
             <p className="text-xs font-semibold text-slate-400 uppercase tracking-wide mt-4 mb-2">
-              Bodega
+              Depósito
             </p>
             {(["v04", "v08"] as const).map((key) => {
               const e = state.bodega[key];

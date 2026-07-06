@@ -157,7 +157,7 @@ export function PromotionTracker({ locations }: PromotionTrackerProps) {
       <div className="min-h-screen bg-white px-4 py-6">
         <div className="mb-6">
           <h1 className="text-xl font-bold text-slate-900">Actividad Promocional</h1>
-          <p className="text-slate-400 text-sm mt-1">Selecciona la localidad del día</p>
+          <p className="text-slate-400 text-sm mt-1">Indica el cliente en el que estás</p>
         </div>
         <input
           type="search"
