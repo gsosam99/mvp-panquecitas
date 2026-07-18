@@ -4,13 +4,11 @@ import Link from 'next/link';
 import { usePathname, useRouter } from 'next/navigation';
 import { toast } from 'sonner';
 import { Button } from '@/components/ui/button';
-import { createSupabaseBrowserClient } from '@/lib/supabase/client';
 
 const NAV_ITEMS = [
   { href: '/dashboard', label: 'Dashboard' },
   { href: '/sap-upload', label: 'Carga SAP' },
   { href: '/locations', label: 'Localidades' },
-  { href: '/users', label: 'Usuarios' },
   { href: '/products', label: 'Productos' },
 ];
 
@@ -19,9 +17,8 @@ export function AdminNav() {
   const router = useRouter();
 
   async function handleLogout() {
-    const supabase = createSupabaseBrowserClient();
-    await supabase.auth.signOut();
-    router.push('/login');
+    await fetch('/api/auth/logout', { method: 'POST' });
+    router.push('/');
     router.refresh();
     toast.success('Sesión cerrada');
   }

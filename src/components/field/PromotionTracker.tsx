@@ -1,8 +1,9 @@
 "use client";
 
-import { useState, useMemo, useEffect } from "react";
+import { useState, useEffect } from "react";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
+import { PdvSelector } from "@/components/field/PdvSelector";
 import type { Location } from "@/types";
 
 interface PromotionTrackerProps {
@@ -70,22 +71,12 @@ function Counter({ label, sublabel, emoji, value, max, onChange }: CounterProps)
 
 export function PromotionTracker({ locations }: PromotionTrackerProps) {
   const [view, setView] = useState<View>("location");
-  const [searchQuery, setSearchQuery] = useState("");
   const [selectedLocation, setSelectedLocation] = useState<Location | null>(null);
   const [samples, setSamples] = useState(0);
   const [conversions, setConversions] = useState(0);
   const [submitting, setSubmitting] = useState(false);
 
   const today = new Date().toISOString().split("T")[0];
-
-  const filteredLocations = useMemo(
-    () =>
-      locations.filter((l) =>
-        l.name.toLowerCase().includes(searchQuery.toLowerCase()) ||
-        l.region?.toLowerCase().includes(searchQuery.toLowerCase())
-      ),
-    [locations, searchQuery]
-  );
 
   function handleSelectLocation(loc: Location) {
     setSelectedLocation(loc);
@@ -98,8 +89,12 @@ export function PromotionTracker({ locations }: PromotionTrackerProps) {
     setSelectedLocation(null);
     setSamples(0);
     setConversions(0);
-    setSearchQuery("");
     setView("location");
+  }
+
+  async function handleLogout() {
+    await fetch("/api/auth/logout", { method: "POST" });
+    window.location.href = "/";
   }
 
   async function handleSubmit() {
@@ -145,9 +140,14 @@ export function PromotionTracker({ locations }: PromotionTrackerProps) {
           {samples} muestras · {conversions} compras
         </p>
         <p className="text-slate-400 mb-8">{rate}% de conversión</p>
-        <Button onClick={handleReset} size="lg" className="w-full max-w-xs">
-          Nuevo reporte
-        </Button>
+        <div className="w-full max-w-xs space-y-3">
+          <Button onClick={handleReset} size="lg" className="w-full">
+            Nuevo reporte
+          </Button>
+          <Button onClick={handleLogout} variant="outline" size="lg" className="w-full">
+            Cerrar sesión
+          </Button>
+        </div>
       </div>
     );
   }
@@ -155,32 +155,11 @@ export function PromotionTracker({ locations }: PromotionTrackerProps) {
   if (view === "location") {
     return (
       <div className="min-h-screen bg-white px-4 py-6">
-        <div className="mb-6">
-          <h1 className="text-xl font-bold text-slate-900">Actividad Promocional</h1>
-          <p className="text-slate-400 text-sm mt-1">Indica el cliente en el que estás</p>
-        </div>
-        <input
-          type="search"
-          placeholder="Buscar localidad…"
-          value={searchQuery}
-          onChange={(e) => setSearchQuery(e.target.value)}
-          className="w-full mb-4 px-4 py-3 border border-slate-300 rounded-xl bg-white text-slate-900 placeholder:text-slate-400 focus:outline-none focus:ring-2 focus:ring-slate-200"
+        <PdvSelector
+          locations={locations}
+          title="Indica el cliente en el que estás"
+          onSelect={handleSelectLocation}
         />
-        <div className="space-y-3">
-          {filteredLocations.map((loc) => (
-            <button
-              key={loc.id}
-              onClick={() => handleSelectLocation(loc)}
-              className="w-full text-left p-4 border border-slate-200 rounded-xl hover:border-slate-400 hover:bg-slate-50 transition-colors"
-            >
-              <p className="font-semibold text-slate-900">{loc.name}</p>
-              <p className="text-sm text-slate-400">{loc.region}</p>
-            </button>
-          ))}
-          {filteredLocations.length === 0 && (
-            <p className="text-center text-slate-400 py-8">No se encontraron localidades</p>
-          )}
-        </div>
       </div>
     );
   }

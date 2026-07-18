@@ -1,34 +1,11 @@
-import { createServerClient } from "@supabase/ssr";
 import { NextResponse, type NextRequest } from "next/server";
 
-export async function proxy(request: NextRequest) {
-  let supabaseResponse = NextResponse.next({ request });
-
-  const supabase = createServerClient(
-    process.env.NEXT_PUBLIC_SUPABASE_URL!,
-    process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!,
-    {
-      cookies: {
-        getAll() {
-          return request.cookies.getAll();
-        },
-        setAll(cookiesToSet) {
-          cookiesToSet.forEach(({ name, value }) =>
-            request.cookies.set(name, value)
-          );
-          supabaseResponse = NextResponse.next({ request });
-          cookiesToSet.forEach(({ name, value, options }) =>
-            supabaseResponse.cookies.set(name, value, options)
-          );
-        },
-      },
-    }
-  );
-
-  // Refresca la sesión — no usar getSession() aquí (inseguro en middleware)
-  await supabase.auth.getUser();
-
-  return supabaseResponse;
+// El MVP ya no usa Supabase Auth: el acceso a dashboards se controla con una
+// cookie de sesión firmada (ver src/lib/session.ts) y los flujos de campo con
+// una cookie de identidad. La verificación se hace en cada Server Component
+// vía requireDashboard()/requireFieldWorker(), no en el proxy.
+export function proxy(_request: NextRequest) {
+  return NextResponse.next();
 }
 
 export const config = {

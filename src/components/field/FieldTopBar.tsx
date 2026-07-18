@@ -1,8 +1,6 @@
 "use client";
 
-import { useMemo } from "react";
 import { useRouter } from "next/navigation";
-import { createSupabaseBrowserClient } from "@/lib/supabase/client";
 
 interface FieldTopBarProps {
   userName: string;
@@ -10,11 +8,11 @@ interface FieldTopBarProps {
 
 export function FieldTopBar({ userName }: FieldTopBarProps) {
   const router = useRouter();
-  const supabase = useMemo(() => createSupabaseBrowserClient(), []);
 
   async function handleLogout() {
-    await supabase.auth.signOut();
-    router.push("/login");
+    await fetch("/api/auth/logout", { method: "POST" });
+    router.push("/");
+    router.refresh();
   }
 
   return (
@@ -24,7 +22,7 @@ export function FieldTopBar({ userName }: FieldTopBarProps) {
         onClick={handleLogout}
         className="text-sm font-medium text-white/80 hover:text-white transition-colors"
       >
-        Salir →
+        Cerrar sesión →
       </button>
     </div>
   );

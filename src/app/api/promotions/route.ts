@@ -1,4 +1,5 @@
-import { createSupabaseServerClient } from "@/lib/supabase/server";
+import { createSupabaseServiceClient } from "@/lib/supabase/server";
+import { getFieldWorker } from "@/lib/session";
 
 interface PromotionPayload {
   location_id: string;
@@ -9,37 +10,40 @@ interface PromotionPayload {
 
 export async function POST(req: Request) {
   try {
-    const supabase = await createSupabaseServerClient();
-    const { data: { user } } = await supabase.auth.getUser();
-    if (!user) return Response.json({ error: "No autenticado" }, { status: 401 });
+    const worker = await getFieldWorker();
+    if (!worker || worker.role !== "PROMOTORA") {
+      return Response.json({ error: "No autorizado" }, { status: 401 });
+    }
 
-    const body = await req.json() as PromotionPayload;
+    const body = (await req.json()) as PromotionPayload;
     const { location_id, report_date, samples_given, conversions_tracked } = body;
 
-    if (!location_id || !report_date || samples_given === undefined || conversions_tracked === undefined) {
+    if (
+      !location_id ||
+      !report_date ||
+      samples_given === undefined ||
+      conversions_tracked === undefined
+    ) {
       return Response.json({ error: "Datos incompletos" }, { status: 400 });
     }
 
     if (conversions_tracked > samples_given) {
-      return Response.json({
-        error: "Las compras confirmadas no pueden superar las muestras entregadas."
-      }, { status: 400 });
+      return Response.json(
+        { error: "Las compras confirmadas no pueden superar las muestras entregadas." },
+        { status: 400 }
+      );
     }
 
-    // Upsert: solo un reporte por (usuario, localidad, día)
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    const { error } = await (supabase as any)
-      .from("promotion_activities")
-      .upsert(
-        {
-          user_id: user.id,
-          location_id,
-          report_date,
-          samples_given,
-          conversions_tracked,
-        },
-        { onConflict: "user_id,location_id,report_date" }
-      );
+    const supabase = createSupabaseServiceClient();
+    const { error } = await supabase.from("promotion_activities").insert({
+      worker_first_name: worker.firstName,
+      worker_last_name: worker.lastName,
+      worker_cedula: worker.cedula,
+      location_id,
+      report_date,
+      samples_given,
+      conversions_tracked,
+    });
 
     if (error) throw error;
 

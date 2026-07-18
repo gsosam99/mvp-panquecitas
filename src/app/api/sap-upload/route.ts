@@ -1,12 +1,14 @@
-import { createSupabaseServerClient } from "@/lib/supabase/server";
+import { createSupabaseServiceClient } from "@/lib/supabase/server";
+import { hasDashboardSession } from "@/lib/session";
 import { SAP_CATEGORY_MAP } from "@/data/catalog";
 import type { ParsedSapRow } from "@/types";
 
 export async function POST(req: Request) {
   try {
-    const supabase = await createSupabaseServerClient();
-    const { data: { user } } = await supabase.auth.getUser();
-    if (!user) return Response.json({ error: "No autenticado" }, { status: 401 });
+    if (!(await hasDashboardSession())) {
+      return Response.json({ error: "No autorizado" }, { status: 401 });
+    }
+    const supabase = createSupabaseServiceClient();
 
     const body = await req.json() as { rows: ParsedSapRow[]; batchId: string };
     const { rows, batchId } = body;
@@ -57,7 +59,7 @@ export async function POST(req: Request) {
         return [];
       }
       return [{
-        uploaded_by: user.id,
+        uploaded_by: null,
         upload_batch_id: batchId,
         location_id,
         product_id,
@@ -92,9 +94,10 @@ export async function POST(req: Request) {
 
 export async function DELETE(req: Request) {
   try {
-    const supabase = await createSupabaseServerClient();
-    const { data: { user } } = await supabase.auth.getUser();
-    if (!user) return Response.json({ error: "No autenticado" }, { status: 401 });
+    if (!(await hasDashboardSession())) {
+      return Response.json({ error: "No autorizado" }, { status: 401 });
+    }
+    const supabase = createSupabaseServiceClient();
 
     const { batchId } = await req.json() as { batchId: string };
     if (!batchId) return Response.json({ error: "batchId requerido" }, { status: 400 });

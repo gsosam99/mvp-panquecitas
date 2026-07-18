@@ -3,7 +3,7 @@
 -- ============================================================
 
 -- ─── Enums ───────────────────────────────────────────────────
-create type user_role as enum ('ADMIN', 'MERCADERISTA', 'PROMOTORA');
+create type user_role as enum ('ADMIN', 'MERCADERISTA', 'PROMOTORA', 'DIENN');
 create type location_type as enum ('SUPERMERCADO', 'ABASTO', 'BODEGA', 'OTRO');
 create type variant_type as enum ('UNIDAD', 'BULTO');
 create type audit_zone as enum ('BODEGA', 'ANAQUEL');
@@ -74,29 +74,31 @@ create trigger on_auth_user_created
 
 -- ─── Locations ───────────────────────────────────────────────
 create table public.locations (
-  id         uuid primary key default gen_random_uuid(),
-  name       text not null,
-  type       location_type not null default 'SUPERMERCADO',
-  sap_code   text unique not null,
-  address    text,
-  region     text,
-  lat        decimal(10, 7),
-  lng        decimal(10, 7),
-  created_at timestamptz not null default now()
+  id             uuid primary key default gen_random_uuid(),
+  name           text not null,
+  type           location_type not null default 'SUPERMERCADO',
+  sap_code       text unique not null,       -- N Cliente de la cartera
+  address        text,
+  region         text,
+  centro_poblado text,                        -- Cabudare / Cumaná / Gürintal / Marigüitar
+  municipio      text,
+  tipo_cliente   text,                        -- valor crudo del Excel (BODEGAS, ABASTOS…)
+  lat            decimal(10, 7),
+  lng            decimal(10, 7),
+  created_at     timestamptz not null default now()
 );
 
 alter table public.locations enable row level security;
 
--- Todos los autenticados pueden leer localidades
-create policy "locations_authenticated_select" on public.locations
-  for select using (auth.role() = 'authenticated');
-
--- Solo admin puede crear/editar/eliminar
-create policy "locations_admin_all" on public.locations
-  for all using (public.is_admin());
+-- Catálogo de lectura pública: los Server Components de campo no tienen sesión
+-- Supabase (el MVP no usa Supabase Auth). La escritura solo ocurre vía route
+-- handlers con service-role (que salta RLS).
+create policy "locations_public_select" on public.locations
+  for select using (true);
 
 create index idx_locations_sap_code on public.locations(sap_code);
 create index idx_locations_region on public.locations(region);
+create index idx_locations_centro_poblado on public.locations(centro_poblado);
 
 -- ─── Products ────────────────────────────────────────────────
 create table public.products (
@@ -108,11 +110,8 @@ create table public.products (
 
 alter table public.products enable row level security;
 
-create policy "products_authenticated_select" on public.products
-  for select using (auth.role() = 'authenticated');
-
-create policy "products_admin_all" on public.products
-  for all using (public.is_admin());
+create policy "products_public_select" on public.products
+  for select using (true);
 
 -- ─── Variants ────────────────────────────────────────────────
 create table public.variants (
@@ -128,11 +127,8 @@ create table public.variants (
 
 alter table public.variants enable row level security;
 
-create policy "variants_authenticated_select" on public.variants
-  for select using (auth.role() = 'authenticated');
-
-create policy "variants_admin_all" on public.variants
-  for all using (public.is_admin());
+create policy "variants_public_select" on public.variants
+  for select using (true);
 
 create index idx_variants_product_id on public.variants(product_id);
 
@@ -141,7 +137,7 @@ create index idx_variants_product_id on public.variants(product_id);
 -- El reporte SAP entrega KG aggregados por cliente y mes, no por presentación.
 create table public.sap_sell_in_records (
   id               uuid primary key default gen_random_uuid(),
-  uploaded_by      uuid not null references public.profiles(id),
+  uploaded_by      uuid references public.profiles(id),  -- nullable: carga sin cuenta
   upload_batch_id  uuid not null,
   location_id      uuid not null references public.locations(id),
   product_id       uuid not null references public.products(id),
@@ -150,28 +146,40 @@ create table public.sap_sell_in_records (
   created_at       timestamptz not null default now()
 );
 
+-- RLS habilitado sin políticas para anon/authenticated → acceso bloqueado.
+-- La carga (Carga SAP) y las lecturas del dashboard usan service-role, que salta RLS.
 alter table public.sap_sell_in_records enable row level security;
-
--- Todos los autenticados pueden leer registros SAP
-create policy "sap_records_authenticated_select" on public.sap_sell_in_records
-  for select using (auth.role() = 'authenticated');
-
--- Solo admin puede insertar y eliminar (no update — datos SAP son inmutables)
-create policy "sap_records_admin_insert" on public.sap_sell_in_records
-  for insert with check (public.is_admin());
-
-create policy "sap_records_admin_delete" on public.sap_sell_in_records
-  for delete using (public.is_admin());
 
 create index idx_sap_records_location_id on public.sap_sell_in_records(location_id);
 create index idx_sap_records_product_id on public.sap_sell_in_records(product_id);
 create index idx_sap_records_date_of_sale on public.sap_sell_in_records(date_of_sale);
 create index idx_sap_records_batch on public.sap_sell_in_records(upload_batch_id);
 
+-- ─── Mercaderista Visits ─────────────────────────────────────
+-- El personal de campo no tiene cuenta: la identidad (nombre/apellido/cédula)
+-- se declara por sesión y se denormaliza en cada registro. Los datos a nivel de
+-- visita (Material POP, caras frontales, acceso a depósito) viven aquí.
+create table public.mercaderista_visits (
+  id                 uuid primary key default gen_random_uuid(),
+  worker_first_name  text not null,
+  worker_last_name   text not null,
+  worker_cedula      text not null,
+  location_id        uuid not null references public.locations(id),
+  pop_present        boolean not null,
+  front_faces        int not null check (front_faces >= 0),
+  deposit_access     boolean not null,
+  created_at         timestamptz not null default now()
+);
+
+-- RLS sin políticas anon/authenticated → solo service-role (route handlers).
+alter table public.mercaderista_visits enable row level security;
+create index idx_merc_visits_location on public.mercaderista_visits(location_id);
+create index idx_merc_visits_created on public.mercaderista_visits(created_at);
+
 -- ─── Inventory Audits ────────────────────────────────────────
 create table public.inventory_audits (
   id                    uuid primary key default gen_random_uuid(),
-  user_id               uuid not null references public.profiles(id),
+  visit_id              uuid not null references public.mercaderista_visits(id) on delete cascade,
   location_id           uuid not null references public.locations(id),
   variant_id            uuid not null references public.variants(id),
   zone                  audit_zone not null,
@@ -179,25 +187,14 @@ create table public.inventory_audits (
   unit_price_observed   decimal(10, 2),  -- solo en ANAQUEL
   calculated_value      decimal(12, 2),  -- solo en BODEGA
   created_at            timestamptz not null default now(),
-  -- Constraint: ANAQUEL requiere precio; BODEGA requiere valor calculado
   constraint anaquel_requires_price check (
     zone != 'ANAQUEL' or unit_price_observed is not null
   )
 );
 
+-- RLS sin políticas anon/authenticated → solo service-role.
 alter table public.inventory_audits enable row level security;
-
--- Mercaderista puede leer y crear sus propios registros
-create policy "inventory_audits_own_select" on public.inventory_audits
-  for select using (auth.uid() = user_id);
-
-create policy "inventory_audits_own_insert" on public.inventory_audits
-  for insert with check (auth.uid() = user_id);
-
--- Admin lee todos
-create policy "inventory_audits_admin_select" on public.inventory_audits
-  for select using (public.is_admin());
-
+create index idx_inventory_audits_visit on public.inventory_audits(visit_id);
 create index idx_inventory_audits_location_variant on public.inventory_audits(location_id, variant_id);
 create index idx_inventory_audits_zone on public.inventory_audits(zone);
 create index idx_inventory_audits_created_at on public.inventory_audits(created_at);
@@ -205,34 +202,20 @@ create index idx_inventory_audits_created_at on public.inventory_audits(created_
 -- ─── Promotion Activities ────────────────────────────────────
 create table public.promotion_activities (
   id                  uuid primary key default gen_random_uuid(),
-  user_id             uuid not null references public.profiles(id),
+  worker_first_name   text not null,
+  worker_last_name    text not null,
+  worker_cedula       text not null,
   location_id         uuid not null references public.locations(id),
   report_date         date not null,
   samples_given       int not null check (samples_given >= 0),
   conversions_tracked int not null check (conversions_tracked >= 0),
-  created_at          timestamptz not null default now(),
-  -- Una promotora solo puede tener un reporte por localidad por día
-  unique (user_id, location_id, report_date)
+  created_at          timestamptz not null default now()
 );
 
+-- RLS sin políticas anon/authenticated → solo service-role.
 alter table public.promotion_activities enable row level security;
-
--- Promotora puede leer y crear sus propios registros
-create policy "promo_activities_own_select" on public.promotion_activities
-  for select using (auth.uid() = user_id);
-
-create policy "promo_activities_own_insert" on public.promotion_activities
-  for insert with check (auth.uid() = user_id);
-
-create policy "promo_activities_own_update" on public.promotion_activities
-  for update using (auth.uid() = user_id);
-
--- Admin lee todos
-create policy "promo_activities_admin_select" on public.promotion_activities
-  for select using (public.is_admin());
-
-create index idx_promo_activities_user_date on public.promotion_activities(user_id, report_date);
 create index idx_promo_activities_location on public.promotion_activities(location_id);
+create index idx_promo_activities_date on public.promotion_activities(report_date);
 
 -- ============================================================
 -- SEED DATA

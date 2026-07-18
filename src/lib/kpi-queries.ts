@@ -1,4 +1,4 @@
-import { createSupabaseServerClient } from "@/lib/supabase/server";
+import { createSupabaseServiceClient } from "@/lib/supabase/server";
 import { PRODUCT_IDS, VARIANT_IDS } from "@/data/catalog";
 import type { KpiData } from "@/types";
 
@@ -23,7 +23,7 @@ interface PromoRow {
 }
 
 export async function getKpiData(filter?: DateFilter): Promise<KpiData> {
-  const supabase = await createSupabaseServerClient();
+  const supabase = createSupabaseServiceClient();
 
   const from = filter?.from ?? "2000-01-01";
   const to = filter?.to ?? new Date().toISOString().split("T")[0];
@@ -58,7 +58,7 @@ export async function getKpiData(filter?: DateFilter): Promise<KpiData> {
     .gte("created_at", `${from}T00:00:00.000Z`)
     .lte("created_at", `${to}T23:59:59.999Z`);
 
-  const audits = (auditData ?? []) as AuditRow[];
+  const audits = (auditData ?? []) as unknown as AuditRow[];
 
   const panquecitasInventoryKg = audits
     .reduce((sum, r) => sum + r.quantity * (r.variants?.presentation_kg ?? 0), 0);
@@ -104,7 +104,7 @@ export interface PricePoint {
 }
 
 export async function getPriceTrend(days = 30): Promise<PricePoint[]> {
-  const supabase = await createSupabaseServerClient();
+  const supabase = createSupabaseServiceClient();
   const since = new Date(Date.now() - days * 24 * 60 * 60 * 1000)
     .toISOString()
     .split("T")[0];
@@ -162,7 +162,7 @@ export interface PromotoraPoint {
 export async function getPromotoraDailyActivity(
   days = 30
 ): Promise<PromotoraPoint[]> {
-  const supabase = await createSupabaseServerClient();
+  const supabase = createSupabaseServiceClient();
   const since = new Date(Date.now() - days * 24 * 60 * 60 * 1000)
     .toISOString()
     .split("T")[0];
@@ -205,7 +205,7 @@ export interface ConversionLocation {
 }
 
 export async function getConversionByLocation(): Promise<ConversionLocation[]> {
-  const supabase = await createSupabaseServerClient();
+  const supabase = createSupabaseServiceClient();
 
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const { data } = await (supabase as any)
@@ -239,7 +239,7 @@ export async function getConversionByLocation(): Promise<ConversionLocation[]> {
 }
 
 export async function getMonthlySellIn(months = 12): Promise<MonthlyPoint[]> {
-  const supabase = await createSupabaseServerClient();
+  const supabase = createSupabaseServiceClient();
   const since = new Date();
   since.setMonth(since.getMonth() - months);
   const sinceStr = since.toISOString().split("T")[0];

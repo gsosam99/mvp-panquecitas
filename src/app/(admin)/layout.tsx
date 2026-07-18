@@ -1,4 +1,4 @@
-import { requireAuth } from "@/lib/auth";
+import { requireDashboard } from "@/lib/session";
 import { AdminNav } from "@/components/admin/AdminNav";
 
 export default async function AdminLayout({
@@ -6,7 +6,7 @@ export default async function AdminLayout({
 }: {
   children: React.ReactNode;
 }) {
-  await requireAuth("ADMIN");
+  await requireDashboard();
 
   return (
     <div className="min-h-screen bg-slate-50 flex flex-col">

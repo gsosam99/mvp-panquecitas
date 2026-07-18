@@ -1,7 +1,17 @@
-export type UserRole = "ADMIN" | "MERCADERISTA" | "PROMOTORA";
+export type UserRole = "ADMIN" | "MERCADERISTA" | "PROMOTORA" | "DIENN";
+export type DashboardRole = "ADMIN" | "DIENN";
+export type FieldRole = "MERCADERISTA" | "PROMOTORA";
 export type LocationType = "SUPERMERCADO" | "ABASTO" | "BODEGA" | "OTRO";
 export type VariantType = "UNIDAD" | "BULTO";
 export type AuditZone = "BODEGA" | "ANAQUEL";
+
+/** Identidad autodeclarada del personal de campo (sin cuenta de usuario). */
+export interface FieldWorker {
+  role: FieldRole;
+  firstName: string;
+  lastName: string;
+  cedula: string;
+}
 
 export interface Profile {
   id: string;
@@ -24,6 +34,9 @@ export interface Location {
   sap_code: string;
   address: string | null;
   region: string | null;
+  centro_poblado: string | null;
+  municipio: string | null;
+  tipo_cliente: string | null;
   lat: number | null;
   lng: number | null;
 }
@@ -56,10 +69,23 @@ export interface SapSellInRecord {
   product?: Product;
 }
 
+export interface MercaderistaVisit {
+  id: string;
+  created_at: string;
+  worker_first_name: string;
+  worker_last_name: string;
+  worker_cedula: string;
+  location_id: string;
+  pop_present: boolean;
+  front_faces: number;
+  deposit_access: boolean;
+  location?: Location;
+}
+
 export interface InventoryAudit {
   id: string;
   created_at: string;
-  user_id: string;
+  visit_id: string;
   location_id: string;
   variant_id: string;
   zone: AuditZone;
@@ -73,7 +99,9 @@ export interface InventoryAudit {
 export interface PromotionActivity {
   id: string;
   created_at: string;
-  user_id: string;
+  worker_first_name: string;
+  worker_last_name: string;
+  worker_cedula: string;
   location_id: string;
   report_date: string;
   samples_given: number;

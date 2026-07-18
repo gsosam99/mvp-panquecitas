@@ -9,8 +9,11 @@ export default async function LocationsPage() {
   const supabase = await createSupabaseServerClient();
   const { data } = await supabase
     .from("locations")
-    .select("id, name, type, sap_code, address, region, lat, lng")
-    .order("region").order("name");
+    .select(
+      "id, name, type, sap_code, address, region, centro_poblado, municipio, tipo_cliente, lat, lng"
+    )
+    .order("centro_poblado")
+    .order("name");
 
   return <LocationsClient initialLocations={(data ?? []) as Location[]} />;
 }
