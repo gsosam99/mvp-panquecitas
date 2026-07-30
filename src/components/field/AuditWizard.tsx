@@ -13,12 +13,15 @@ import type { Location } from "@/types";
 type Step =
   | "location"
   | "pop"
+  | "presence"
+  | "product_location"
   | "faces"
   | "anaquel"
   | "deposit_access"
   | "deposito"
   | "summary";
 type Currency = "USD" | "BS";
+type ProductLocationOption = "HARINA_TRIGO" | "OTRA_CATEGORIA";
 
 interface AnaquelEntry {
   quantity: string;
@@ -47,6 +50,8 @@ const EMPTY: WizardState = {
 const STEP_LABELS: Record<Step, string> = {
   location: "Local",
   pop: "Material POP",
+  presence: "Presencia de producto",
+  product_location: "Ubicación del producto",
   faces: "Caras frontales",
   anaquel: "Anaquel",
   deposit_access: "Depósito",
@@ -69,6 +74,9 @@ export function AuditWizard({ locations }: AuditWizardProps) {
 
   // Nuevos pasos
   const [popPresent, setPopPresent] = useState<boolean | null>(null);
+  const [productPresent, setProductPresent] = useState<boolean | null>(null);
+  const [productLocation, setProductLocation] = useState<ProductLocationOption[]>([]);
+  const [productLocationOther, setProductLocationOther] = useState("");
   const [frontFaces, setFrontFaces] = useState("");
   const [depositAccess, setDepositAccess] = useState<boolean | null>(null);
 
@@ -79,13 +87,16 @@ export function AuditWizard({ locations }: AuditWizardProps) {
   const [bcvError, setBcvError] = useState(false);
   const [manualRate, setManualRate] = useState("");
 
-  // Pasos efectivos (el depósito se omite si no hay acceso)
+  // Pasos efectivos: si no hay presencia del producto se saltan
+  // product_location/faces/anaquel; el depósito se omite si no hay acceso.
   const steps = useMemo<Step[]>(() => {
-    const base: Step[] = ["location", "pop", "faces", "anaquel", "deposit_access"];
+    const base: Step[] = ["location", "pop", "presence"];
+    if (productPresent === true) base.push("product_location", "faces", "anaquel");
+    base.push("deposit_access");
     if (depositAccess === true) base.push("deposito");
     base.push("summary");
     return base;
-  }, [depositAccess]);
+  }, [productPresent, depositAccess]);
 
   const stepIndex = steps.indexOf(step);
   const progress = ((stepIndex + 1) / steps.length) * 100;
@@ -178,9 +189,18 @@ export function AuditWizard({ locations }: AuditWizardProps) {
     setStep("location");
     setLocation(null);
     setPopPresent(null);
+    setProductPresent(null);
+    setProductLocation([]);
+    setProductLocationOther("");
     setFrontFaces("");
     setDepositAccess(null);
     setDone(false);
+  }
+
+  function toggleProductLocation(opt: ProductLocationOption) {
+    setProductLocation((cur) =>
+      cur.includes(opt) ? cur.filter((o) => o !== opt) : [...cur, opt]
+    );
   }
 
   async function handleLogout() {
@@ -189,7 +209,13 @@ export function AuditWizard({ locations }: AuditWizardProps) {
   }
 
   async function handleSubmit() {
-    if (!location || popPresent === null || depositAccess === null) return;
+    if (
+      !location ||
+      popPresent === null ||
+      productPresent === null ||
+      depositAccess === null
+    )
+      return;
     setSubmitting(true);
 
     try {
@@ -201,14 +227,14 @@ export function AuditWizard({ locations }: AuditWizardProps) {
         quantity: number;
         unit_price_observed: number;
       }[] = [];
-      if (Number(a04.quantity) > 0) {
+      if (productPresent && Number(a04.quantity) > 0) {
         anaquel.push({
           variant_id: VARIANT_IDS.PANQ_04KG_UNIDAD,
           quantity: Number(a04.quantity),
           unit_price_observed: toUsd(a04.price),
         });
       }
-      if (Number(a08.quantity) > 0) {
+      if (productPresent && Number(a08.quantity) > 0) {
         anaquel.push({
           variant_id: VARIANT_IDS.PANQ_08KG_UNIDAD,
           quantity: Number(a08.quantity),
@@ -256,7 +282,12 @@ export function AuditWizard({ locations }: AuditWizardProps) {
         body: JSON.stringify({
           location_id: location.id,
           pop_present: popPresent,
-          front_faces: Number(frontFaces) || 0,
+          product_present: productPresent,
+          product_location: productPresent ? productLocation : [],
+          product_location_other: productPresent
+            ? productLocationOther.trim() || undefined
+            : undefined,
+          front_faces: productPresent ? Number(frontFaces) || 0 : null,
           deposit_access: depositAccess,
           anaquel,
           deposito,
@@ -369,6 +400,94 @@ export function AuditWizard({ locations }: AuditWizardProps) {
             <Button
               className="w-full mt-8 h-14 text-base"
               disabled={popPresent === null}
+              onClick={advance}
+            >
+              Continuar →
+            </Button>
+          </div>
+        )}
+
+        {/* ── PRESENCIA DE PRODUCTO (pregunta filtro) ─────────────────────── */}
+        {step === "presence" && (
+          <div>
+            <h2 className="text-xl font-bold text-slate-900 mb-1">Presencia de producto</h2>
+            <p className="text-slate-400 text-sm mb-6">
+              ¿Hay presencia del producto en el local?
+            </p>
+            <div className="grid grid-cols-2 gap-4">
+              {([true, false] as const).map((val) => (
+                <button
+                  key={String(val)}
+                  type="button"
+                  onClick={() => {
+                    setProductPresent(val);
+                    if (!val) {
+                      setProductLocation([]);
+                      setProductLocationOther("");
+                      setFrontFaces("");
+                      setState((s) => ({ ...s, anaquel: EMPTY.anaquel }));
+                    }
+                  }}
+                  className={`h-28 rounded-2xl border-2 text-2xl font-bold transition-all ${
+                    productPresent === val
+                      ? "border-panquecitas bg-panquecitas text-white"
+                      : "border-slate-200 bg-white text-slate-700 hover:border-slate-300"
+                  }`}
+                >
+                  {val ? "SÍ" : "NO"}
+                </button>
+              ))}
+            </div>
+            <Button
+              className="w-full mt-8 h-14 text-base"
+              disabled={productPresent === null}
+              onClick={advance}
+            >
+              Continuar →
+            </Button>
+          </div>
+        )}
+
+        {/* ── UBICACIÓN DEL PRODUCTO ───────────────────────────────────────── */}
+        {step === "product_location" && (
+          <div>
+            <h2 className="text-xl font-bold text-slate-900 mb-1">Ubicación del producto</h2>
+            <p className="text-slate-400 text-sm mb-6">
+              El producto lo podemos encontrar en: (selecciona todas las que apliquen)
+            </p>
+            <div className="space-y-3">
+              {(
+                [
+                  { key: "HARINA_TRIGO", label: "Junto a la harina de trigo" },
+                  { key: "OTRA_CATEGORIA", label: "Junto a otra categoría" },
+                ] as const
+              ).map((opt) => (
+                <button
+                  key={opt.key}
+                  type="button"
+                  onClick={() => toggleProductLocation(opt.key)}
+                  className={`w-full text-left p-4 rounded-2xl border-2 font-semibold transition-all ${
+                    productLocation.includes(opt.key)
+                      ? "border-panquecitas bg-panquecitas/5 text-panquecitas"
+                      : "border-slate-200 bg-white text-slate-700 hover:border-slate-300"
+                  }`}
+                >
+                  {opt.label}
+                </button>
+              ))}
+              {productLocation.includes("OTRA_CATEGORIA") && (
+                <input
+                  type="text"
+                  value={productLocationOther}
+                  onChange={(e) => setProductLocationOther(e.target.value)}
+                  placeholder="¿Cuál otra categoría?"
+                  className="w-full px-4 py-3 border border-slate-300 rounded-xl bg-white text-slate-900 placeholder:text-slate-400 focus:outline-none focus:ring-2 focus:ring-slate-200"
+                />
+              )}
+            </div>
+            <Button
+              className="w-full mt-8 h-14 text-base"
+              disabled={productLocation.length === 0}
               onClick={advance}
             >
               Continuar →
@@ -731,14 +850,41 @@ export function AuditWizard({ locations }: AuditWizardProps) {
               </span>
             </div>
             <div className="flex justify-between items-center py-3 border-b border-slate-100">
-              <span className="text-slate-500 text-sm">Caras frontales</span>
-              <span className="font-semibold text-slate-900">{frontFaces || 0}</span>
+              <span className="text-slate-500 text-sm">Presencia de producto</span>
+              <span className="font-semibold text-slate-900">
+                {productPresent ? "Sí" : "No"}
+              </span>
             </div>
 
-            <p className="text-xs font-semibold text-slate-400 uppercase tracking-wide mt-4 mb-2">
-              Anaquel
-            </p>
-            {(["v04", "v08"] as const).map((key) => {
+            {productPresent && (
+              <>
+                <div className="flex justify-between items-center py-3 border-b border-slate-100">
+                  <span className="text-slate-500 text-sm">Ubicación del producto</span>
+                  <span className="font-semibold text-slate-900 text-right">
+                    {productLocation
+                      .map((o) =>
+                        o === "HARINA_TRIGO"
+                          ? "Junto a harina de trigo"
+                          : `Junto a otra categoría${
+                              productLocationOther ? ` (${productLocationOther})` : ""
+                            }`
+                      )
+                      .join(" · ")}
+                  </span>
+                </div>
+                <div className="flex justify-between items-center py-3 border-b border-slate-100">
+                  <span className="text-slate-500 text-sm">Caras frontales</span>
+                  <span className="font-semibold text-slate-900">{frontFaces || 0}</span>
+                </div>
+              </>
+            )}
+
+            {productPresent && (
+              <p className="text-xs font-semibold text-slate-400 uppercase tracking-wide mt-4 mb-2">
+                Anaquel
+              </p>
+            )}
+            {productPresent && (["v04", "v08"] as const).map((key) => {
               const e = state.anaquel[key];
               if (!Number(e.quantity)) return null;
               const usdPrice = toUsd(e.price);

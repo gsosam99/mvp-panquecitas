@@ -160,15 +160,20 @@ create index idx_sap_records_batch on public.sap_sell_in_records(upload_batch_id
 -- se declara por sesión y se denormaliza en cada registro. Los datos a nivel de
 -- visita (Material POP, caras frontales, acceso a depósito) viven aquí.
 create table public.mercaderista_visits (
-  id                 uuid primary key default gen_random_uuid(),
-  worker_first_name  text not null,
-  worker_last_name   text not null,
-  worker_cedula      text not null,
-  location_id        uuid not null references public.locations(id),
-  pop_present        boolean not null,
-  front_faces        int not null check (front_faces >= 0),
-  deposit_access     boolean not null,
-  created_at         timestamptz not null default now()
+  id                     uuid primary key default gen_random_uuid(),
+  worker_first_name      text not null,
+  worker_last_name       text not null,
+  worker_cedula          text not null,
+  location_id            uuid not null references public.locations(id),
+  pop_present            boolean not null,
+  -- Pregunta filtro: si no hay presencia del producto, el wizard salta
+  -- directo a depósito y front_faces/product_location quedan sin capturar.
+  product_present        boolean not null default true,
+  product_location       text[] null,  -- 'HARINA_TRIGO' | 'OTRA_CATEGORIA'
+  product_location_other text null,    -- texto libre si eligió OTRA_CATEGORIA
+  front_faces            int null check (front_faces is null or front_faces >= 0),
+  deposit_access         boolean not null,
+  created_at             timestamptz not null default now()
 );
 
 -- RLS sin políticas anon/authenticated → solo service-role (route handlers).

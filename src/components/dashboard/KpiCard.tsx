@@ -7,6 +7,7 @@ interface KpiCardProps {
   value: string;
   subtitle?: string;
   highlight?: boolean;
+  critical?: boolean;
   trend?: "up" | "down" | "neutral";
   product?: ProductBadge;
 }
@@ -38,16 +39,25 @@ function ProductPill({ product }: { product: ProductBadge }) {
   );
 }
 
-export function KpiCard({ title, value, subtitle, highlight, trend, product }: KpiCardProps) {
+export function KpiCard({ title, value, subtitle, highlight, critical, trend, product }: KpiCardProps) {
+  const inverted = highlight || critical;
   return (
-    <Card className={highlight ? "border-primary bg-primary text-primary-foreground shadow-md" : "shadow-sm"}>
+    <Card
+      className={
+        critical
+          ? "border-rose-600 bg-rose-600 text-white shadow-md"
+          : highlight
+          ? "border-primary bg-primary text-primary-foreground shadow-md"
+          : "shadow-sm"
+      }
+    >
       <CardContent className="pt-5">
         {product && <ProductPill product={product} />}
-        <p className={`text-xs font-semibold uppercase tracking-widest mb-1 ${highlight ? "text-primary-foreground/70" : "text-muted-foreground"}`}>
+        <p className={`text-xs font-semibold uppercase tracking-widest mb-1 ${inverted ? "text-white/70" : "text-muted-foreground"}`}>
           {title}
         </p>
         <div className="flex items-end gap-2">
-          <p className={`text-3xl font-bold font-[var(--font-heading)] ${highlight ? "text-primary-foreground" : "text-foreground"}`}>
+          <p className={`text-3xl font-bold font-[var(--font-heading)] ${inverted ? "text-white" : "text-foreground"}`}>
             {value}
           </p>
           {trend && (
@@ -57,7 +67,7 @@ export function KpiCard({ title, value, subtitle, highlight, trend, product }: K
           )}
         </div>
         {subtitle && (
-          <p className={`text-xs mt-1 ${highlight ? "text-primary-foreground/60" : "text-muted-foreground"}`}>
+          <p className={`text-xs mt-1 ${inverted ? "text-white/60" : "text-muted-foreground"}`}>
             {subtitle}
           </p>
         )}

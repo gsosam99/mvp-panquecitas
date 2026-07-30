@@ -69,6 +69,8 @@ export interface SapSellInRecord {
   product?: Product;
 }
 
+export type ProductLocationOption = "HARINA_TRIGO" | "OTRA_CATEGORIA";
+
 export interface MercaderistaVisit {
   id: string;
   created_at: string;
@@ -77,7 +79,10 @@ export interface MercaderistaVisit {
   worker_cedula: string;
   location_id: string;
   pop_present: boolean;
-  front_faces: number;
+  product_present: boolean;
+  product_location: ProductLocationOption[] | null;
+  product_location_other: string | null;
+  front_faces: number | null;
   deposit_access: boolean;
   location?: Location;
 }

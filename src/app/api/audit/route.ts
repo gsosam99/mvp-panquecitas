@@ -14,7 +14,10 @@ interface DepositoLine {
 interface AuditPayload {
   location_id: string;
   pop_present: boolean;
-  front_faces: number;
+  product_present: boolean;
+  product_location?: string[];
+  product_location_other?: string;
+  front_faces: number | null;
   deposit_access: boolean;
   anaquel: AnaquelLine[];
   deposito: DepositoLine[];
@@ -28,14 +31,24 @@ export async function POST(req: Request) {
     }
 
     const body = (await req.json()) as AuditPayload;
-    const { location_id, pop_present, front_faces, deposit_access, anaquel, deposito } =
-      body;
+    const {
+      location_id,
+      pop_present,
+      product_present,
+      product_location,
+      product_location_other,
+      front_faces,
+      deposit_access,
+      anaquel,
+      deposito,
+    } = body;
 
     if (
       !location_id ||
       typeof pop_present !== "boolean" ||
+      typeof product_present !== "boolean" ||
       typeof deposit_access !== "boolean" ||
-      front_faces === undefined
+      (product_present && front_faces === undefined)
     ) {
       return Response.json({ error: "Datos incompletos" }, { status: 400 });
     }
@@ -51,7 +64,12 @@ export async function POST(req: Request) {
         worker_cedula: worker.cedula,
         location_id,
         pop_present,
-        front_faces,
+        product_present,
+        product_location: product_present ? product_location ?? [] : null,
+        product_location_other: product_present
+          ? product_location_other ?? null
+          : null,
+        front_faces: product_present ? front_faces : null,
         deposit_access,
       })
       .select("id")
