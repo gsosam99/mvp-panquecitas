@@ -1,45 +1,41 @@
 import { createSupabaseServiceClient } from "@/lib/supabase/server";
 import type { Location } from "@/types";
 
-// Clusters piloto evaluados por DIENN para el modelo de escalamiento
-// (ver "Modificaciones en Indicadores app Panquecitas" §3). El universo de
-// PDVs es dinámico: toda location cuyo centro_poblado caiga en uno de estos
-// clusters, no un conteo fijo (el "439" del doc es solo el ejemplo de la
-// foto del momento en que se escribió).
+// Sectores de venta piloto evaluados por DIENN para el modelo de escalamiento
+// (ver "Cambios en app Panquecitas - Versión Ale" — antes se clasificaba por
+// centro poblado (Cumaná/Marigüitar/Güirintal vs Cabudare); ahora se clasifica
+// por Oficina de Venta, para que Cumaná, Marigüitar y Güirintal (todos
+// atendidos por la oficina "CUMANA") queden en un solo sector, y todo lo
+// atendido por la oficina "BARQUISIMETO ESTE" quede en el otro. El universo
+// de PDVs es dinámico: toda location cuya oficina_venta caiga en uno de estos
+// sectores, no un conteo fijo.
 //
-// La carga real (carteras de cliente SAP) trae "centro_poblado" en MAYÚSCULAS
-// (ej. "CUMANÁ", "CABUDARE") — la comparación es case-insensitive a propósito
-// para no depender de qué capitalización traiga cada carga.
-export const CUMANA_CLUSTER = ["Cumaná", "Marigüitar", "Güirintal"] as const;
-export const CABUDARE_CLUSTER = "Cabudare" as const;
+// Las constantes puras (sin dependencia de Supabase) viven en src/lib/sectors.ts
+// para poder importarse también desde Client Components.
+export {
+  CUMANA_SECTOR,
+  BARQUISIMETO_ESTE_SECTOR,
+  PILOT_SECTORS,
+  SECTOR_LABELS,
+  sectorGroup,
+  type Sector,
+} from "@/lib/sectors";
 
-export const PILOT_CLUSTERS = [...CUMANA_CLUSTER, CABUDARE_CLUSTER] as const;
+import { sectorGroup as _sectorGroup } from "@/lib/sectors";
 
-const CUMANA_CLUSTER_UPPER = CUMANA_CLUSTER.map((c) => c.toUpperCase());
-const CABUDARE_CLUSTER_UPPER = CABUDARE_CLUSTER.toUpperCase();
-
-export function clusterGroup(centroPoblado: string | null): "cumana" | "cabudare" | null {
-  if (!centroPoblado) return null;
-  const upper = centroPoblado.trim().toUpperCase();
-  if (CUMANA_CLUSTER_UPPER.includes(upper)) return "cumana";
-  if (upper === CABUDARE_CLUSTER_UPPER) return "cabudare";
-  return null;
-}
-
-/** Universo total seleccionado de PDVs (k): locations en los clusters piloto. */
+/** Universo total seleccionado de PDVs (k): locations en los sectores piloto. */
 export async function getUniverseLocations(): Promise<Location[]> {
   const supabase = createSupabaseServiceClient();
 
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  const { data } = await (supabase as any)
+  const { data } = await supabase
     .from("locations")
     .select(
-      "id, name, type, sap_code, address, region, centro_poblado, municipio, tipo_cliente, lat, lng"
+      "id, name, type, sap_code, address, region, centro_poblado, municipio, tipo_cliente, oficina_venta, lat, lng"
     );
 
-  // Filtrado en JS (no en la query) porque centro_poblado puede venir en
-  // distinta capitalización según la carga — ver clusterGroup().
-  return ((data ?? []) as Location[]).filter((l) => clusterGroup(l.centro_poblado) !== null);
+  // Filtrado en JS (no en la query) porque oficina_venta puede venir en
+  // distinta capitalización según la carga — ver sectorGroup().
+  return ((data ?? []) as Location[]).filter((l) => _sectorGroup(l.oficina_venta) !== null);
 }
 
 interface SellInFilter {
@@ -54,11 +50,7 @@ export async function getSellInTotalsByLocation(
 ): Promise<Map<string, number>> {
   const supabase = createSupabaseServiceClient();
 
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  let query = (supabase as any)
-    .from("sap_sell_in_records")
-    .select("location_id, quantity_kg")
-    .eq("product_id", productId);
+  let query = supabase.from("sap_sell_in_records").select("location_id, quantity_kg").eq("product_id", productId);
 
   if (filter?.from) query = query.gte("date_of_sale", filter.from);
   if (filter?.to) query = query.lte("date_of_sale", filter.to);

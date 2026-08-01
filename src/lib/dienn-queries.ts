@@ -1,193 +1,382 @@
 import { createSupabaseServiceClient } from "@/lib/supabase/server";
-import { PRODUCT_IDS } from "@/data/catalog";
+import { PRODUCT_IDS, VARIANT_IDS } from "@/data/catalog";
 import {
-  CABUDARE_CLUSTER,
-  CUMANA_CLUSTER,
-  clusterGroup,
+  PILOT_SECTORS,
+  SECTOR_LABELS,
+  sectorGroup,
   getSellInTotalsByLocation,
   getUniverseLocations,
+  type Sector,
 } from "@/lib/universe";
-import type { Location, LocationType } from "@/types";
+import type { Location, LocationType, SapPendingOrder } from "@/types";
 
 // ────────────────────────────────────────────────────────────────
-// Perfil DIENN — Dashboard estratégico y modelo de escalamiento.
-// Ver doc §3. Único perfil con acceso a cifras de Sell-in y al
-// ratio Panquecitas/HMP.
+// Perfil DIENN — Dashboard estratégico reconstruido desde 0 (ver
+// "Cambios en app Panquecitas - Versión Ale (1)" y
+// docs/decisiones-implementacion.md). Único perfil con acceso a
+// cifras de Sell-in y al ratio Panquecitas/HMP.
 // ────────────────────────────────────────────────────────────────
 
-// ── 1. Penetración de mercado ─────────────────────────────────────
+// ── Helpers de semana (ISO week, lunes a domingo) ─────────────────
 
-export interface PenetracionResult {
-  compradores: number;
-  universo: number;
-  pct: number;
-  cumana: { compradores: number; universo: number; pct: number };
-  cabudare: { compradores: number; universo: number; pct: number };
+function isoWeekKey(dateStr: string): string {
+  const d = new Date(dateStr + "T00:00:00Z");
+  const target = new Date(d.getTime());
+  const dayNr = (d.getUTCDay() + 6) % 7; // lunes=0 .. domingo=6
+  target.setUTCDate(target.getUTCDate() - dayNr + 3); // jueves de esa semana
+  const firstThursday = new Date(Date.UTC(target.getUTCFullYear(), 0, 4));
+  const weekNr =
+    1 + Math.round(((target.getTime() - firstThursday.getTime()) / 86400000 - 3 + ((firstThursday.getUTCDay() + 6) % 7)) / 7);
+  return `${target.getUTCFullYear()}-W${String(weekNr).padStart(2, "0")}`;
 }
 
-export async function getPenetracionMercado(): Promise<PenetracionResult> {
+// ── Filtro reactivo de segmento (Tabs TOTAL / sector) ──────────────
+// Todas las queries de abajo aceptan un `sector` opcional: sin filtro
+// (TOTAL) o acotado a un sector (Barquisimeto Este / Cumaná). Ver
+// "2. FILTROS REACTIVOS DE SEGMENTO" en el documento DIENN.
+
+async function getUniverseLocationIds(sector?: Sector): Promise<Set<string>> {
   const universo = await getUniverseLocations();
-  const panqTotals = await getSellInTotalsByLocation(PRODUCT_IDS.PANQUECITAS);
+  const filtered = sector ? universo.filter((l) => sectorGroup(l.oficina_venta) === sector) : universo;
+  return new Set(filtered.map((l) => l.id));
+}
 
-  const compradores = universo.filter((l) => (panqTotals.get(l.id) ?? 0) > 0);
+// ── 1. Total Ton ───────────────────────────────────────────────────
 
-  const cumanaUniverso = universo.filter((l) => clusterGroup(l.centro_poblado) === "cumana");
-  const cabudareUniverso = universo.filter((l) => clusterGroup(l.centro_poblado) === "cabudare");
-  const cumanaCompradores = compradores.filter((l) => clusterGroup(l.centro_poblado) === "cumana");
-  const cabudareCompradores = compradores.filter(
-    (l) => clusterGroup(l.centro_poblado) === "cabudare"
+export async function getTotalToneladas(sector?: Sector): Promise<number> {
+  const supabase = createSupabaseServiceClient();
+  const { data } = await supabase
+    .from("sap_sell_in_records")
+    .select("quantity_kg, location_id")
+    .eq("product_id", PRODUCT_IDS.PANQUECITAS);
+
+  const ids = await getUniverseLocationIds(sector);
+  const rows = (data ?? []) as { quantity_kg: number; location_id: string }[];
+  const totalKg = rows.filter((r) => ids.has(r.location_id)).reduce((s, r) => s + r.quantity_kg, 0);
+  return Math.round((totalKg / 1000) * 100) / 100;
+}
+
+// ── 2. Running de Ventas ──────────────────────────────────────────
+// Kg_Semanal_Promedio = Total_Kg_Vendidos / Numero_Semanas_Evaluadas
+// (fórmula dada en el documento). Días de inventario = inventario
+// actual en depósito (última visita por PDV) / ritmo diario de venta.
+// Proyección: a 3 meses del ritmo semanal actual (horizonte fijo — no
+// especificado en el documento, ver docs/decisiones-implementacion.md).
+
+export interface RunningVentasResult {
+  kgPerWeek: number;
+  diasInventario: number;
+  proyeccionToneladas: number;
+  proyeccionMeses: number;
+}
+
+async function getInventarioDepositoKg(sector?: Sector): Promise<number> {
+  const supabase = createSupabaseServiceClient();
+  const ids = await getUniverseLocationIds(sector);
+
+  // Última visita (con acceso a depósito) por PDV.
+  const { data: visitsData } = await supabase
+    .from("mercaderista_visits")
+    .select("id, location_id, created_at, deposit_access")
+    .order("created_at", { ascending: false });
+
+  const lastVisitByLocation = new Map<string, string>();
+  for (const v of (visitsData ?? []) as { id: string; location_id: string; deposit_access: boolean }[]) {
+    if (!lastVisitByLocation.has(v.location_id) && v.deposit_access && ids.has(v.location_id)) {
+      lastVisitByLocation.set(v.location_id, v.id);
+    }
+  }
+  const visitIds = Array.from(lastVisitByLocation.values());
+  if (visitIds.length === 0) return 0;
+
+  const { data: auditsData } = await supabase
+    .from("inventory_audits")
+    .select("visit_id, variant_id, quantity, zone")
+    .eq("zone", "BODEGA")
+    .in("visit_id", visitIds);
+
+  const { data: variantsData } = await supabase.from("variants").select("id, presentation_kg, units_per_bulk");
+  const kgPerUnit = new Map(
+    ((variantsData ?? []) as { id: string; presentation_kg: number; units_per_bulk: number }[]).map((v) => [
+      v.id,
+      v.presentation_kg * v.units_per_bulk,
+    ])
   );
 
-  const pct = (num: number, den: number) => (den > 0 ? Math.round((num / den) * 100 * 10) / 10 : 0);
+  let totalKg = 0;
+  for (const a of (auditsData ?? []) as { variant_id: string; quantity: number }[]) {
+    totalKg += a.quantity * (kgPerUnit.get(a.variant_id) ?? 0);
+  }
+  return totalKg;
+}
+
+const PROYECCION_MESES = 3;
+
+export async function getRunningVentas(sector?: Sector): Promise<RunningVentasResult> {
+  const supabase = createSupabaseServiceClient();
+  const ids = await getUniverseLocationIds(sector);
+  const { data } = await supabase
+    .from("sap_sell_in_records")
+    .select("quantity_kg, date_of_sale, location_id")
+    .eq("product_id", PRODUCT_IDS.PANQUECITAS)
+    .order("date_of_sale");
+
+  const rows = ((data ?? []) as { quantity_kg: number; date_of_sale: string; location_id: string }[]).filter((r) =>
+    ids.has(r.location_id)
+  );
+  const totalKg = rows.reduce((s, r) => s + r.quantity_kg, 0);
+
+  let numSemanas = 1;
+  if (rows.length > 0) {
+    const first = new Date(rows[0].date_of_sale).getTime();
+    const last = new Date(rows[rows.length - 1].date_of_sale).getTime();
+    numSemanas = Math.max(1, Math.round((last - first) / (7 * 86400000)));
+  }
+
+  const kgPerWeek = totalKg / numSemanas;
+  const inventarioKg = await getInventarioDepositoKg(sector);
+  const kgPerDay = kgPerWeek / 7;
+  const diasInventario = kgPerDay > 0 ? Math.round(inventarioKg / kgPerDay) : 0;
+
+  const proyeccionKg = kgPerWeek * 4.345 * PROYECCION_MESES;
 
   return {
-    compradores: compradores.length,
-    universo: universo.length,
-    pct: pct(compradores.length, universo.length),
-    cumana: {
-      compradores: cumanaCompradores.length,
-      universo: cumanaUniverso.length,
-      pct: pct(cumanaCompradores.length, cumanaUniverso.length),
-    },
-    cabudare: {
-      compradores: cabudareCompradores.length,
-      universo: cabudareUniverso.length,
-      pct: pct(cabudareCompradores.length, cabudareUniverso.length),
-    },
+    kgPerWeek: Math.round(kgPerWeek * 10) / 10,
+    diasInventario,
+    proyeccionToneladas: Math.round((proyeccionKg / 1000) * 100) / 100,
+    proyeccionMeses: PROYECCION_MESES,
   };
 }
 
-// ── 2. Pedido promedio por segmento ───────────────────────────────
-// Nota: el reporte SAP actual no distingue formato (400g/800g) a nivel
-// de fila, solo kg totales por cliente/mes — se expresa en KG (no se
-// inventa una conversión a bultos sin esa granularidad).
+// ── 3. Mix de Producto ────────────────────────────────────────────
+// Ver decisión #7: se calcula desde el depósito (inventory_audits zona
+// BODEGA, última visita por PDV) porque el módulo de anaquel rediseñado
+// ya no distingue 400g/800g (ver decisión #6).
 
-export interface PedidoPromedioSegmento {
-  segment: LocationType;
-  avgKg: number;
-  orders: number;
+export interface MixProductoPoint {
+  variant: "400g" | "800g";
+  kg: number;
+  pct: number;
 }
 
-export async function getPedidoPromedioPorSegmento(): Promise<PedidoPromedioSegmento[]> {
+export async function getMixProducto(sector?: Sector): Promise<MixProductoPoint[]> {
   const supabase = createSupabaseServiceClient();
+  const ids = await getUniverseLocationIds(sector);
 
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  const { data } = await (supabase as any)
-    .from("sap_sell_in_records")
-    .select("location_id, quantity_kg")
-    .eq("product_id", PRODUCT_IDS.PANQUECITAS)
-    .gt("quantity_kg", 0);
+  const { data: visitsData } = await supabase
+    .from("mercaderista_visits")
+    .select("id, location_id, created_at, deposit_access")
+    .order("created_at", { ascending: false });
 
-  const rows = (data ?? []) as { location_id: string; quantity_kg: number }[];
-  if (rows.length === 0) return [];
+  const lastVisitByLocation = new Map<string, string>();
+  for (const v of (visitsData ?? []) as { id: string; location_id: string; deposit_access: boolean }[]) {
+    if (!lastVisitByLocation.has(v.location_id) && v.deposit_access && ids.has(v.location_id)) {
+      lastVisitByLocation.set(v.location_id, v.id);
+    }
+  }
+  const visitIds = Array.from(lastVisitByLocation.values());
+  if (visitIds.length === 0) return [];
 
-  const locationIds = Array.from(new Set(rows.map((r) => r.location_id)));
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  const { data: locData } = await (supabase as any)
-    .from("locations")
-    .select("id, type")
-    .in("id", locationIds);
+  const { data: auditsData } = await supabase
+    .from("inventory_audits")
+    .select("visit_id, variant_id, quantity, zone")
+    .eq("zone", "BODEGA")
+    .in("visit_id", visitIds);
 
-  const typeById = new Map(
-    ((locData ?? []) as { id: string; type: LocationType }[]).map((l) => [l.id, l.type])
+  const { data: variantsData } = await supabase.from("variants").select("id, presentation_kg, units_per_bulk");
+  const kgPerUnit = new Map(
+    ((variantsData ?? []) as { id: string; presentation_kg: number; units_per_bulk: number }[]).map((v) => [
+      v.id,
+      v.presentation_kg * v.units_per_bulk,
+    ])
   );
 
-  const bySegment = new Map<LocationType, { sum: number; count: number }>();
-  for (const row of rows) {
-    const type = typeById.get(row.location_id);
-    if (!type) continue;
-    if (!bySegment.has(type)) bySegment.set(type, { sum: 0, count: 0 });
-    const entry = bySegment.get(type)!;
-    entry.sum += row.quantity_kg;
-    entry.count += 1;
+  let kg400 = 0;
+  let kg800 = 0;
+  for (const a of (auditsData ?? []) as { variant_id: string; quantity: number }[]) {
+    const kg = a.quantity * (kgPerUnit.get(a.variant_id) ?? 0);
+    if (a.variant_id === VARIANT_IDS.PANQ_04KG_BULTO || a.variant_id === VARIANT_IDS.PANQ_04KG_UNIDAD) kg400 += kg;
+    else if (a.variant_id === VARIANT_IDS.PANQ_08KG_BULTO || a.variant_id === VARIANT_IDS.PANQ_08KG_UNIDAD) kg800 += kg;
   }
 
-  return Array.from(bySegment.entries()).map(([segment, { sum, count }]) => ({
-    segment,
-    avgKg: Math.round((sum / count) * 10) / 10,
-    orders: count,
-  }));
+  const total = kg400 + kg800;
+  if (total === 0) return [];
+
+  return [
+    { variant: "400g", kg: Math.round(kg400 * 10) / 10, pct: Math.round((kg400 / total) * 1000) / 10 },
+    { variant: "800g", kg: Math.round(kg800 * 10) / 10, pct: Math.round((kg800 / total) * 1000) / 10 },
+  ];
 }
 
-// ── 3. Tiempo promedio de recompra ────────────────────────────────
+// ── 4. Evolución de Penetración y Tasa de Recompra (semanal) ──────
 
-export async function getTiempoPromedioRecompra(): Promise<number> {
+export interface PenetracionRecompraPoint {
+  week: string;
+  penetracionPct: number;
+  recompraPct: number;
+}
+
+export async function getPenetracionRecompraSemanal(sector?: Sector): Promise<PenetracionRecompraPoint[]> {
+  const universo = await getUniverseLocations();
+  const universoFiltrado = sector ? universo.filter((l) => sectorGroup(l.oficina_venta) === sector) : universo;
+  if (universoFiltrado.length === 0) return [];
+  const ids = new Set(universoFiltrado.map((l) => l.id));
+
   const supabase = createSupabaseServiceClient();
-
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  const { data } = await (supabase as any)
+  const { data } = await supabase
     .from("sap_sell_in_records")
     .select("location_id, date_of_sale")
     .eq("product_id", PRODUCT_IDS.PANQUECITAS)
     .gt("quantity_kg", 0)
     .order("date_of_sale");
 
-  const rows = (data ?? []) as { location_id: string; date_of_sale: string }[];
+  const rows = ((data ?? []) as { location_id: string; date_of_sale: string }[]).filter((r) => ids.has(r.location_id));
+  if (rows.length === 0) return [];
 
-  const datesByLocation = new Map<string, string[]>();
-  for (const row of rows) {
-    if (!datesByLocation.has(row.location_id)) datesByLocation.set(row.location_id, []);
-    const arr = datesByLocation.get(row.location_id)!;
-    if (arr[arr.length - 1] !== row.date_of_sale) arr.push(row.date_of_sale);
+  const weeks = Array.from(new Set(rows.map((r) => isoWeekKey(r.date_of_sale)))).sort();
+
+  const points: PenetracionRecompraPoint[] = [];
+  for (const week of weeks) {
+    const rowsUpToWeek = rows.filter((r) => isoWeekKey(r.date_of_sale) <= week);
+
+    const monthsByLocation = new Map<string, Set<string>>();
+    for (const r of rowsUpToWeek) {
+      const month = r.date_of_sale.slice(0, 7);
+      if (!monthsByLocation.has(r.location_id)) monthsByLocation.set(r.location_id, new Set());
+      monthsByLocation.get(r.location_id)!.add(month);
+    }
+
+    const compradores = monthsByLocation.size;
+    const conRecompra = Array.from(monthsByLocation.values()).filter((m) => m.size >= 2).length;
+
+    points.push({
+      week,
+      penetracionPct: Math.round((compradores / universoFiltrado.length) * 1000) / 10,
+      recompraPct: compradores > 0 ? Math.round((conRecompra / compradores) * 1000) / 10 : 0,
+    });
   }
 
-  const avgGaps: number[] = [];
-  for (const dates of datesByLocation.values()) {
-    if (dates.length < 2) continue;
-    const first = new Date(dates[0]).getTime();
-    const last = new Date(dates[dates.length - 1]).getTime();
-    const days = (last - first) / (1000 * 60 * 60 * 24);
-    avgGaps.push(days / (dates.length - 1));
+  return points;
+}
+
+// ── 5. Cobertura y Comunicación por sector (semanal) ───────────────
+// Ver decisión #11: no hay datos reales de campañas de comunicación ni
+// metas por ciudad, así que se usa un proxy con datos existentes.
+// Cobertura = % acumulado de PDV visitados por mercaderista.
+// Comunicación = % acumulado de PDV con material POP presente.
+// "Ciudad" = sector (Barquisimeto Este / Cumaná); "meta" = universo del sector.
+
+export interface CoberturaComunicacionPoint {
+  week: string;
+  [key: string]: string | number; // `${sector}_cobertura` / `${sector}_comunicacion`
+}
+
+export async function getCoberturaComunicacionPorSector(): Promise<CoberturaComunicacionPoint[]> {
+  const universo = await getUniverseLocations();
+  if (universo.length === 0) return [];
+
+  const universoBySector = new Map<Sector, number>();
+  for (const sector of ["cumana", "barquisimeto_este"] as Sector[]) {
+    universoBySector.set(sector, universo.filter((l) => sectorGroup(l.oficina_venta) === sector).length);
   }
+  const sectorByLocation = new Map(universo.map((l) => [l.id, sectorGroup(l.oficina_venta)]));
 
-  if (avgGaps.length === 0) return 0;
-  return Math.round(avgGaps.reduce((a, b) => a + b, 0) / avgGaps.length);
-}
-
-// ── 4. Volumen vendido (Sell-In) por cluster ──────────────────────
-// Nota: mismo límite de granularidad que §2 — se agrupa por producto
-// y cluster/ciudad, no por formato 400g/800g.
-
-export interface VolumenClusterPoint {
-  cluster: string;
-  pan_kg: number;
-  panquecitas_kg: number;
-}
-
-export async function getVolumenVendidoPorCluster(): Promise<VolumenClusterPoint[]> {
   const supabase = createSupabaseServiceClient();
+  const { data } = await supabase
+    .from("mercaderista_visits")
+    .select("location_id, created_at, pop_present")
+    .order("created_at");
 
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  const { data } = await (supabase as any)
-    .from("sap_sell_in_records")
-    .select("quantity_kg, product_id, locations(centro_poblado)")
-    .in("product_id", [PRODUCT_IDS.HARINA_PAN, PRODUCT_IDS.PANQUECITAS]);
+  const rows = (data ?? []) as { location_id: string; created_at: string; pop_present: boolean }[];
+  const relevantRows = rows.filter((r) => sectorByLocation.has(r.location_id));
+  if (relevantRows.length === 0) return [];
 
-  const rows = (data ?? []) as {
-    quantity_kg: number;
-    product_id: string;
-    locations: { centro_poblado: string | null } | null;
-  }[];
+  const weeks = Array.from(new Set(relevantRows.map((r) => isoWeekKey(r.created_at.slice(0, 10))))).sort();
 
-  const byCluster = new Map<string, { pan_kg: number; panquecitas_kg: number }>();
-  for (const row of rows) {
-    const cluster = row.locations?.centro_poblado ?? "Sin cluster";
-    if (!byCluster.has(cluster)) byCluster.set(cluster, { pan_kg: 0, panquecitas_kg: 0 });
-    const entry = byCluster.get(cluster)!;
-    if (row.product_id === PRODUCT_IDS.HARINA_PAN) entry.pan_kg += row.quantity_kg;
-    else if (row.product_id === PRODUCT_IDS.PANQUECITAS) entry.panquecitas_kg += row.quantity_kg;
+  const points: CoberturaComunicacionPoint[] = [];
+  for (const week of weeks) {
+    const rowsUpToWeek = relevantRows.filter((r) => isoWeekKey(r.created_at.slice(0, 10)) <= week);
+
+    const point: CoberturaComunicacionPoint = { week };
+    for (const sector of ["cumana", "barquisimeto_este"] as Sector[]) {
+      const sectorRows = rowsUpToWeek.filter((r) => sectorByLocation.get(r.location_id) === sector);
+      const visitados = new Set(sectorRows.map((r) => r.location_id));
+      const conPop = new Set(sectorRows.filter((r) => r.pop_present).map((r) => r.location_id));
+      const universoSector = universoBySector.get(sector) ?? 0;
+
+      point[`${sector}_cobertura`] = universoSector > 0 ? Math.round((visitados.size / universoSector) * 1000) / 10 : 0;
+      point[`${sector}_comunicacion`] = universoSector > 0 ? Math.round((conPop.size / universoSector) * 1000) / 10 : 0;
+    }
+    points.push(point);
   }
 
-  return Array.from(byCluster.entries())
-    .map(([cluster, { pan_kg, panquecitas_kg }]) => ({
-      cluster,
-      pan_kg: Math.round(pan_kg * 10) / 10,
-      panquecitas_kg: Math.round(panquecitas_kg * 10) / 10,
-    }))
-    .sort((a, b) => b.panquecitas_kg - a.panquecitas_kg);
+  return points;
 }
 
-// ── 5. Tasa de conversión en degustaciones ────────────────────────
+// ── 6. Detalle de Clientes por Segmento ────────────────────────────
+// Segmento = tipo_cliente (decisión #5). %HPM TOTAL / %HPM vs Base:
+// ver decisión #12.
+
+export interface DetalleSegmentoRow {
+  segmento: string;
+  penetracionPct: number;
+  recompraPct: number;
+  hpmVsBasePct: number;
+  hpmTotalPct: number;
+}
+
+export async function getDetalleClientesPorSegmento(sector?: Sector): Promise<DetalleSegmentoRow[]> {
+  const universoTotal = await getUniverseLocations();
+  const universo = sector ? universoTotal.filter((l) => sectorGroup(l.oficina_venta) === sector) : universoTotal;
+  if (universo.length === 0) return [];
+
+  const panqTotals = await getSellInTotalsByLocation(PRODUCT_IDS.PANQUECITAS);
+  const hmpTotals = await getSellInTotalsByLocation(PRODUCT_IDS.HARINA_PAN);
+
+  const supabase = createSupabaseServiceClient();
+  const { data } = await supabase
+    .from("sap_sell_in_records")
+    .select("location_id, date_of_sale")
+    .eq("product_id", PRODUCT_IDS.PANQUECITAS)
+    .gt("quantity_kg", 0);
+
+  const salesRows = (data ?? []) as { location_id: string; date_of_sale: string }[];
+  const monthsByLocation = new Map<string, Set<string>>();
+  for (const r of salesRows) {
+    if (!monthsByLocation.has(r.location_id)) monthsByLocation.set(r.location_id, new Set());
+    monthsByLocation.get(r.location_id)!.add(r.date_of_sale.slice(0, 7));
+  }
+
+  const universoTotalHmpKg = universo.reduce((s, l) => s + (hmpTotals.get(l.id) ?? 0), 0);
+
+  const bySegmento = new Map<string, Location[]>();
+  for (const l of universo) {
+    const seg = l.tipo_cliente?.trim() || "Sin clasificar";
+    if (!bySegmento.has(seg)) bySegmento.set(seg, []);
+    bySegmento.get(seg)!.push(l);
+  }
+
+  const rows: DetalleSegmentoRow[] = [];
+  for (const [segmento, locs] of bySegmento.entries()) {
+    const compradores = locs.filter((l) => (panqTotals.get(l.id) ?? 0) > 0);
+    const conRecompra = compradores.filter((l) => (monthsByLocation.get(l.id)?.size ?? 0) >= 2);
+
+    const segHmpKg = locs.reduce((s, l) => s + (hmpTotals.get(l.id) ?? 0), 0);
+    const segPanqKg = locs.reduce((s, l) => s + (panqTotals.get(l.id) ?? 0), 0);
+
+    rows.push({
+      segmento,
+      penetracionPct: Math.round((compradores.length / locs.length) * 1000) / 10,
+      recompraPct: compradores.length > 0 ? Math.round((conRecompra.length / compradores.length) * 1000) / 10 : 0,
+      hpmVsBasePct: segHmpKg > 0 ? Math.round((segPanqKg / segHmpKg) * 1000) / 10 : 0,
+      hpmTotalPct: universoTotalHmpKg > 0 ? Math.round((segHmpKg / universoTotalHmpKg) * 1000) / 10 : 0,
+    });
+  }
+
+  return rows.sort((a, b) => b.hpmTotalPct - a.hpmTotalPct);
+}
+
+// ── 7. Tasa de conversión en degustaciones (se mantiene) ──────────
 
 export interface ConversionDegustaciones {
   samples: number;
@@ -198,9 +387,7 @@ export interface ConversionDegustaciones {
 export async function getConversionDegustaciones(): Promise<ConversionDegustaciones> {
   const supabase = createSupabaseServiceClient();
 
-  const { data } = await supabase
-    .from("promotion_activities")
-    .select("samples_given, conversions_tracked");
+  const { data } = await supabase.from("promotion_activities").select("samples_given, conversions_tracked");
 
   const rows = (data ?? []) as { samples_given: number; conversions_tracked: number }[];
   const samples = rows.reduce((sum, r) => sum + r.samples_given, 0);
@@ -213,66 +400,20 @@ export async function getConversionDegustaciones(): Promise<ConversionDegustacio
   };
 }
 
-// ── 6. Modelo de escalamiento (Panquecitas vs HMP) ────────────────
+// ── 8. Pedidos pendientes por entregar ────────────────────────────
+// Ver decisión #13: formato del reporte SAP aún no confirmado.
 
-export interface EscalamientoPdvDetail {
-  location: Location;
-  panquecitasKg: number;
-  hmpKg: number;
-  shareMvp: number; // 0..1
+export async function getPedidosPendientes(sector?: Sector): Promise<SapPendingOrder[]> {
+  const supabase = createSupabaseServiceClient();
+  const { data } = await supabase
+    .from("sap_pending_orders")
+    .select("id, created_at, upload_batch_id, location_id, product_id, quantity, order_date, notes, location:locations(id, name, type, sap_code, address, region, centro_poblado, municipio, tipo_cliente, oficina_venta, lat, lng)")
+    .order("order_date", { ascending: true });
+
+  const rows = (data ?? []) as unknown as SapPendingOrder[];
+  if (!sector) return rows;
+  return rows.filter((r) => sectorGroup(r.location?.oficina_venta ?? null) === sector);
 }
 
-export interface ModeloEscalamiento {
-  volumenCapturadoKg: number;
-  volumenOportunidadKg: number;
-  hmpUniverseKg: number;
-  panquecitasUniverseKg: number;
-  pctOportunidadHmp: number;
-  pctPenetracionReal: number;
-  pctEficienciaPdvs: number;
-  compradores: number;
-  totalUniverso: number;
-  detail: EscalamientoPdvDetail[];
-}
-
-export async function getModeloEscalamiento(): Promise<ModeloEscalamiento> {
-  const universo = await getUniverseLocations();
-  const panqTotals = await getSellInTotalsByLocation(PRODUCT_IDS.PANQUECITAS);
-  const hmpTotals = await getSellInTotalsByLocation(PRODUCT_IDS.HARINA_PAN);
-
-  const detail: EscalamientoPdvDetail[] = universo.map((location) => {
-    const panquecitasKg = panqTotals.get(location.id) ?? 0;
-    const hmpKg = hmpTotals.get(location.id) ?? 0;
-    return {
-      location,
-      panquecitasKg,
-      hmpKg,
-      shareMvp: hmpKg > 0 ? panquecitasKg / hmpKg : 0,
-    };
-  });
-
-  const compradores = detail.filter((d) => d.panquecitasKg > 0);
-  const noCompradores = detail.filter((d) => d.panquecitasKg === 0);
-
-  const volumenCapturadoKg = compradores.reduce((sum, d) => sum + d.panquecitasKg, 0);
-  const volumenOportunidadKg = noCompradores.reduce((sum, d) => sum + d.hmpKg, 0);
-  const hmpUniverseKg = detail.reduce((sum, d) => sum + d.hmpKg, 0);
-  const panquecitasUniverseKg = detail.reduce((sum, d) => sum + d.panquecitasKg, 0);
-
-  const pct = (num: number, den: number) => (den > 0 ? Math.round((num / den) * 100 * 10) / 10 : 0);
-
-  return {
-    volumenCapturadoKg: Math.round(volumenCapturadoKg * 10) / 10,
-    volumenOportunidadKg: Math.round(volumenOportunidadKg * 10) / 10,
-    hmpUniverseKg: Math.round(hmpUniverseKg * 10) / 10,
-    panquecitasUniverseKg: Math.round(panquecitasUniverseKg * 10) / 10,
-    pctOportunidadHmp: pct(volumenOportunidadKg, hmpUniverseKg),
-    pctPenetracionReal: pct(volumenCapturadoKg, hmpUniverseKg),
-    pctEficienciaPdvs: pct(compradores.length, detail.length),
-    compradores: compradores.length,
-    totalUniverso: detail.length,
-    detail: detail.sort((a, b) => b.hmpKg - a.hmpKg),
-  };
-}
-
-export { CUMANA_CLUSTER, CABUDARE_CLUSTER };
+export { PILOT_SECTORS, SECTOR_LABELS };
+export type { LocationType };

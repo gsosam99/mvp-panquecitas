@@ -180,6 +180,14 @@ export function PromotionTracker({ locations }: PromotionTrackerProps) {
         </div>
       </div>
 
+      <div className="px-4 pt-4">
+        <div className="bg-slate-50 border border-slate-100 rounded-xl px-4 py-3 text-xs text-slate-500 leading-relaxed">
+          Una <span className="font-semibold text-slate-700">compra confirmada</span> cuenta solo si la
+          persona que probó el producto también lo compró. No cuenta si compró sin haber probado antes —
+          pero si probó y no compró, igual se suma como muestra entregada.
+        </div>
+      </div>
+
       <div className="flex-1 flex flex-col items-center justify-center px-6 gap-12 py-8">
         <Counter
           label="Muestras Entregadas"
@@ -193,7 +201,7 @@ export function PromotionTracker({ locations }: PromotionTrackerProps) {
 
         <Counter
           label="Compras Confirmadas"
-          sublabel="Clientes que compraron tras la muestra"
+          sublabel="Personas que probaron y compraron (no cantidad de paquetes vendidos)"
           emoji="🛍️"
           value={conversions}
           max={samples}

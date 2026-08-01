@@ -17,12 +17,10 @@ interface FieldRegisterFormProps {
 
 export function FieldRegisterForm({ role, roleLabel }: FieldRegisterFormProps) {
   const router = useRouter();
-  const [firstName, setFirstName] = useState("");
-  const [lastName, setLastName] = useState("");
   const [cedula, setCedula] = useState("");
   const [loading, setLoading] = useState(false);
 
-  const valid = firstName.trim() && lastName.trim() && cedula.trim();
+  const valid = cedula.trim().length > 0;
 
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
@@ -32,10 +30,11 @@ export function FieldRegisterForm({ role, roleLabel }: FieldRegisterFormProps) {
       const res = await fetch("/api/auth/field", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ role, firstName, lastName, cedula }),
+        body: JSON.stringify({ role, cedula }),
       });
+      const data = (await res.json()) as { error?: string };
       if (!res.ok) {
-        toast.error("Revisa los datos ingresados.");
+        toast.error(data.error ?? "Revisa la cédula ingresada.");
         return;
       }
       router.push(role === "MERCADERISTA" ? "/audit" : "/promotions");
@@ -50,38 +49,12 @@ export function FieldRegisterForm({ role, roleLabel }: FieldRegisterFormProps) {
   return (
     <Card>
       <CardHeader>
-        <CardTitle className="text-lg">{roleLabel} · Tus datos</CardTitle>
+        <CardTitle className="text-lg">{roleLabel} · Ingresa tu cédula</CardTitle>
       </CardHeader>
       <CardContent>
         <form onSubmit={handleSubmit} className="space-y-4">
           <div className="space-y-2">
-            <Label htmlFor="firstName">Nombre</Label>
-            <Input
-              id="firstName"
-              type="text"
-              value={firstName}
-              onChange={(e) => setFirstName(e.target.value)}
-              placeholder="Nombre"
-              required
-              autoComplete="given-name"
-              className="bg-white text-slate-900 placeholder:text-slate-400"
-            />
-          </div>
-          <div className="space-y-2">
-            <Label htmlFor="lastName">Apellido</Label>
-            <Input
-              id="lastName"
-              type="text"
-              value={lastName}
-              onChange={(e) => setLastName(e.target.value)}
-              placeholder="Apellido"
-              required
-              autoComplete="family-name"
-              className="bg-white text-slate-900 placeholder:text-slate-400"
-            />
-          </div>
-          <div className="space-y-2">
-            <Label htmlFor="cedula">Cédula</Label>
+            <Label htmlFor="cedula">Cédula de Identidad</Label>
             <Input
               id="cedula"
               type="text"
@@ -91,11 +64,15 @@ export function FieldRegisterForm({ role, roleLabel }: FieldRegisterFormProps) {
               onChange={(e) => setCedula(e.target.value.replace(/\D/g, ""))}
               placeholder="Solo números"
               required
+              autoFocus
               className="bg-white text-slate-900 placeholder:text-slate-400"
             />
+            <p className="text-xs text-slate-400">
+              Tu cédula debe estar registrada previamente por tu supervisor.
+            </p>
           </div>
           <Button type="submit" className="w-full" disabled={loading || !valid}>
-            {loading ? "Continuando…" : "Continuar"}
+            {loading ? "Verificando…" : "Continuar"}
           </Button>
           <Link
             href="/"

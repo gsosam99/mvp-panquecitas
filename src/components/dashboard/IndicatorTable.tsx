@@ -14,7 +14,7 @@ export interface IndicatorTableRow {
   id: string;
   sapCode: string;
   name: string;
-  centroPoblado: string | null;
+  sector: string | null;
   tipoCliente: string | null;
   extra?: ReactNode;
 }
@@ -79,7 +79,7 @@ export function IndicatorTable({ rows, extraLabel, emptyMessage }: IndicatorTabl
           <TableHeader>
             <TableRow>
               <TableHead>PDV</TableHead>
-              <TableHead>Cluster</TableHead>
+              <TableHead>Sector</TableHead>
               {extraLabel && <TableHead>{extraLabel}</TableHead>}
             </TableRow>
           </TableHeader>
@@ -90,7 +90,7 @@ export function IndicatorTable({ rows, extraLabel, emptyMessage }: IndicatorTabl
                   <span className="font-medium text-slate-900">{r.sapCode}</span>{" "}
                   <span className="text-slate-500">— {r.name}</span>
                 </TableCell>
-                <TableCell className="text-slate-500">{r.centroPoblado ?? "—"}</TableCell>
+                <TableCell className="text-slate-500">{r.sector ?? "—"}</TableCell>
                 {extraLabel && <TableCell>{r.extra}</TableCell>}
               </TableRow>
             ))}

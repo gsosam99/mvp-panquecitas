@@ -1,32 +1,55 @@
 import { cookies } from "next/headers";
 import { seal, FIELD_COOKIE } from "@/lib/session";
+import { lookupFieldWorker } from "@/lib/field-roster";
 import type { FieldRole, FieldWorker } from "@/types";
 
 interface FieldPayload {
   role: FieldRole;
-  firstName: string;
-  lastName: string;
   cedula: string;
 }
+
+const ROLE_LABELS: Record<FieldRole, string> = {
+  MERCADERISTA: "Mercaderista",
+  PROMOTORA: "Promotora",
+};
 
 export async function POST(req: Request) {
   try {
     const body = (await req.json()) as FieldPayload;
     const role = body.role;
-    const firstName = body.firstName?.trim();
-    const lastName = body.lastName?.trim();
     const cedula = body.cedula?.trim();
 
-    if (
-      (role !== "MERCADERISTA" && role !== "PROMOTORA") ||
-      !firstName ||
-      !lastName ||
-      !cedula
-    ) {
+    if ((role !== "MERCADERISTA" && role !== "PROMOTORA") || !cedula) {
       return Response.json({ error: "Datos incompletos" }, { status: 400 });
     }
 
-    const worker: FieldWorker = { role, firstName, lastName, cedula };
+    // El login de campo ahora valida la cédula contra el roster autorizado
+    // (field_workers) en vez de aceptar nombre/apellido libres — ver
+    // decisión #1/#2 en docs/decisiones-implementacion.md.
+    const record = await lookupFieldWorker(cedula);
+    if (!record) {
+      return Response.json(
+        { error: "Cédula no registrada. Contacta a tu supervisor." },
+        { status: 401 }
+      );
+    }
+
+    if (record.role !== role) {
+      return Response.json(
+        {
+          error: `Esta cédula está registrada como ${ROLE_LABELS[record.role]}, no como ${ROLE_LABELS[role]}.`,
+        },
+        { status: 403 }
+      );
+    }
+
+    const worker: FieldWorker = {
+      role,
+      firstName: record.first_name,
+      lastName: record.last_name,
+      cedula: record.cedula,
+      oficinaVenta: record.oficina_venta,
+    };
 
     const store = await cookies();
     store.set(FIELD_COOKIE, seal(worker), {
