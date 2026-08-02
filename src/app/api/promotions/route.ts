@@ -1,11 +1,13 @@
 import { createSupabaseServiceClient } from "@/lib/supabase/server";
 import { getFieldWorker } from "@/lib/session";
+import { TICKETS_PER_ROLL } from "@/types";
 
 interface PromotionPayload {
   location_id: string;
   report_date: string;
-  samples_given: number;
-  conversions_tracked: number;
+  tickets_entregados: number;
+  tickets_recibidos: number;
+  tickets_intactos: number;
 }
 
 export async function POST(req: Request) {
@@ -16,20 +18,32 @@ export async function POST(req: Request) {
     }
 
     const body = (await req.json()) as PromotionPayload;
-    const { location_id, report_date, samples_given, conversions_tracked } = body;
+    const { location_id, report_date, tickets_entregados, tickets_recibidos, tickets_intactos } = body;
 
     if (
       !location_id ||
       !report_date ||
-      samples_given === undefined ||
-      conversions_tracked === undefined
+      tickets_entregados === undefined ||
+      tickets_recibidos === undefined ||
+      tickets_intactos === undefined
     ) {
       return Response.json({ error: "Datos incompletos" }, { status: 400 });
     }
 
-    if (conversions_tracked > samples_given) {
+    // Validaciones de negocio (defensa en profundidad — el formulario ya
+    // las aplica del lado del cliente, ver PromotionTracker.tsx).
+    if (tickets_entregados + tickets_intactos !== TICKETS_PER_ROLL) {
       return Response.json(
-        { error: "Las compras confirmadas no pueden superar las muestras entregadas." },
+        {
+          error: `Error de inventario: la suma de los tickets entregados más los tickets intactos debe dar exactamente ${TICKETS_PER_ROLL}.`,
+        },
+        { status: 400 }
+      );
+    }
+
+    if (tickets_recibidos > tickets_entregados) {
+      return Response.json(
+        { error: "Error de conversión: los tickets recibidos no pueden superar a los tickets entregados." },
         { status: 400 }
       );
     }
@@ -41,8 +55,9 @@ export async function POST(req: Request) {
       worker_cedula: worker.cedula,
       location_id,
       report_date,
-      samples_given,
-      conversions_tracked,
+      tickets_entregados,
+      tickets_recibidos,
+      tickets_intactos,
     });
 
     if (error) throw error;

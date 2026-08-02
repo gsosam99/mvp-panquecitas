@@ -134,10 +134,14 @@ export interface PromotionActivity {
   worker_cedula: string;
   location_id: string;
   report_date: string;
-  samples_given: number;
-  conversions_tracked: number;
+  tickets_entregados: number;
+  tickets_recibidos: number;
+  tickets_intactos: number;
   location?: Location;
 }
+
+/** Tamaño fijo del rollo de tickets que porta cada promotora por jornada. */
+export const TICKETS_PER_ROLL = 80;
 
 export interface ParsedSapRow {
   sap_code: string;

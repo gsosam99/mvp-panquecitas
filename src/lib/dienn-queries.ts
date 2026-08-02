@@ -376,7 +376,9 @@ export async function getDetalleClientesPorSegmento(sector?: Sector): Promise<De
   return rows.sort((a, b) => b.hpmTotalPct - a.hpmTotalPct);
 }
 
-// ── 7. Tasa de conversión en degustaciones (se mantiene) ──────────
+// ── 7. Tasa de conversión en degustaciones (sistema de tickets) ───
+// Ver migración 004: samples_given/conversions_tracked se renombraron a
+// tickets_entregados/tickets_recibidos (sistema de tickets físicos).
 
 export interface ConversionDegustaciones {
   samples: number;
@@ -387,11 +389,11 @@ export interface ConversionDegustaciones {
 export async function getConversionDegustaciones(): Promise<ConversionDegustaciones> {
   const supabase = createSupabaseServiceClient();
 
-  const { data } = await supabase.from("promotion_activities").select("samples_given, conversions_tracked");
+  const { data } = await supabase.from("promotion_activities").select("tickets_entregados, tickets_recibidos");
 
-  const rows = (data ?? []) as { samples_given: number; conversions_tracked: number }[];
-  const samples = rows.reduce((sum, r) => sum + r.samples_given, 0);
-  const conversions = rows.reduce((sum, r) => sum + r.conversions_tracked, 0);
+  const rows = (data ?? []) as { tickets_entregados: number; tickets_recibidos: number }[];
+  const samples = rows.reduce((sum, r) => sum + r.tickets_entregados, 0);
+  const conversions = rows.reduce((sum, r) => sum + r.tickets_recibidos, 0);
 
   return {
     samples,

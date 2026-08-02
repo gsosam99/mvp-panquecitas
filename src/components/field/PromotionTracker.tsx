@@ -4,7 +4,7 @@ import { useState, useEffect } from "react";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import { PdvSelector } from "@/components/field/PdvSelector";
-import type { Location } from "@/types";
+import { TICKETS_PER_ROLL, type Location } from "@/types";
 
 interface PromotionTrackerProps {
   locations: Location[];
@@ -72,23 +72,31 @@ function Counter({ label, sublabel, emoji, value, max, onChange }: CounterProps)
 export function PromotionTracker({ locations }: PromotionTrackerProps) {
   const [view, setView] = useState<View>("location");
   const [selectedLocation, setSelectedLocation] = useState<Location | null>(null);
-  const [samples, setSamples] = useState(0);
-  const [conversions, setConversions] = useState(0);
+  const [entregados, setEntregados] = useState(0);
+  const [recibidos, setRecibidos] = useState(0);
+  const [intactos, setIntactos] = useState(0);
   const [submitting, setSubmitting] = useState(false);
 
   const today = new Date().toISOString().split("T")[0];
 
+  const balance = entregados + intactos;
+  const balanceOk = balance === TICKETS_PER_ROLL;
+  const conversionOk = recibidos <= entregados;
+  const canSubmit = balanceOk && conversionOk;
+
   function handleSelectLocation(loc: Location) {
     setSelectedLocation(loc);
-    setSamples(0);
-    setConversions(0);
+    setEntregados(0);
+    setRecibidos(0);
+    setIntactos(0);
     setView("counters");
   }
 
   function handleReset() {
     setSelectedLocation(null);
-    setSamples(0);
-    setConversions(0);
+    setEntregados(0);
+    setRecibidos(0);
+    setIntactos(0);
     setView("location");
   }
 
@@ -98,7 +106,7 @@ export function PromotionTracker({ locations }: PromotionTrackerProps) {
   }
 
   async function handleSubmit() {
-    if (!selectedLocation) return;
+    if (!selectedLocation || !canSubmit) return;
     setSubmitting(true);
 
     try {
@@ -108,12 +116,13 @@ export function PromotionTracker({ locations }: PromotionTrackerProps) {
         body: JSON.stringify({
           location_id: selectedLocation.id,
           report_date: today,
-          samples_given: samples,
-          conversions_tracked: conversions,
+          tickets_entregados: entregados,
+          tickets_recibidos: recibidos,
+          tickets_intactos: intactos,
         }),
       });
 
-      const data = await res.json() as { ok?: boolean; error?: string };
+      const data = (await res.json()) as { ok?: boolean; error?: string };
 
       if (!res.ok) {
         toast.error(data.error ?? "Error al guardar");
@@ -130,14 +139,14 @@ export function PromotionTracker({ locations }: PromotionTrackerProps) {
   }
 
   if (view === "done") {
-    const rate = samples > 0 ? Math.round((conversions / samples) * 100) : 0;
+    const rate = entregados > 0 ? Math.round((recibidos / entregados) * 100) : 0;
     return (
       <div className="flex flex-col items-center justify-center min-h-screen bg-white px-6 text-center">
         <div className="text-6xl mb-4">🎉</div>
         <h2 className="text-xl font-bold text-slate-900 mb-1">¡Reporte enviado!</h2>
         <p className="text-slate-500 mb-1">{selectedLocation?.name}</p>
         <p className="text-2xl font-bold text-slate-900 mb-1">
-          {samples} muestras · {conversions} compras
+          {entregados} tickets entregados · {recibidos} recibidos
         </p>
         <p className="text-slate-400 mb-8">{rate}% de conversión</p>
         <div className="w-full max-w-xs space-y-3">
@@ -165,7 +174,7 @@ export function PromotionTracker({ locations }: PromotionTrackerProps) {
   }
 
   // view === "counters"
-  const conversionRate = samples > 0 ? Math.round((conversions / samples) * 100) : 0;
+  const conversionRate = entregados > 0 ? Math.round((recibidos / entregados) * 100) : 0;
 
   return (
     <div className="min-h-screen bg-white flex flex-col">
@@ -182,33 +191,46 @@ export function PromotionTracker({ locations }: PromotionTrackerProps) {
 
       <div className="px-4 pt-4">
         <div className="bg-slate-50 border border-slate-100 rounded-xl px-4 py-3 text-xs text-slate-500 leading-relaxed">
-          Una <span className="font-semibold text-slate-700">compra confirmada</span> cuenta solo si la
-          persona que probó el producto también lo compró. No cuenta si compró sin haber probado antes —
-          pero si probó y no compró, igual se suma como muestra entregada.
+          Cada muestra se entrega con un <span className="font-semibold text-slate-700">ticket</span>. Si la
+          persona compra el producto, te trae el ticket de vuelta para canjear un regalo. Al final del día,
+          cuenta cuántos tickets entregaste, cuántos te devolvieron y cuántos te quedaron sin entregar del
+          rollo de {TICKETS_PER_ROLL}.
         </div>
       </div>
 
-      <div className="flex-1 flex flex-col items-center justify-center px-6 gap-12 py-8">
+      <div className="flex-1 flex flex-col items-center justify-center px-6 gap-10 py-8">
         <Counter
-          label="Muestras Entregadas"
-          sublabel="Total de degustaciones del día"
-          emoji="🥞"
-          value={samples}
-          onChange={setSamples}
+          label="Tickets Entregados"
+          sublabel="A consumidores en la degustación"
+          emoji="🎟️"
+          value={entregados}
+          max={TICKETS_PER_ROLL}
+          onChange={setEntregados}
         />
 
         <div className="w-full border-t border-slate-100" />
 
         <Counter
-          label="Compras Confirmadas"
-          sublabel="Personas que probaron y compraron (no cantidad de paquetes vendidos)"
-          emoji="🛍️"
-          value={conversions}
-          max={samples}
-          onChange={setConversions}
+          label="Tickets Recibidos"
+          sublabel="Regalos canjeados (no pueden superar los entregados)"
+          emoji="🎁"
+          value={recibidos}
+          max={entregados}
+          onChange={setRecibidos}
         />
 
-        {samples > 0 && (
+        <div className="w-full border-t border-slate-100" />
+
+        <Counter
+          label="Tickets Intactos"
+          sublabel="Sobrantes al final del día"
+          emoji="📦"
+          value={intactos}
+          max={TICKETS_PER_ROLL}
+          onChange={setIntactos}
+        />
+
+        {entregados > 0 && (
           <div className="text-center">
             <p className="text-3xl font-bold text-slate-900">{conversionRate}%</p>
             <p className="text-sm text-slate-400">Tasa de conversión</p>
@@ -217,16 +239,20 @@ export function PromotionTracker({ locations }: PromotionTrackerProps) {
       </div>
 
       <div className="px-4 pb-safe-bottom pb-6 pt-4 border-t border-slate-100">
-        <Button
-          className="w-full h-14 text-base"
-          onClick={handleSubmit}
-          disabled={submitting || samples === 0}
-        >
+        {!balanceOk && (
+          <p className="text-xs text-rose-600 text-center mb-2">
+            ⚠️ Error de inventario: entregados ({entregados}) + intactos ({intactos}) = {balance}. Debe dar
+            exactamente {TICKETS_PER_ROLL}.
+          </p>
+        )}
+        {balanceOk && !conversionOk && (
+          <p className="text-xs text-rose-600 text-center mb-2">
+            ⚠️ Error de conversión: los tickets recibidos no pueden superar a los entregados.
+          </p>
+        )}
+        <Button className="w-full h-14 text-base" onClick={handleSubmit} disabled={submitting || !canSubmit}>
           {submitting ? "Enviando…" : "Enviar Reporte del Día"}
         </Button>
-        {samples === 0 && (
-          <p className="text-xs text-slate-400 text-center mt-2">Ingresa al menos 1 muestra para enviar</p>
-        )}
       </div>
     </div>
   );
