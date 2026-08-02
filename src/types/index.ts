@@ -50,9 +50,13 @@ export interface Location {
   municipio: string | null;
   tipo_cliente: string | null;
   oficina_venta: string | null;
+  asesor_encargado: string | null;
+  fuente_sell_out: FuenteSellOut;
   lat: number | null;
   lng: number | null;
 }
+
+export type FuenteSellOut = "Calculado" | "Reportado_B2B";
 
 export interface Product {
   id: string;
@@ -106,6 +110,8 @@ export interface MercaderistaVisit {
   price_800: number | null;
   price_800_na: boolean;
   total_units_anaquel: number | null;
+  anaquel_400_units: number | null;
+  anaquel_800_units: number | null;
   front_faces: number | null;
   harina_trigo_faces: number | null;
   deposit_access: boolean;
@@ -174,6 +180,8 @@ export interface ParsedCarteraRow {
   centro_poblado: string;
   municipio: string;
   region: string;
+  asesor_encargado: string;
+  fuente_sell_out?: FuenteSellOut;
 }
 
 export interface CarteraParseResult {
@@ -202,6 +210,54 @@ export interface ParsedPendingOrderRow {
 
 export interface PendingOrdersParseResult {
   valid: ParsedPendingOrderRow[];
+  errors: ParseError[];
+}
+
+export interface SapDispatch {
+  id: string;
+  created_at: string;
+  upload_batch_id: string;
+  location_id: string;
+  variant_id: string | null;
+  quantity: number;
+  dispatch_date: string;
+  location?: Location;
+}
+
+export interface ParsedDispatchRow {
+  sap_code: string;
+  variant_sku?: string;
+  quantity: number;
+  dispatch_date: string;
+}
+
+export interface DispatchesParseResult {
+  valid: ParsedDispatchRow[];
+  errors: ParseError[];
+}
+
+export interface SellOutReportado {
+  id: string;
+  created_at: string;
+  upload_batch_id: string;
+  location_id: string;
+  variant_id: string | null;
+  fecha_inicio: string;
+  fecha_fin: string;
+  volumen: number;
+  location?: Location;
+}
+
+export interface ParsedSellOutReportadoRow {
+  sap_code: string;
+  variant_sku?: string;
+  fecha_inicio: string;
+  fecha_fin: string;
+  volumen: number;
+}
+
+export interface SellOutReportadoParseResult {
+  valid: ParsedSellOutReportadoRow[];
   errors: ParseError[];
 }
 

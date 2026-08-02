@@ -110,6 +110,8 @@ export function AuditWizard({ locations }: AuditWizardProps) {
 
   // Contar en anaquel
   const [totalUnitsAnaquel, setTotalUnitsAnaquel] = useState("");
+  const [anaquel400, setAnaquel400] = useState("");
+  const [anaquel800, setAnaquel800] = useState("");
   const [frontFaces, setFrontFaces] = useState("");
   const [harinaTrigoFaces, setHarinaTrigoFaces] = useState("");
 
@@ -210,14 +212,30 @@ export function AuditWizard({ locations }: AuditWizardProps) {
   const priceOrderError =
     !price400Na && !price800Na && Number(price400) > 0 && Number(price800) > 0 && toUsd(price400) > toUsd(price800);
 
+  // El desglose 400g/800g debe sumar exactamente el total ingresado — ver
+  // decisión #1 de la ronda de "Arreglos app Panquecitas": se mantiene la
+  // pregunta del total (documento anterior) y se agrega el desglose por
+  // presentación que necesita el motor de Sell-Out / Mix de Producto.
+  const anaquelSplitValid = useMemo(() => {
+    if (totalUnitsAnaquel === "" || anaquel400 === "" || anaquel800 === "") return false;
+    return Number(anaquel400) + Number(anaquel800) === Number(totalUnitsAnaquel);
+  }, [totalUnitsAnaquel, anaquel400, anaquel800]);
+
+  const anaquelSplitError =
+    totalUnitsAnaquel !== "" &&
+    anaquel400 !== "" &&
+    anaquel800 !== "" &&
+    Number(anaquel400) + Number(anaquel800) !== Number(totalUnitsAnaquel);
+
   const anaquelCountValid = useMemo(() => {
     if (totalUnitsAnaquel === "" || frontFaces === "") return false;
+    if (!anaquelSplitValid) return false;
     const total = Number(totalUnitsAnaquel);
     const faces = Number(frontFaces);
     if (total < faces) return false;
     if (faces <= 2 && harinaTrigoFaces === "") return false;
     return true;
-  }, [totalUnitsAnaquel, frontFaces, harinaTrigoFaces]);
+  }, [totalUnitsAnaquel, frontFaces, harinaTrigoFaces, anaquelSplitValid]);
 
   const anaquelCountOrderError =
     totalUnitsAnaquel !== "" && frontFaces !== "" && Number(totalUnitsAnaquel) < Number(frontFaces);
@@ -254,6 +272,8 @@ export function AuditWizard({ locations }: AuditWizardProps) {
     setPrice800("");
     setPrice800Na(false);
     setTotalUnitsAnaquel("");
+    setAnaquel400("");
+    setAnaquel800("");
     setFrontFaces("");
     setHarinaTrigoFaces("");
     setDepositAccess(null);
@@ -330,6 +350,8 @@ export function AuditWizard({ locations }: AuditWizardProps) {
           price_800: productPresent && !price800Na ? usd08 : null,
           price_800_na: productPresent ? price800Na : false,
           total_units_anaquel: productPresent ? Number(totalUnitsAnaquel) || 0 : null,
+          anaquel_400_units: productPresent ? Number(anaquel400) || 0 : null,
+          anaquel_800_units: productPresent ? Number(anaquel800) || 0 : null,
           front_faces: productPresent ? Number(frontFaces) || 0 : null,
           harina_trigo_faces: productPresent && Number(frontFaces) <= 2 ? Number(harinaTrigoFaces) || 0 : null,
           deposit_access: depositAccess,
@@ -586,6 +608,8 @@ export function AuditWizard({ locations }: AuditWizardProps) {
                       setPrice800("");
                       setPrice800Na(false);
                       setTotalUnitsAnaquel("");
+                      setAnaquel400("");
+                      setAnaquel800("");
                       setFrontFaces("");
                       setHarinaTrigoFaces("");
                     }
@@ -807,6 +831,39 @@ export function AuditWizard({ locations }: AuditWizardProps) {
                   +
                 </button>
               </div>
+            </div>
+
+            <div className="mb-8">
+              <p className="text-xs font-semibold text-slate-500 mb-3 uppercase tracking-wide text-center">
+                De esas, ¿cuántas son de cada presentación?
+              </p>
+              <div className="grid grid-cols-2 gap-3">
+                {(
+                  [
+                    { key: "400", label: "400g", value: anaquel400, setVal: setAnaquel400 },
+                    { key: "800", label: "800g", value: anaquel800, setVal: setAnaquel800 },
+                  ] as const
+                ).map((p) => (
+                  <div key={p.key} className="border-2 border-slate-200 rounded-2xl p-3">
+                    <p className="text-xs font-semibold text-slate-500 mb-2 text-center">Panquecitas {p.label}</p>
+                    <input
+                      type="text"
+                      inputMode="numeric"
+                      pattern="[0-9]*"
+                      value={p.value}
+                      placeholder="0"
+                      onChange={(e) => p.setVal(e.target.value.replace(/\D/g, ""))}
+                      className="w-full text-2xl font-bold text-center py-2 border-2 border-slate-200 rounded-xl bg-white text-slate-900 placeholder:text-slate-300 focus:outline-none focus:ring-2 focus:ring-panquecitas/30 focus:border-panquecitas"
+                    />
+                  </div>
+                ))}
+              </div>
+              {anaquelSplitError && (
+                <p className="text-xs text-rose-600 mt-2 text-center">
+                  ⚠️ 400g ({anaquel400 || 0}) + 800g ({anaquel800 || 0}) = {Number(anaquel400 || 0) + Number(anaquel800 || 0)}.
+                  Debe sumar el total de {totalUnitsAnaquel || 0}.
+                </p>
+              )}
             </div>
 
             <div className="mb-2">
@@ -1083,7 +1140,9 @@ export function AuditWizard({ locations }: AuditWizardProps) {
                 </div>
                 <div className="flex justify-between items-center py-3 border-b border-slate-100">
                   <span className="text-slate-500 text-sm">Total unidades en anaquel</span>
-                  <span className="font-semibold text-slate-900">{totalUnitsAnaquel || 0}</span>
+                  <span className="font-semibold text-slate-900">
+                    {totalUnitsAnaquel || 0} ({anaquel400 || 0} × 400g + {anaquel800 || 0} × 800g)
+                  </span>
                 </div>
                 <div className="flex justify-between items-center py-3 border-b border-slate-100">
                   <span className="text-slate-500 text-sm">Caras frontales</span>

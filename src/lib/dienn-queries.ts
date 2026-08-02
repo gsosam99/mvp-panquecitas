@@ -1,5 +1,5 @@
 import { createSupabaseServiceClient } from "@/lib/supabase/server";
-import { PRODUCT_IDS, VARIANT_IDS } from "@/data/catalog";
+import { PRODUCT_IDS } from "@/data/catalog";
 import {
   PILOT_SECTORS,
   SECTOR_LABELS,
@@ -148,65 +148,11 @@ export async function getRunningVentas(sector?: Sector): Promise<RunningVentasRe
   };
 }
 
-// ── 3. Mix de Producto ────────────────────────────────────────────
-// Ver decisión #7: se calcula desde el depósito (inventory_audits zona
-// BODEGA, última visita por PDV) porque el módulo de anaquel rediseñado
-// ya no distingue 400g/800g (ver decisión #6).
-
-export interface MixProductoPoint {
-  variant: "400g" | "800g";
-  kg: number;
-  pct: number;
-}
-
-export async function getMixProducto(sector?: Sector): Promise<MixProductoPoint[]> {
-  const supabase = createSupabaseServiceClient();
-  const ids = await getUniverseLocationIds(sector);
-
-  const { data: visitsData } = await supabase
-    .from("mercaderista_visits")
-    .select("id, location_id, created_at, deposit_access")
-    .order("created_at", { ascending: false });
-
-  const lastVisitByLocation = new Map<string, string>();
-  for (const v of (visitsData ?? []) as { id: string; location_id: string; deposit_access: boolean }[]) {
-    if (!lastVisitByLocation.has(v.location_id) && v.deposit_access && ids.has(v.location_id)) {
-      lastVisitByLocation.set(v.location_id, v.id);
-    }
-  }
-  const visitIds = Array.from(lastVisitByLocation.values());
-  if (visitIds.length === 0) return [];
-
-  const { data: auditsData } = await supabase
-    .from("inventory_audits")
-    .select("visit_id, variant_id, quantity, zone")
-    .eq("zone", "BODEGA")
-    .in("visit_id", visitIds);
-
-  const { data: variantsData } = await supabase.from("variants").select("id, presentation_kg, units_per_bulk");
-  const kgPerUnit = new Map(
-    ((variantsData ?? []) as { id: string; presentation_kg: number; units_per_bulk: number }[]).map((v) => [
-      v.id,
-      v.presentation_kg * v.units_per_bulk,
-    ])
-  );
-
-  let kg400 = 0;
-  let kg800 = 0;
-  for (const a of (auditsData ?? []) as { variant_id: string; quantity: number }[]) {
-    const kg = a.quantity * (kgPerUnit.get(a.variant_id) ?? 0);
-    if (a.variant_id === VARIANT_IDS.PANQ_04KG_BULTO || a.variant_id === VARIANT_IDS.PANQ_04KG_UNIDAD) kg400 += kg;
-    else if (a.variant_id === VARIANT_IDS.PANQ_08KG_BULTO || a.variant_id === VARIANT_IDS.PANQ_08KG_UNIDAD) kg800 += kg;
-  }
-
-  const total = kg400 + kg800;
-  if (total === 0) return [];
-
-  return [
-    { variant: "400g", kg: Math.round(kg400 * 10) / 10, pct: Math.round((kg400 / total) * 1000) / 10 },
-    { variant: "800g", kg: Math.round(kg800 * 10) / 10, pct: Math.round((kg800 / total) * 1000) / 10 },
-  ];
-}
+// ── 3. Mix de Producto: se movió a src/lib/sellout-queries.ts ─────
+// (aggregateMixProducto). Ya no se calcula desde el depósito: ahora es la
+// salida directa del motor de Sell-Out por presentación (toneladas
+// vendidas 400g vs 800g) — ver decisión #6/#1 de "Arreglos app
+// Panquecitas" en docs/decisiones-implementacion.md.
 
 // ── 4. Evolución de Penetración y Tasa de Recompra (semanal) ──────
 

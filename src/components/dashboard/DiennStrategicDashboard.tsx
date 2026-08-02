@@ -2,39 +2,40 @@ import {
   getConversionDegustaciones,
   getCoberturaComunicacionPorSector,
   getDetalleClientesPorSegmento,
-  getMixProducto,
   getPedidosPendientes,
   getPenetracionRecompraSemanal,
   getRunningVentas,
   getTotalToneladas,
 } from "@/lib/dienn-queries";
 import { getIndiceTiendaPerfecta } from "@/lib/admin-queries";
-import { SECTOR_LABELS, type Sector } from "@/lib/universe";
-
-const PILOT_SECTOR_KEYS: Sector[] = ["cumana", "barquisimeto_este"];
+import { computeSellOut } from "@/lib/sellout-queries";
+import { getAvailableZonasYAsesores } from "@/lib/sellout-utils";
+import { getUniverseLocations, SECTOR_LABELS, type Sector } from "@/lib/universe";
 import { DiennDashboardClient, type SectorBundle } from "@/components/dashboard/DiennDashboardClient";
 
-async function getBundle(sector?: Sector): Promise<SectorBundle> {
-  const [totalToneladas, runningVentas, mixProducto, penetracionRecompra, detalleSegmentos, pedidosPendientes] =
-    await Promise.all([
-      getTotalToneladas(sector),
-      getRunningVentas(sector),
-      getMixProducto(sector),
-      getPenetracionRecompraSemanal(sector),
-      getDetalleClientesPorSegmento(sector),
-      getPedidosPendientes(sector),
-    ]);
+const PILOT_SECTOR_KEYS: Sector[] = ["cumana", "barquisimeto_este"];
 
-  return { totalToneladas, runningVentas, mixProducto, penetracionRecompra, detalleSegmentos, pedidosPendientes };
+async function getBundle(sector?: Sector): Promise<SectorBundle> {
+  const [totalToneladas, runningVentas, penetracionRecompra, detalleSegmentos, pedidosPendientes] = await Promise.all([
+    getTotalToneladas(sector),
+    getRunningVentas(sector),
+    getPenetracionRecompraSemanal(sector),
+    getDetalleClientesPorSegmento(sector),
+    getPedidosPendientes(sector),
+  ]);
+
+  return { totalToneladas, runningVentas, penetracionRecompra, detalleSegmentos, pedidosPendientes };
 }
 
 // El objetivo de este dashboard es reactivo en el cliente (Tabs
-// TOTAL/sector) sin ida y vuelta al servidor por cada clic — ver "2.
-// FILTROS REACTIVOS DE SEGMENTO" en el documento DIENN — así que aquí se
-// precalculan los 3 posibles cortes (TOTAL + cada sector piloto) y se le
-// pasan completos al cliente, que solo decide cuál mostrar.
+// TOTAL/sector, y ahora también Zona/Asesor/Fuente para Sell-Out) sin ida
+// y vuelta al servidor por cada clic — ver "2. FILTROS REACTIVOS DE
+// SEGMENTO" en el documento DIENN — así que aquí se precalculan los 3
+// posibles cortes de sector (TOTAL + cada sector piloto) y el motor de
+// Sell-Out completo (sin filtrar), y se le pasan al cliente, que decide
+// qué mostrar sin volver a pedir datos.
 export async function DiennStrategicDashboard() {
-  const [total, cumana, barquisimetoEste, coberturaComunicacion, conversionDegustaciones, tiendaIdeal] =
+  const [total, cumana, barquisimetoEste, coberturaComunicacion, conversionDegustaciones, tiendaIdeal, sellOutRecords, universo] =
     await Promise.all([
       getBundle(undefined),
       getBundle("cumana"),
@@ -42,7 +43,11 @@ export async function DiennStrategicDashboard() {
       getCoberturaComunicacionPorSector(),
       getConversionDegustaciones(),
       getIndiceTiendaPerfecta(),
+      computeSellOut(),
+      getUniverseLocations(),
     ]);
+
+  const { zonas, asesores } = getAvailableZonasYAsesores(universo);
 
   return (
     <DiennDashboardClient
@@ -52,6 +57,9 @@ export async function DiennStrategicDashboard() {
       tiendaIdeal={tiendaIdeal}
       sectorLabels={SECTOR_LABELS}
       pilotSectors={PILOT_SECTOR_KEYS}
+      sellOutRecords={sellOutRecords}
+      zonas={zonas}
+      asesores={asesores}
     />
   );
 }

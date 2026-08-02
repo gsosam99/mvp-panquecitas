@@ -54,3 +54,18 @@ export const SAP_CATEGORY_MAP: Record<string, string> = {
   "Harina de Maíz": PRODUCT_IDS.HARINA_PAN,
   // "TAG_PANQUECITAS": PRODUCT_IDS.PANQUECITAS,  ← agregar cuando esté disponible
 };
+
+// Heurística para resolver el SKU/presentación de un despacho o Sell-Out
+// reportado (columna libre, formato SAP aún no confirmado) a un variant_id
+// de Panquecitas. Se usa la variante "UNIDAD" de cada presentación porque
+// despachos/facturas normalmente vienen en unidades, no en bultos — ajustar
+// si el reporte real trae otra unidad de medida. Retorna null si el SKU no
+// menciona la presentación (el despacho queda a nivel de producto, sin
+// desglose 400g/800g).
+export function resolveVariantFromSku(sku: string | null | undefined): string | null {
+  if (!sku) return null;
+  const normalized = sku.replace(/[.,]/g, "").toUpperCase();
+  if (normalized.includes("400")) return VARIANT_IDS.PANQ_04KG_UNIDAD;
+  if (normalized.includes("800")) return VARIANT_IDS.PANQ_08KG_UNIDAD;
+  return null;
+}

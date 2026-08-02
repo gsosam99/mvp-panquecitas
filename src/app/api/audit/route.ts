@@ -22,6 +22,8 @@ interface AuditPayload {
   price_800: number | null;
   price_800_na: boolean;
   total_units_anaquel: number | null;
+  anaquel_400_units: number | null;
+  anaquel_800_units: number | null;
   front_faces: number | null;
   harina_trigo_faces: number | null;
   deposit_access: boolean;
@@ -51,6 +53,8 @@ export async function POST(req: Request) {
       price_800,
       price_800_na,
       total_units_anaquel,
+      anaquel_400_units,
+      anaquel_800_units,
       front_faces,
       harina_trigo_faces,
       deposit_access,
@@ -82,16 +86,30 @@ export async function POST(req: Request) {
           { status: 400 }
         );
       }
+      if (
+        total_units_anaquel !== null &&
+        anaquel_400_units !== null &&
+        anaquel_800_units !== null &&
+        anaquel_400_units + anaquel_800_units !== total_units_anaquel
+      ) {
+        return Response.json(
+          { error: "El desglose 400g + 800g del anaquel debe sumar el total de unidades ingresado." },
+          { status: 400 }
+        );
+      }
     }
 
     const supabase = createSupabaseServiceClient();
 
     // 1. Crear la visita — nivel de visita: POP (mensaje/preciador/materiales),
     // presencia/ubicación de producto, precio por presentación, conteo en
-    // anaquel y acceso a depósito. Ver decisión #6 en
-    // docs/decisiones-implementacion.md: el conteo en anaquel ya no se
-    // desglosa por presentación (400g/800g) — es un total único — así que
-    // ya no se insertan filas ANAQUEL en inventory_audits.
+    // anaquel y acceso a depósito. El total en anaquel (pregunta del
+    // documento original) se mantiene, y se agrega el desglose 400g/800g
+    // (anaquel_400_units/anaquel_800_units) que necesita el motor de
+    // Sell-Out y el Mix de Producto — ver migración 005 y decisión #1 de
+    // "Arreglos app Panquecitas" en docs/decisiones-implementacion.md. El
+    // depósito sigue sin pasar por aquí: se inserta abajo en
+    // inventory_audits (zona BODEGA), que sí es por presentación.
     const { data: visitData, error: visitError } = await supabase
       .from("mercaderista_visits")
       .insert({
@@ -112,6 +130,8 @@ export async function POST(req: Request) {
         price_800: product_present ? price_800 : null,
         price_800_na: product_present ? price_800_na : false,
         total_units_anaquel: product_present ? total_units_anaquel : null,
+        anaquel_400_units: product_present ? anaquel_400_units : null,
+        anaquel_800_units: product_present ? anaquel_800_units : null,
         front_faces: product_present ? front_faces : null,
         harina_trigo_faces: product_present ? harina_trigo_faces : null,
         deposit_access,

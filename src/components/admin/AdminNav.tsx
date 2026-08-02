@@ -9,6 +9,8 @@ const NAV_ITEMS = [
   { href: '/dashboard', label: 'Dashboard' },
   { href: '/sap-upload', label: 'Carga SAP' },
   { href: '/pedidos-pendientes', label: 'Pedidos Pendientes' },
+  { href: '/despachos', label: 'Despachos SAP' },
+  { href: '/sell-out-cadenas', label: 'Sell-Out Cadenas' },
   { href: '/cartera', label: 'Cartera de Clientes' },
   { href: '/products', label: 'Productos' },
   { href: '/personal', label: 'Personal de Campo' },

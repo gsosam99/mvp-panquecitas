@@ -36,6 +36,8 @@ export async function POST(req: Request) {
       centro_poblado: row.centro_poblado || null,
       municipio: row.municipio || null,
       region: row.region || null,
+      asesor_encargado: row.asesor_encargado || null,
+      fuente_sell_out: row.fuente_sell_out ?? "Calculado",
     }));
 
     const { data: upserted, error } = await supabase

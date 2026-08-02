@@ -6,6 +6,10 @@ import type {
   CarteraParseResult,
   ParsedPendingOrderRow,
   PendingOrdersParseResult,
+  ParsedDispatchRow,
+  DispatchesParseResult,
+  ParsedSellOutReportadoRow,
+  SellOutReportadoParseResult,
 } from "@/types";
 
 const MONTH_ES: Record<string, string> = {
@@ -146,6 +150,8 @@ const CARTERA_HEADER_ALIASES: Record<keyof CarteraColumnMap, string[]> = {
   centro_poblado: ["centropoblado"],
   municipio: ["municipio"],
   region: ["territoriodeventas2", "territoriodeventas"],
+  asesor_encargado: ["asesorencargado", "asesor"],
+  fuente_sell_out: ["fuentesellout", "fuentedesellout"],
 };
 
 interface CarteraColumnMap {
@@ -156,6 +162,8 @@ interface CarteraColumnMap {
   centro_poblado: number;
   municipio: number;
   region: number;
+  asesor_encargado: number;
+  fuente_sell_out: number;
 }
 
 export async function parseCarteraExcel(buffer: ArrayBuffer): Promise<CarteraParseResult> {
@@ -231,6 +239,10 @@ export async function parseCarteraExcel(buffer: ArrayBuffer): Promise<CarteraPar
       .trim()
       .toUpperCase();
 
+    const fuenteRaw = String(col.fuente_sell_out ? row.getCell(col.fuente_sell_out).value ?? "" : "")
+      .trim()
+      .toUpperCase();
+
     valid.push({
       sap_code,
       name,
@@ -240,6 +252,8 @@ export async function parseCarteraExcel(buffer: ArrayBuffer): Promise<CarteraPar
       centro_poblado: String(col.centro_poblado ? row.getCell(col.centro_poblado).value ?? "" : "").trim(),
       municipio: String(col.municipio ? row.getCell(col.municipio).value ?? "" : "").trim(),
       region: String(col.region ? row.getCell(col.region).value ?? "" : "").trim(),
+      asesor_encargado: String(col.asesor_encargado ? row.getCell(col.asesor_encargado).value ?? "" : "").trim(),
+      fuente_sell_out: fuenteRaw.includes("B2B") || fuenteRaw.includes("REPORTADO") ? "Reportado_B2B" : undefined,
     });
   });
 
@@ -353,6 +367,213 @@ export async function parsePendingOrdersExcel(buffer: ArrayBuffer): Promise<Pend
 
   if (valid.length === 0 && errors.length === 0) {
     errors.push({ row: 0, field: "datos", message: "No se encontraron filas de pedidos pendientes." });
+  }
+
+  return { valid, errors };
+}
+
+// ════════════════════════════════════════════════════════════════
+// Despachos SAP con fecha real (para el motor de Sell-Out, corte D-1).
+// El reporte mensual agregado que usa "Carga SAP" no sirve para esto: no
+// trae fecha real por despacho. No se recibió un archivo de ejemplo de
+// este reporte tampoco, así que el parser es "best-effort" por nombre de
+// columna, igual que parsePendingOrdersExcel. Ver decisión #2 en
+// docs/decisiones-implementacion.md.
+// ════════════════════════════════════════════════════════════════
+
+const DISPATCH_ALIASES: Record<keyof DispatchColumnMap, string[]> = {
+  sap_code: ["ncliente", "nrocliente", "codigocliente", "codigosap", "cliente", "sapcode"],
+  variant_sku: ["sku", "presentacion", "variante", "producto", "codigoproducto"],
+  quantity: ["cantidad", "unidades", "cantidaddespachada", "qty", "cantidadfacturada"],
+  dispatch_date: ["fecha", "fechadespacho", "fechafactura", "fechadefacturacion", "fechadeldespacho"],
+};
+
+interface DispatchColumnMap {
+  sap_code: number;
+  variant_sku: number;
+  quantity: number;
+  dispatch_date: number;
+}
+
+export async function parseDispatchesExcel(buffer: ArrayBuffer): Promise<DispatchesParseResult> {
+  const ExcelJS = (await import("exceljs")).default;
+  const workbook = new ExcelJS.Workbook();
+  await workbook.xlsx.load(buffer);
+
+  const ws = workbook.worksheets[0];
+  if (!ws) {
+    return { valid: [], errors: [{ row: 0, field: "file", message: "El archivo no contiene hojas." }] };
+  }
+
+  let headerRowNum = -1;
+  let columns: Partial<DispatchColumnMap> = {};
+  for (let r = 1; r <= 10 && headerRowNum < 0; r++) {
+    const row = ws.getRow(r);
+    const found: Partial<DispatchColumnMap> = {};
+    row.eachCell({ includeEmpty: false }, (cell, col) => {
+      const norm = normalizeHeader(String(cell.value ?? ""));
+      for (const [field, aliases] of Object.entries(DISPATCH_ALIASES) as [keyof DispatchColumnMap, string[]][]) {
+        if (field in found) continue;
+        if (aliases.includes(norm)) found[field] = col;
+      }
+    });
+    if (found.sap_code && found.quantity && found.dispatch_date) {
+      headerRowNum = r;
+      columns = found;
+    }
+  }
+
+  if (headerRowNum < 0 || !columns.sap_code || !columns.quantity || !columns.dispatch_date) {
+    return {
+      valid: [],
+      errors: [
+        {
+          row: 0,
+          field: "formato",
+          message:
+            'No se encontraron las columnas esperadas ("Nº cliente", "Cantidad", "Fecha"). El formato del reporte de despachos aún no está confirmado — ajusta parseDispatchesExcel en src/lib/excel-parser.ts cuando tengas un archivo real.',
+        },
+      ],
+    };
+  }
+
+  const valid: ParsedDispatchRow[] = [];
+  const errors: ParseError[] = [];
+  const col = columns as DispatchColumnMap;
+
+  ws.eachRow((row, rowNum) => {
+    if (rowNum <= headerRowNum) return;
+
+    const rawCode = row.getCell(col.sap_code).value;
+    if (rawCode === null || rawCode === undefined) return;
+    const sap_code = String(rawCode).trim();
+    if (!sap_code) return;
+
+    const rawQty = row.getCell(col.quantity).value;
+    const quantity = Number(rawQty);
+    if (!isFinite(quantity) || quantity < 0) {
+      errors.push({ row: rowNum, field: "cantidad", message: "Cantidad inválida." });
+      return;
+    }
+
+    const dispatch_date = parseDateCell(row.getCell(col.dispatch_date).value);
+    if (!dispatch_date) {
+      errors.push({ row: rowNum, field: "fecha", message: "Fecha de despacho inválida o vacía." });
+      return;
+    }
+
+    const variant_sku = col.variant_sku ? String(row.getCell(col.variant_sku).value ?? "").trim() : "";
+
+    valid.push({ sap_code, variant_sku: variant_sku || undefined, quantity, dispatch_date });
+  });
+
+  if (valid.length === 0 && errors.length === 0) {
+    errors.push({ row: 0, field: "datos", message: "No se encontraron filas de despachos." });
+  }
+
+  return { valid, errors };
+}
+
+// ════════════════════════════════════════════════════════════════
+// Sell-Out reportado por Cadenas (Key Accounts) — layout conocido, a
+// diferencia de despachos/pedidos pendientes: Nº cliente, Fecha Inicio,
+// Fecha Fin, Volumen/Unidades, SKU (opcional).
+// ════════════════════════════════════════════════════════════════
+
+const SELL_OUT_REPORTADO_ALIASES: Record<keyof SellOutReportadoColumnMap, string[]> = {
+  sap_code: ["ncliente", "nrocliente", "codigocliente", "codigosap", "cliente", "sapcode"],
+  fecha_inicio: ["fechainicio", "fechadeinicio", "inicio"],
+  fecha_fin: ["fechafin", "fechadefin", "fin"],
+  volumen: ["volumen", "unidades", "volumenunidadessellout", "sellout", "volumensellout"],
+  variant_sku: ["sku", "presentacion", "variante", "producto", "codigoproducto"],
+};
+
+interface SellOutReportadoColumnMap {
+  sap_code: number;
+  fecha_inicio: number;
+  fecha_fin: number;
+  volumen: number;
+  variant_sku: number;
+}
+
+export async function parseSellOutReportadoExcel(buffer: ArrayBuffer): Promise<SellOutReportadoParseResult> {
+  const ExcelJS = (await import("exceljs")).default;
+  const workbook = new ExcelJS.Workbook();
+  await workbook.xlsx.load(buffer);
+
+  const ws = workbook.worksheets[0];
+  if (!ws) {
+    return { valid: [], errors: [{ row: 0, field: "file", message: "El archivo no contiene hojas." }] };
+  }
+
+  let headerRowNum = -1;
+  let columns: Partial<SellOutReportadoColumnMap> = {};
+  for (let r = 1; r <= 10 && headerRowNum < 0; r++) {
+    const row = ws.getRow(r);
+    const found: Partial<SellOutReportadoColumnMap> = {};
+    row.eachCell({ includeEmpty: false }, (cell, col) => {
+      const norm = normalizeHeader(String(cell.value ?? ""));
+      for (const [field, aliases] of Object.entries(SELL_OUT_REPORTADO_ALIASES) as [
+        keyof SellOutReportadoColumnMap,
+        string[],
+      ][]) {
+        if (field in found) continue;
+        if (aliases.includes(norm)) found[field] = col;
+      }
+    });
+    if (found.sap_code && found.fecha_inicio && found.fecha_fin && found.volumen) {
+      headerRowNum = r;
+      columns = found;
+    }
+  }
+
+  if (headerRowNum < 0 || !columns.sap_code || !columns.fecha_inicio || !columns.fecha_fin || !columns.volumen) {
+    return {
+      valid: [],
+      errors: [
+        {
+          row: 0,
+          field: "formato",
+          message:
+            'No se encontraron las columnas esperadas ("Nº cliente", "Fecha Inicio", "Fecha Fin", "Volumen/Unidades").',
+        },
+      ],
+    };
+  }
+
+  const valid: ParsedSellOutReportadoRow[] = [];
+  const errors: ParseError[] = [];
+  const col = columns as SellOutReportadoColumnMap;
+
+  ws.eachRow((row, rowNum) => {
+    if (rowNum <= headerRowNum) return;
+
+    const rawCode = row.getCell(col.sap_code).value;
+    if (rawCode === null || rawCode === undefined) return;
+    const sap_code = String(rawCode).trim();
+    if (!sap_code) return;
+
+    const fecha_inicio = parseDateCell(row.getCell(col.fecha_inicio).value);
+    const fecha_fin = parseDateCell(row.getCell(col.fecha_fin).value);
+    if (!fecha_inicio || !fecha_fin) {
+      errors.push({ row: rowNum, field: "fechas", message: "Fecha Inicio/Fin inválida o vacía." });
+      return;
+    }
+
+    const rawVol = row.getCell(col.volumen).value;
+    const volumen = Number(rawVol);
+    if (!isFinite(volumen) || volumen < 0) {
+      errors.push({ row: rowNum, field: "volumen", message: "Volumen/Unidades inválido." });
+      return;
+    }
+
+    const variant_sku = col.variant_sku ? String(row.getCell(col.variant_sku).value ?? "").trim() : "";
+
+    valid.push({ sap_code, variant_sku: variant_sku || undefined, fecha_inicio, fecha_fin, volumen });
+  });
+
+  if (valid.length === 0 && errors.length === 0) {
+    errors.push({ row: 0, field: "datos", message: "No se encontraron filas de Sell-Out reportado." });
   }
 
   return { valid, errors };
