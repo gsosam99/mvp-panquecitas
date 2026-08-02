@@ -16,7 +16,7 @@ import { Alert, AlertDescription } from "@/components/ui/alert";
 import type { CarteraParseResult, ParsedCarteraRow } from "@/types";
 
 interface CarteraDropzoneProps {
-  onCommitSuccess: (count: number) => void;
+  onCommitSuccess: (count: number, sinSector: number) => void;
 }
 
 type UploadState = "idle" | "parsing" | "previewing" | "uploading" | "done";
@@ -67,15 +67,21 @@ export function CarteraDropzone({ onCommitSuccess }: CarteraDropzoneProps) {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ rows: parseResult.valid }),
       });
-      const data = (await res.json()) as { locations_upserted?: number; error?: string };
+      const data = (await res.json()) as { locations_upserted?: number; sin_sector?: number; error?: string };
       if (!res.ok) {
         toast.error(data.error ?? "Error al guardar");
         setState("previewing");
         return;
       }
       setState("done");
-      onCommitSuccess(data.locations_upserted ?? 0);
-      toast.success(`${data.locations_upserted} localidades actualizadas`);
+      onCommitSuccess(data.locations_upserted ?? 0, data.sin_sector ?? 0);
+      if (data.sin_sector) {
+        toast.warning(
+          `${data.locations_upserted} localidades actualizadas · ${data.sin_sector} sin sector reconocido (no aparecerán en campo/DIENN hasta corregir "Oficina de Ventas")`
+        );
+      } else {
+        toast.success(`${data.locations_upserted} localidades actualizadas`);
+      }
     } catch {
       toast.error("Error de conexión. Intenta de nuevo.");
       setState("previewing");

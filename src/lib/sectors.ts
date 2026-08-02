@@ -8,16 +8,32 @@ export const BARQUISIMETO_ESTE_SECTOR = "Barquisimeto Este" as const;
 
 export const PILOT_SECTORS = [CUMANA_SECTOR, BARQUISIMETO_ESTE_SECTOR] as const;
 
-const CUMANA_SECTOR_UPPER = "CUMANA"; // sin tilde: así llega en la cartera
-const BARQUISIMETO_ESTE_SECTOR_UPPER = "BARQUISIMETO ESTE";
-
 export type Sector = "cumana" | "barquisimeto_este";
+
+// Rango Unicode de marcas diacríticas combinantes (para quitar tildes tras
+// normalize("NFD")) — mismo enfoque que normalizeHeader() en excel-parser.ts.
+const DIACRITICS_RE = new RegExp(
+  `[${String.fromCharCode(0x0300)}-${String.fromCharCode(0x036f)}]`,
+  "g"
+);
+
+function foldSector(value: string): string {
+  return value.trim().toUpperCase().normalize("NFD").replace(DIACRITICS_RE, "");
+}
+
+// Comparación sin tildes ni espacios: la cartera trae "CUMANA" (sin tilde),
+// pero el roster de personal (field_workers, cargado a mano desde Admin) o
+// cargas futuras pueden traer "Cumaná"/"CUMANÁ" — deben resolver al mismo
+// sector. Bug real detectado: con comparación exacta, un trabajador con
+// oficina_venta="Cumaná" nunca hacía match contra "CUMANA" y no veía PDVs.
+const CUMANA_SECTOR_FOLDED = foldSector("CUMANA");
+const BARQUISIMETO_ESTE_SECTOR_FOLDED = foldSector("BARQUISIMETO ESTE");
 
 export function sectorGroup(oficinaVenta: string | null | undefined): Sector | null {
   if (!oficinaVenta) return null;
-  const upper = oficinaVenta.trim().toUpperCase();
-  if (upper === CUMANA_SECTOR_UPPER) return "cumana";
-  if (upper === BARQUISIMETO_ESTE_SECTOR_UPPER) return "barquisimeto_este";
+  const folded = foldSector(oficinaVenta);
+  if (folded === CUMANA_SECTOR_FOLDED) return "cumana";
+  if (folded === BARQUISIMETO_ESTE_SECTOR_FOLDED) return "barquisimeto_este";
   return null;
 }
 

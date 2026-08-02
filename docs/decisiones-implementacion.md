@@ -7,19 +7,7 @@ equipo lo revise y confirme/corrija donde haga falta — varios puntos no tenía
 fuente de datos exacta en el documento original, así que se tomó la interpretación más razonable
 y se documenta aquí explícitamente.
 
-## Paso manual pendiente (antes de usar la app)
 
-La migración de base de datos **no se aplicó automáticamente** — el proyecto ya tenía esta
-convención desde antes (ver `supabase/migrations/002_indicadores.sql`), porque este entorno no
-tiene acceso de administración a ese proyecto Supabase. Hay que correr manualmente en el SQL
-Editor de Supabase:
-
-```
-supabase/migrations/003_sectores_roster_pop.sql
-```
-
-Sin esto, el login por cédula, la cartera de clientes, el wizard nuevo de Mercaderista y los
-pedidos pendientes no van a funcionar (las columnas/tablas nuevas no existen todavía).
 
 ## Cartera de clientes: no se importó el archivo pegado en el chat
 

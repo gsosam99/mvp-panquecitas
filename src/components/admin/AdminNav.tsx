@@ -10,7 +10,6 @@ const NAV_ITEMS = [
   { href: '/sap-upload', label: 'Carga SAP' },
   { href: '/pedidos-pendientes', label: 'Pedidos Pendientes' },
   { href: '/cartera', label: 'Cartera de Clientes' },
-  { href: '/locations', label: 'Localidades' },
   { href: '/products', label: 'Productos' },
   { href: '/personal', label: 'Personal de Campo' },
 ];

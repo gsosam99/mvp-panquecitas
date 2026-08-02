@@ -1,5 +1,6 @@
 import { createSupabaseServiceClient } from "@/lib/supabase/server";
 import { hasDashboardSession } from "@/lib/session";
+import { sectorGroup } from "@/lib/sectors";
 import type { ParsedCarteraRow } from "@/types";
 
 // Carga/actualización de la cartera de clientes: agrega/actualiza
@@ -44,7 +45,14 @@ export async function POST(req: Request) {
 
     if (error) throw error;
 
-    return Response.json({ locations_upserted: (upserted ?? []).length });
+    // Diagnóstico: cuántas de las filas subidas no calzan con ningún sector
+    // conocido (Cumaná / Barquisimeto Este) — si esto es alto, el filtro de
+    // campo/DIENN por sector no va a encontrar esos PDV aunque la carga en
+    // sí haya sido exitosa. Ver bug reportado: "dice que la carga fue
+    // exitosa pero los perfiles de campo no ven la lista".
+    const sinSector = locationsToUpsert.filter((l) => sectorGroup(l.oficina_venta) === null).length;
+
+    return Response.json({ locations_upserted: (upserted ?? []).length, sin_sector: sinSector });
   } catch (error) {
     console.error("[POST /api/cartera-upload]", error);
     return Response.json({ error: "Error interno del servidor" }, { status: 500 });

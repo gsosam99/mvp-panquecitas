@@ -7,14 +7,15 @@ import { Badge } from "@/components/ui/badge";
 
 interface UploadRecord {
   count: number;
+  sinSector: number;
   timestamp: Date;
 }
 
 export function CarteraUploadClient() {
   const [history, setHistory] = useState<UploadRecord[]>([]);
 
-  function handleCommitSuccess(count: number) {
-    setHistory((prev) => [{ count, timestamp: new Date() }, ...prev]);
+  function handleCommitSuccess(count: number, sinSector: number) {
+    setHistory((prev) => [{ count, sinSector, timestamp: new Date() }, ...prev]);
   }
 
   return (
@@ -41,11 +42,18 @@ export function CarteraUploadClient() {
             ) : (
               <ul className="space-y-3">
                 {history.map((rec, i) => (
-                  <li key={i} className="flex items-center justify-between gap-2">
-                    <p className="text-sm font-medium text-slate-700">
-                      {rec.timestamp.toLocaleTimeString("es-VE", { hour: "2-digit", minute: "2-digit" })}
-                    </p>
-                    <Badge>{rec.count} loc.</Badge>
+                  <li key={i}>
+                    <div className="flex items-center justify-between gap-2">
+                      <p className="text-sm font-medium text-slate-700">
+                        {rec.timestamp.toLocaleTimeString("es-VE", { hour: "2-digit", minute: "2-digit" })}
+                      </p>
+                      <Badge>{rec.count} loc.</Badge>
+                    </div>
+                    {rec.sinSector > 0 && (
+                      <p className="text-xs text-amber-600 mt-1">
+                        {rec.sinSector} sin sector reconocido — revisa la columna &quot;Oficina de Ventas&quot;.
+                      </p>
+                    )}
                   </li>
                 ))}
               </ul>
