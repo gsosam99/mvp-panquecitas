@@ -146,10 +146,20 @@ const CARTERA_HEADER_ALIASES: Record<keyof CarteraColumnMap, string[]> = {
   sap_code: ["ncliente", "nrocliente", "codigocliente", "codigosap", "sapcode"],
   name: ["nombre", "nombrecliente", "razonsocial"],
   tipo_cliente: ["tipodecliente"],
-  oficina_venta: ["oficinadeventas", "oficinadeventa", "oficventas"],
+  // OJO: NO agregar "oficventas" aquí — es la forma normalizada de "Ofic
+  // Ventas" (columna de CÓDIGO, ej. "N007"), una columna distinta de
+  // "Oficina de ventas" (el NOMBRE del sector, ej. "CUMANA"). Como "Ofic
+  // Ventas" aparece antes en el archivo y el matching es "primera columna
+  // que calza gana", agregar ese alias hacía que se guardara el código en
+  // vez del nombre — y sectorGroup() nunca reconocía ningún PDV. Bug real
+  // visto en producción: 358/358 filas "sin sector reconocido".
+  oficina_venta: ["oficinadeventas", "oficinadeventa"],
   centro_poblado: ["centropoblado"],
   municipio: ["municipio"],
-  region: ["territoriodeventas2", "territoriodeventas"],
+  // Igual razón: "Territorio de ventas" es el CÓDIGO (ej. "T12") y
+  // aparece antes que "Territorio de ventas2", que es el nombre
+  // descriptivo (ej. "Oriente Norte") que sí queremos en `region`.
+  region: ["territoriodeventas2"],
   asesor_encargado: ["asesorencargado", "asesor"],
   fuente_sell_out: ["fuentesellout", "fuentedesellout"],
 };
