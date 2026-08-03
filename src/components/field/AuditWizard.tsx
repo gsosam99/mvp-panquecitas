@@ -380,7 +380,7 @@ export function AuditWizard({ locations }: AuditWizardProps) {
       <div className="flex flex-col items-center justify-center flex-1 px-6 text-center py-12">
         <div className="text-6xl mb-4">✅</div>
         <h2 className="text-xl font-bold text-slate-900 mb-1">¡Visita completa!</h2>
-        <p className="text-slate-500 mb-8">{location?.name}</p>
+        <p className="text-slate-500 mb-8">{location?.sap_code}</p>
         <div className="w-full max-w-xs space-y-3">
           <Button onClick={handleReset} size="lg" className="w-full">
             Iniciar nueva visita
@@ -409,9 +409,7 @@ export function AuditWizard({ locations }: AuditWizardProps) {
               Paso {stepIndex + 1} de {steps.length} · {STEP_LABELS[step]}
             </p>
             {location && (
-              <p className="text-sm text-slate-600 truncate">
-                {location.sap_code} — {location.name}
-              </p>
+              <p className="text-sm text-slate-600 truncate">{location.sap_code}</p>
             )}
           </div>
         </div>
@@ -1075,9 +1073,7 @@ export function AuditWizard({ locations }: AuditWizardProps) {
 
             <div className="flex justify-between items-center py-3 border-b border-slate-100">
               <span className="text-slate-500 text-sm">Local</span>
-              <span className="font-semibold text-slate-900 text-right">
-                {location?.sap_code} — {location?.name}
-              </span>
+              <span className="font-semibold text-slate-900 text-right">{location?.sap_code}</span>
             </div>
             <div className="flex justify-between items-center py-3 border-b border-slate-100">
               <span className="text-slate-500 text-sm">Material POP</span>

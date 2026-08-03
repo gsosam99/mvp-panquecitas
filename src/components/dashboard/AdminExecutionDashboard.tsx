@@ -55,7 +55,7 @@ export async function AdminExecutionDashboard({ demoMode = false }: { demoMode?:
 
       <DemoModeToggle demoMode={demoMode} />
 
-      {/* ── KPI Cards (resumen de los 3 bloques) ─────────────────────────── */}
+      {/* ── KPI Cards (resumen de los bloques) ───────────────────────────── */}
       <div className="grid grid-cols-2 md:grid-cols-4 gap-4 mb-6">
         <KpiCard
           title="Índice Tienda Perfecta"
@@ -167,7 +167,7 @@ export async function AdminExecutionDashboard({ demoMode = false }: { demoMode?:
       <h2 className="text-lg font-bold text-slate-900 mb-1">Bloque 2 · % Cobertura Mercaderista</h2>
       <p className="text-sm text-slate-400 mb-4">PDVs compradores que faltan por visitar.</p>
 
-      <Card className="mb-8">
+      <Card>
         <CardHeader>
           <CardTitle>Falta por visitar</CardTitle>
         </CardHeader>
@@ -175,32 +175,6 @@ export async function AdminExecutionDashboard({ demoMode = false }: { demoMode?:
           <IndicatorTable
             rows={cobertura.faltantes.map((l) => toRow(l))}
             emptyMessage="Todos los PDVs compradores han sido visitados."
-          />
-        </CardContent>
-      </Card>
-
-      <Separator className="mb-6" />
-
-      {/* ══════════════════ BLOQUE 3: PRECIO DE VENTA ══════════════════ */}
-      <h2 className="text-lg font-bold text-slate-900 mb-1">Bloque 3 · Precio de Venta</h2>
-      <p className="text-sm text-slate-400 mb-4">
-        Clientes cuyo precio de venta es diferente al indicado por sector.
-      </p>
-
-      <Card>
-        <CardContent className="pt-6">
-          <IndicatorTable
-            rows={desviacionPvp.map((r) =>
-              toRow(
-                r.location,
-                <div className="flex gap-1.5">
-                  <Badge variant={r.deviated04 ? "destructive" : "outline"}>400g: ${r.price04?.toFixed(2) ?? "s/d"}</Badge>
-                  <Badge variant={r.deviated08 ? "destructive" : "outline"}>800g: ${r.price08?.toFixed(2) ?? "s/d"}</Badge>
-                </div>
-              )
-            )}
-            extraLabel="Precios"
-            emptyMessage="Todos los precios coinciden con el objetivo de su sector."
           />
         </CardContent>
       </Card>

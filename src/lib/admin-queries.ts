@@ -6,9 +6,9 @@ import type { Location } from "@/types";
 
 // ────────────────────────────────────────────────────────────────
 // Perfil Administrador — Auditoría, Control de Ejecución en PDV.
-// Reestructurado en 3 bloques (Ejecución / Cobertura Mercaderista /
-// Precio de Venta) — ver "Cambios en app Panquecitas - Versión Ale (2)"
-// y docs/decisiones-implementacion.md (decisiones #3, #5, #6, #8, #9,
+// Reestructurado en 2 bloques (Ejecución — que ya incluye la desviación
+// de PVP — y Cobertura Mercaderista) — ver "Cambios en app Panquecitas -
+// Versión Ale (2)" y docs/decisiones-implementacion.md (decisiones #3, #5, #6, #8, #9,
 // #10). Ninguna de estas queries toca sap_sell_in_records más allá de
 // identificar "PDVs compradores" (nunca expone $ ni kg/bultos de
 // Sell-in al perfil Administrador).
@@ -224,7 +224,7 @@ export async function getCarasFrontalesBajas(demoMode = false): Promise<CarasFro
   return rows;
 }
 
-// ── Bloque 1.i / Bloque 3: Desviación PVP 400g/800g ───────────────
+// ── Bloque 1.i: Desviación PVP 400g/800g ──────────────────────────
 
 export interface PvpDeviationRow {
   location: Location;

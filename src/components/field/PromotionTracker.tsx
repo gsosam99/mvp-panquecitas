@@ -144,7 +144,7 @@ export function PromotionTracker({ locations }: PromotionTrackerProps) {
       <div className="flex flex-col items-center justify-center min-h-screen bg-white px-6 text-center">
         <div className="text-6xl mb-4">🎉</div>
         <h2 className="text-xl font-bold text-slate-900 mb-1">¡Reporte enviado!</h2>
-        <p className="text-slate-500 mb-1">{selectedLocation?.name}</p>
+        <p className="text-slate-500 mb-1">{selectedLocation?.sap_code}</p>
         <p className="text-2xl font-bold text-slate-900 mb-1">
           {entregados} tickets entregados · {recibidos} recibidos
         </p>
@@ -182,7 +182,7 @@ export function PromotionTracker({ locations }: PromotionTrackerProps) {
         <div className="flex items-center justify-between">
           <button onClick={handleReset} className="text-slate-400 text-lg">←</button>
           <div className="text-center">
-            <p className="font-semibold text-slate-900 text-sm truncate max-w-[200px]">{selectedLocation?.name}</p>
+            <p className="font-semibold text-slate-900 text-sm truncate max-w-[200px]">{selectedLocation?.sap_code}</p>
             <p className="text-xs text-slate-400">{today}</p>
           </div>
           <div className="w-6" />

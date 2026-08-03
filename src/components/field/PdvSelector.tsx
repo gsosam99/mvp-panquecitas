@@ -30,7 +30,7 @@ export function PdvSelector({ locations, title, onSelect }: PdvSelectorProps) {
 
       <input
         type="search"
-        placeholder="Buscar por nombre o código…"
+        placeholder="Buscar por código…"
         value={query}
         onChange={(e) => setQuery(e.target.value)}
         className="w-full mb-4 px-4 py-3 border border-slate-300 rounded-xl bg-white text-slate-900 placeholder:text-slate-400 focus:outline-none focus:ring-2 focus:ring-slate-200"
@@ -43,9 +43,7 @@ export function PdvSelector({ locations, title, onSelect }: PdvSelectorProps) {
             onClick={() => onSelect(loc)}
             className="w-full text-left p-4 border border-slate-200 rounded-xl hover:border-panquecitas hover:bg-slate-50 transition-colors"
           >
-            <p className="font-semibold text-slate-900">
-              <span className="text-panquecitas">{loc.sap_code}</span> — {loc.name}
-            </p>
+            <p className="font-semibold text-panquecitas">{loc.sap_code}</p>
             <p className="text-sm text-slate-400">
               {loc.centro_poblado}
               {loc.tipo_cliente ? ` · ${loc.tipo_cliente}` : ""}
