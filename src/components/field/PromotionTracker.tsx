@@ -72,21 +72,23 @@ function Counter({ label, sublabel, emoji, value, max, onChange }: CounterProps)
 export function PromotionTracker({ locations }: PromotionTrackerProps) {
   const [view, setView] = useState<View>("location");
   const [selectedLocation, setSelectedLocation] = useState<Location | null>(null);
-  const [entregados, setEntregados] = useState(0);
   const [recibidos, setRecibidos] = useState(0);
   const [intactos, setIntactos] = useState(0);
   const [submitting, setSubmitting] = useState(false);
 
   const today = new Date().toISOString().split("T")[0];
 
-  const balance = entregados + intactos;
-  const balanceOk = balance === TICKETS_PER_ROLL;
-  const conversionOk = recibidos <= entregados;
-  const canSubmit = balanceOk && conversionOk;
+  // Los tickets entregados ya no se cuentan a mano: se deducen del rollo.
+  // Todo lo que no sobró al final del día, se entregó.
+  const entregados = TICKETS_PER_ROLL - intactos;
+  const conversionRate = entregados > 0 ? Math.round((recibidos / entregados) * 100) : 0;
+
+  const superaRollo = recibidos > TICKETS_PER_ROLL;
+  const superaEntregados = recibidos > entregados;
+  const canSubmit = !superaRollo && !superaEntregados;
 
   function handleSelectLocation(loc: Location) {
     setSelectedLocation(loc);
-    setEntregados(0);
     setRecibidos(0);
     setIntactos(0);
     setView("counters");
@@ -94,7 +96,6 @@ export function PromotionTracker({ locations }: PromotionTrackerProps) {
 
   function handleReset() {
     setSelectedLocation(null);
-    setEntregados(0);
     setRecibidos(0);
     setIntactos(0);
     setView("location");
@@ -113,10 +114,11 @@ export function PromotionTracker({ locations }: PromotionTrackerProps) {
       const res = await fetch("/api/promotions", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
+        // tickets_entregados no se envía: lo deriva el servidor a partir de
+        // los sobrantes, para que haya una sola fuente de verdad.
         body: JSON.stringify({
           location_id: selectedLocation.id,
           report_date: today,
-          tickets_entregados: entregados,
           tickets_recibidos: recibidos,
           tickets_intactos: intactos,
         }),
@@ -139,7 +141,6 @@ export function PromotionTracker({ locations }: PromotionTrackerProps) {
   }
 
   if (view === "done") {
-    const rate = entregados > 0 ? Math.round((recibidos / entregados) * 100) : 0;
     return (
       <div className="flex flex-col items-center justify-center min-h-screen bg-white px-6 text-center">
         <div className="text-6xl mb-4">🎉</div>
@@ -148,7 +149,7 @@ export function PromotionTracker({ locations }: PromotionTrackerProps) {
         <p className="text-2xl font-bold text-slate-900 mb-1">
           {entregados} tickets entregados · {recibidos} recibidos
         </p>
-        <p className="text-slate-400 mb-8">{rate}% de conversión</p>
+        <p className="text-slate-400 mb-8">{conversionRate}% de conversión</p>
         <div className="w-full max-w-xs space-y-3">
           <Button onClick={handleReset} size="lg" className="w-full">
             Nuevo reporte
@@ -174,8 +175,6 @@ export function PromotionTracker({ locations }: PromotionTrackerProps) {
   }
 
   // view === "counters"
-  const conversionRate = entregados > 0 ? Math.round((recibidos / entregados) * 100) : 0;
-
   return (
     <div className="min-h-screen bg-white flex flex-col">
       <div className="px-4 pt-4 pb-3 border-b border-slate-100">
@@ -192,62 +191,57 @@ export function PromotionTracker({ locations }: PromotionTrackerProps) {
       <div className="px-4 pt-4">
         <div className="bg-slate-50 border border-slate-100 rounded-xl px-4 py-3 text-xs text-slate-500 leading-relaxed">
           Cada muestra se entrega con un <span className="font-semibold text-slate-700">ticket</span>. Si la
-          persona compra el producto, te trae el ticket de vuelta para canjear un regalo. Al final del día,
-          cuenta cuántos tickets entregaste, cuántos te devolvieron y cuántos te quedaron sin entregar del
-          rollo de {TICKETS_PER_ROLL}.
+          persona compra el producto, te trae el ticket de vuelta para canjear un regalo. Al final del día
+          solo cuenta dos cosas: cuántos tickets te devolvieron y cuántos te quedaron sin entregar del rollo
+          de {TICKETS_PER_ROLL}. Los entregados se calculan solos.
         </div>
       </div>
 
       <div className="flex-1 flex flex-col items-center justify-center px-6 gap-10 py-8">
         <Counter
-          label="Tickets Entregados"
-          sublabel="A consumidores en la degustación"
-          emoji="🎟️"
-          value={entregados}
-          max={TICKETS_PER_ROLL}
-          onChange={setEntregados}
-        />
-
-        <div className="w-full border-t border-slate-100" />
-
-        <Counter
-          label="Tickets Recibidos"
-          sublabel="Regalos canjeados (no pueden superar los entregados)"
+          label="Tickets recibidos"
+          sublabel="Regalos canjeados"
           emoji="🎁"
           value={recibidos}
-          max={entregados}
+          max={TICKETS_PER_ROLL}
           onChange={setRecibidos}
         />
 
         <div className="w-full border-t border-slate-100" />
 
         <Counter
-          label="Tickets Intactos"
-          sublabel="Sobrantes al final del día"
+          label="Tickets sobrantes al final del día"
+          sublabel="Los que quedaron intactos en el rollo"
           emoji="📦"
           value={intactos}
           max={TICKETS_PER_ROLL}
           onChange={setIntactos}
         />
 
-        {entregados > 0 && (
-          <div className="text-center">
+        <div className="w-full border-t border-slate-100" />
+
+        <div className="flex w-full max-w-xs justify-around text-center">
+          <div>
+            <p className="text-3xl font-bold text-slate-900">{entregados}</p>
+            <p className="text-sm text-slate-400">Tickets entregados</p>
+          </div>
+          <div>
             <p className="text-3xl font-bold text-slate-900">{conversionRate}%</p>
             <p className="text-sm text-slate-400">Tasa de conversión</p>
           </div>
-        )}
+        </div>
       </div>
 
       <div className="px-4 pb-safe-bottom pb-6 pt-4 border-t border-slate-100">
-        {!balanceOk && (
+        {superaRollo && (
           <p className="text-xs text-rose-600 text-center mb-2">
-            ⚠️ Error de inventario: entregados ({entregados}) + intactos ({intactos}) = {balance}. Debe dar
-            exactamente {TICKETS_PER_ROLL}.
+            ⚠️ Error de conversión: Los tickets recibidos por compra no pueden superar {TICKETS_PER_ROLL}.
           </p>
         )}
-        {balanceOk && !conversionOk && (
+        {!superaRollo && superaEntregados && (
           <p className="text-xs text-rose-600 text-center mb-2">
-            ⚠️ Error de conversión: los tickets recibidos no pueden superar a los entregados.
+            ⚠️ Error de conversión: recibiste {recibidos} tickets pero solo entregaste {entregados} (
+            {TICKETS_PER_ROLL} − {intactos} sobrantes). Revisa los sobrantes.
           </p>
         )}
         <Button className="w-full h-14 text-base" onClick={handleSubmit} disabled={submitting || !canSubmit}>

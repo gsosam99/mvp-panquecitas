@@ -9,6 +9,7 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table";
+import { ExportExcelButton } from "@/components/dashboard/ExportExcelButton";
 
 export interface IndicatorTableRow {
   id: string;
@@ -16,16 +17,21 @@ export interface IndicatorTableRow {
   name: string;
   sector: string | null;
   tipoCliente: string | null;
+  grupoVendedor?: string | null;
   extra?: ReactNode;
+  /** Versión en texto plano de `extra`, para la exportación a Excel. */
+  extraText?: string;
 }
 
 interface IndicatorTableProps {
   rows: IndicatorTableRow[];
   extraLabel?: string;
   emptyMessage: string;
+  /** Nombre del archivo .xlsx. Sin esto no se muestra el botón de exportar. */
+  exportName?: string;
 }
 
-export function IndicatorTable({ rows, extraLabel, emptyMessage }: IndicatorTableProps) {
+export function IndicatorTable({ rows, extraLabel, emptyMessage, exportName }: IndicatorTableProps) {
   const [query, setQuery] = useState("");
   const [tipoCliente, setTipoCliente] = useState("");
 
@@ -71,6 +77,24 @@ export function IndicatorTable({ rows, extraLabel, emptyMessage }: IndicatorTabl
               </option>
             ))}
           </select>
+        )}
+        {/* Se exporta lo que el usuario tiene en pantalla (con su búsqueda y
+            su filtro de tipo aplicados), no la lista completa. */}
+        {exportName && (
+          <ExportExcelButton
+            filename={exportName}
+            rows={filtered}
+            columns={[
+              { header: "Código cliente", value: (r) => r.sapCode, width: 16 },
+              { header: "Cliente", value: (r) => r.name, width: 44 },
+              { header: "Oficina de venta", value: (r) => r.sector, width: 20 },
+              { header: "Grupo vendedor", value: (r) => r.grupoVendedor ?? "", width: 16 },
+              { header: "Tipo de cliente", value: (r) => r.tipoCliente, width: 24 },
+              ...(extraLabel
+                ? [{ header: extraLabel, value: (r: IndicatorTableRow) => r.extraText ?? "", width: 34 }]
+                : []),
+            ]}
+          />
         )}
       </div>
 

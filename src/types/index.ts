@@ -50,6 +50,8 @@ export interface Location {
   municipio: string | null;
   tipo_cliente: string | null;
   oficina_venta: string | null;
+  /** Grupo vendedor de SAP (ej. U29, U30) — subdivisión dentro de la oficina. */
+  grupo_vendedor: string | null;
   asesor_encargado: string | null;
   fuente_sell_out: FuenteSellOut;
   lat: number | null;
@@ -180,6 +182,7 @@ export interface ParsedCarteraRow {
   centro_poblado: string;
   municipio: string;
   region: string;
+  grupo_vendedor: string;
   asesor_encargado: string;
   fuente_sell_out?: FuenteSellOut;
 }

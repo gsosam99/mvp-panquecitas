@@ -11,18 +11,11 @@ export const revalidate = 300;
 // de Sell-in ni el ratio Panquecitas/HMP, por lo que cada rama solo importa
 // y ejecuta las queries que le corresponden — la restricción ocurre en el
 // servidor, no ocultando datos en el cliente.
-export default async function DashboardPage({
-  searchParams,
-}: {
-  searchParams: Promise<{ demo?: string }>;
-}) {
+export default async function DashboardPage() {
   const session = await requireDashboard();
 
   if (session.role === "ADMIN") {
-    // TODO(demo): quitar `demo` una vez haya datos reales de SAP — ver
-    // src/lib/admin-queries.ts y src/components/dashboard/DemoModeToggle.tsx.
-    const { demo } = await searchParams;
-    return <AdminExecutionDashboard demoMode={demo === "1"} />;
+    return <AdminExecutionDashboard />;
   }
 
   return <DiennStrategicDashboard />;

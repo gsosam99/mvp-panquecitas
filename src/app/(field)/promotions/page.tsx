@@ -2,6 +2,7 @@ import type { Metadata } from "next";
 import { createSupabaseServerClient } from "@/lib/supabase/server";
 import { requireFieldWorker } from "@/lib/session";
 import { sectorGroup } from "@/lib/universe";
+import { LOCATION_COLUMNS } from "@/lib/location-columns";
 import { PromotionTracker } from "@/components/field/PromotionTracker";
 import type { Location } from "@/types";
 
@@ -13,9 +14,7 @@ export default async function PromotionsPage() {
 
   const { data } = await supabase
     .from("locations")
-    .select(
-      "id, name, type, sap_code, address, region, centro_poblado, municipio, tipo_cliente, oficina_venta, lat, lng"
-    )
+    .select(LOCATION_COLUMNS)
     .order("centro_poblado")
     .order("name");
 

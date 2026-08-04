@@ -139,3 +139,48 @@
     color-scheme: light only;
   }
 }
+
+/* ── Reporte descargable en PDF (lámina horizontal) ──────────────────
+   El botón "Descargar reporte PDF" abre el diálogo de impresión del
+   navegador, donde el destino "Guardar como PDF" produce el archivo. No
+   hay librería de PDF: así el texto y los gráficos (SVG de Recharts)
+   salen vectoriales y nítidos en vez de como una captura de pantalla.
+
+   ANCHO_LAMINA (1248px) es el ancho de contenido del dashboard en
+   escritorio (max-w-7xl menos el padding del layout). Se fija también en
+   pantalla un instante antes de imprimir — ver ReportPrintButton — para
+   que los gráficos responsivos de Recharts se midan contra el ancho de la
+   lámina y no contra el de la ventana. El zoom de impresión lo reduce a
+   los ~281mm útiles de un A4 apaisado con márgenes de 8mm. Se usa `zoom`
+   y no `transform: scale` porque zoom sí achica la caja de layout: con
+   transform quedaba una página en blanco al final. */
+body.preparing-print .print-root {
+  width: 1248px;
+}
+
+@media print {
+  @page {
+    size: A4 landscape;
+    margin: 8mm;
+  }
+
+  html,
+  body {
+    background: #fff !important;
+  }
+
+  body {
+    -webkit-print-color-adjust: exact;
+    print-color-adjust: exact;
+  }
+
+  .print-root {
+    width: 1248px;
+    zoom: 0.85;
+  }
+
+  /* Ninguna tarjeta ni gráfico debe partirse entre dos páginas. */
+  .print-avoid-break {
+    break-inside: avoid;
+  }
+}

@@ -2,6 +2,9 @@
 
 import { useMemo, useState } from "react";
 import { KpiCard } from "@/components/dashboard/KpiCard";
+import { ExportExcelButton } from "@/components/dashboard/ExportExcelButton";
+import { ReportPrintButton } from "@/components/dashboard/ReportPrintButton";
+import { ReportPrintHeader } from "@/components/dashboard/ReportPrintHeader";
 import { PenetracionRecompraChart } from "@/components/dashboard/PenetracionRecompraChart";
 import { CoberturaComunicacionChart } from "@/components/dashboard/CoberturaComunicacionChart";
 import { SellOutChart } from "@/components/dashboard/SellOutChart";
@@ -91,15 +94,31 @@ export function DiennDashboardClient({
   const sellOutPorRonda = useMemo(() => aggregateByRound(filteredSellOut), [filteredSellOut]);
   const rotacion = useMemo(() => computeRotacion(filteredSellOut), [filteredSellOut]);
 
+  const filtroTexto = filter === "TOTAL" ? "Total sectores piloto" : sectorLabels[filter];
+
   return (
-    <div>
-      <div className="mb-6">
-        <h1 className="text-2xl font-bold text-slate-900">Dashboard Estratégico — DIENN</h1>
-        <p className="text-slate-500 mt-1">Ventas, penetración, rotación y cobertura del mercado</p>
+    <div className="print-root">
+      <ReportPrintHeader
+        title="Reporte Estratégico de Mercado"
+        subtitle="Ventas, penetración, rotación y cobertura — perfil DIENN"
+        filtros={[
+          filtroTexto,
+          zonaFilter || "Todas las zonas",
+          asesorFilter || "Todos los asesores",
+          fuenteFilter === "TODOS" ? "Tradicional y cadenas" : fuenteFilter === "Calculado" ? "Solo tradicional" : "Solo cadenas",
+        ]}
+      />
+
+      <div className="mb-6 flex flex-wrap items-start justify-between gap-3 print:hidden">
+        <div>
+          <h1 className="text-2xl font-bold text-slate-900">Dashboard Estratégico — DIENN</h1>
+          <p className="text-slate-500 mt-1">Ventas, penetración, rotación y cobertura del mercado</p>
+        </div>
+        <ReportPrintButton />
       </div>
 
       {/* ── Filtro reactivo de segmento ────────────────────────────────── */}
-      <div className="flex gap-2 mb-6">
+      <div className="flex gap-2 mb-6 print:hidden">
         <button
           onClick={() => setFilter("TOTAL")}
           className={`px-4 py-2 rounded-full text-sm font-semibold border transition-colors ${
@@ -126,7 +145,7 @@ export function DiennDashboardClient({
       </div>
 
       {/* ── Tarjetas de KPIs dinámicos ─────────────────────────────────── */}
-      <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mb-6">
+      <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mb-6 print-avoid-break">
         <KpiCard
           title="Total Ton"
           value={`${bundle.totalToneladas.toLocaleString("es-VE", { maximumFractionDigits: 2 })} Ton`}
@@ -184,7 +203,7 @@ export function DiennDashboardClient({
         </Card>
       </div>
 
-      <div className="grid grid-cols-2 md:grid-cols-4 gap-4 mb-6">
+      <div className="grid grid-cols-2 md:grid-cols-4 gap-4 mb-6 print-avoid-break">
         <KpiCard
           title="Índice Tienda Ideal"
           value={`${tiendaIdeal.pct}%`}
@@ -209,10 +228,10 @@ export function DiennDashboardClient({
         />
       </div>
 
-      <Separator className="mb-6" />
+      <Separator className="mb-6 print:hidden" />
 
       {/* ── Gráfico 1: Evolución de Penetración y Tasa de Recompra ───────── */}
-      <Card className="mb-6">
+      <Card className="mb-6 print-avoid-break">
         <CardHeader>
           <CardTitle>Evolución de Penetración y Tasa de Recompra</CardTitle>
         </CardHeader>
@@ -231,7 +250,7 @@ export function DiennDashboardClient({
       </Card>
 
       {/* ── Gráfico 2: Cobertura y Comunicación por Ciudad ────────────────── */}
-      <Card className="mb-6">
+      <Card className="mb-6 print-avoid-break">
         <CardHeader>
           <CardTitle>Cobertura y Comunicación por Ciudad (% vs Universo)</CardTitle>
           <p className="text-xs text-slate-400 mt-1">
@@ -252,7 +271,7 @@ export function DiennDashboardClient({
         </CardContent>
       </Card>
 
-      <Separator className="mb-6" />
+      <Separator className="mb-6 print:hidden" />
 
       {/* ── Gráfico 3: Sell-In vs Sell-Out por ronda ──────────────────────── */}
       <div className="mb-2 flex flex-wrap items-center justify-between gap-3">
@@ -262,7 +281,7 @@ export function DiennDashboardClient({
             Agrupado por ciclo de rondas (nunca diario). Corte D-1 estricto entre visitas consecutivas.
           </p>
         </div>
-        <div className="flex flex-wrap gap-2">
+        <div className="flex flex-wrap gap-2 print:hidden">
           <select
             value={zonaFilter}
             onChange={(e) => setZonaFilter(e.target.value)}
@@ -309,7 +328,7 @@ export function DiennDashboardClient({
         </div>
       </div>
 
-      <Card className="mb-6">
+      <Card className="mb-6 print-avoid-break">
         <CardContent className="pt-6">
           {sellOutPorRonda.length > 0 ? (
             <SellOutChart data={sellOutPorRonda} />
@@ -328,12 +347,23 @@ export function DiennDashboardClient({
         </CardContent>
       </Card>
 
-      <Separator className="mb-6" />
+      <Separator className="mb-6 print:hidden" />
 
       {/* ── Tabla: Detalle de Clientes ─────────────────────────────────── */}
-      <Card className="mb-6">
-        <CardHeader>
+      <Card className="mb-6 print:hidden">
+        <CardHeader className="flex flex-row items-start justify-between gap-3 space-y-0">
           <CardTitle>Detalle de Clientes (# clts y ton vendidas)</CardTitle>
+          <ExportExcelButton
+            filename={`Detalle de clientes por segmento — ${filtroTexto}`}
+            rows={bundle.detalleSegmentos}
+            columns={[
+              { header: "Segmento", value: (r) => r.segmento, width: 30 },
+              { header: "Penetración x seg (%)", value: (r) => r.penetracionPct, width: 22 },
+              { header: "Recompra x seg (%)", value: (r) => r.recompraPct, width: 22 },
+              { header: "% HPM vs Base", value: (r) => r.hpmVsBasePct, width: 18 },
+              { header: "% HPM TOTAL", value: (r) => r.hpmTotalPct, width: 18 },
+            ]}
+          />
         </CardHeader>
         <CardContent className="p-0">
           {bundle.detalleSegmentos.length === 0 ? (
@@ -368,12 +398,27 @@ export function DiennDashboardClient({
       </Card>
 
       {/* ── Pedidos pendientes por entregar ────────────────────────────── */}
-      <Card>
-        <CardHeader>
-          <CardTitle>Pedidos Pendientes por Entregar</CardTitle>
-          <p className="text-xs text-slate-400 mt-1">
-            Se carga desde SAP a medida que se suben los reportes (Admin → Pedidos Pendientes).
-          </p>
+      <Card className="print:hidden">
+        <CardHeader className="flex flex-row items-start justify-between gap-3 space-y-0">
+          <div>
+            <CardTitle>Pedidos Pendientes por Entregar</CardTitle>
+            <p className="text-xs text-slate-400 mt-1">
+              Se carga desde SAP a medida que se suben los reportes (Admin → Pedidos Pendientes).
+            </p>
+          </div>
+          <ExportExcelButton
+            filename={`Pedidos pendientes por entregar — ${filtroTexto}`}
+            rows={bundle.pedidosPendientes}
+            columns={[
+              { header: "Código cliente", value: (p) => p.location?.sap_code ?? "", width: 16 },
+              { header: "Cliente", value: (p) => p.location?.name ?? "", width: 44 },
+              { header: "Oficina de venta", value: (p) => p.location?.oficina_venta ?? "", width: 20 },
+              { header: "Grupo vendedor", value: (p) => p.location?.grupo_vendedor ?? "", width: 16 },
+              { header: "Centro poblado", value: (p) => p.location?.centro_poblado ?? "", width: 20 },
+              { header: "Cantidad", value: (p) => p.quantity, width: 14 },
+              { header: "Fecha del pedido", value: (p) => p.order_date ?? "", width: 18 },
+            ]}
+          />
         </CardHeader>
         <CardContent className="p-0">
           {bundle.pedidosPendientes.length === 0 ? (

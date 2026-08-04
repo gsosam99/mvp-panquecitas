@@ -160,6 +160,10 @@ const CARTERA_HEADER_ALIASES: Record<keyof CarteraColumnMap, string[]> = {
   // aparece antes que "Territorio de ventas2", que es el nombre
   // descriptivo (ej. "Oriente Norte") que sí queremos en `region`.
   region: ["territoriodeventas2"],
+  // Grupo vendedor de SAP (ej. U29, U30). Es el nivel de filtro más fino
+  // del dashboard de Admin y no se puede derivar de la oficina: los dos
+  // grupos del piloto viven dentro de CUMANA. Ver migración 006.
+  grupo_vendedor: ["grupovendedor", "grupovendedores", "grupodevendedores", "gruponvendedor"],
   asesor_encargado: ["asesorencargado", "asesor"],
   fuente_sell_out: ["fuentesellout", "fuentedesellout"],
 };
@@ -172,6 +176,7 @@ interface CarteraColumnMap {
   centro_poblado: number;
   municipio: number;
   region: number;
+  grupo_vendedor: number;
   asesor_encargado: number;
   fuente_sell_out: number;
 }
@@ -262,6 +267,9 @@ export async function parseCarteraExcel(buffer: ArrayBuffer): Promise<CarteraPar
       centro_poblado: String(col.centro_poblado ? row.getCell(col.centro_poblado).value ?? "" : "").trim(),
       municipio: String(col.municipio ? row.getCell(col.municipio).value ?? "" : "").trim(),
       region: String(col.region ? row.getCell(col.region).value ?? "" : "").trim(),
+      grupo_vendedor: String(col.grupo_vendedor ? row.getCell(col.grupo_vendedor).value ?? "" : "")
+        .trim()
+        .toUpperCase(),
       asesor_encargado: String(col.asesor_encargado ? row.getCell(col.asesor_encargado).value ?? "" : "").trim(),
       fuente_sell_out: fuenteRaw.includes("B2B") || fuenteRaw.includes("REPORTADO") ? "Reportado_B2B" : undefined,
     });

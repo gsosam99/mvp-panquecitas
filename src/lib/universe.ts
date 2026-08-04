@@ -1,4 +1,5 @@
 import { createSupabaseServiceClient } from "@/lib/supabase/server";
+import { LOCATION_COLUMNS } from "@/lib/location-columns";
 import type { Location } from "@/types";
 
 // Sectores de venta piloto evaluados por DIENN para el modelo de escalamiento
@@ -27,11 +28,7 @@ import { sectorGroup as _sectorGroup } from "@/lib/sectors";
 export async function getUniverseLocations(): Promise<Location[]> {
   const supabase = createSupabaseServiceClient();
 
-  const { data } = await supabase
-    .from("locations")
-    .select(
-      "id, name, type, sap_code, address, region, centro_poblado, municipio, tipo_cliente, oficina_venta, lat, lng"
-    );
+  const { data } = await supabase.from("locations").select(LOCATION_COLUMNS);
 
   // Filtrado en JS (no en la query) porque oficina_venta puede venir en
   // distinta capitalización según la carga — ver sectorGroup().

@@ -28,7 +28,7 @@ export function AdminNav() {
   }
 
   return (
-    <header className="bg-white border-b border-slate-200 sticky top-0 z-40">
+    <header className="bg-white border-b border-slate-200 sticky top-0 z-40 print:hidden">
       <div className="container mx-auto px-4 max-w-7xl">
         <div className="flex items-center justify-between h-14">
           <div className="flex items-center gap-1">

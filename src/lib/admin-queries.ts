@@ -1,24 +1,35 @@
 import { createSupabaseServiceClient } from "@/lib/supabase/server";
 import { PRODUCT_IDS } from "@/data/catalog";
-import { PVP_TARGETS, isPvpDeviated } from "@/data/pvp-thresholds";
-import { sectorGroup } from "@/lib/universe";
-import type { Location } from "@/types";
+import { getUniverseLocations } from "@/lib/universe";
+import { sectorGroup } from "@/lib/sectors";
+import { PVP_TARGETS } from "@/data/pvp-thresholds";
+import { desviado400, desviado800, type AdminPdvRow } from "@/lib/admin-metrics";
 
 // ────────────────────────────────────────────────────────────────
 // Perfil Administrador — Auditoría, Control de Ejecución en PDV.
-// Reestructurado en 2 bloques (Ejecución — que ya incluye la desviación
-// de PVP — y Cobertura Mercaderista) — ver "Cambios en app Panquecitas -
-// Versión Ale (2)" y docs/decisiones-implementacion.md (decisiones #3, #5, #6, #8, #9,
-// #10). Ninguna de estas queries toca sap_sell_in_records más allá de
-// identificar "PDVs compradores" (nunca expone $ ni kg/bultos de
-// Sell-in al perfil Administrador).
+// Dos bloques: Ejecución y % Cobertura Mercaderista.
+//
+// Una sola query por carga de página: getAdminExecutionSnapshot() arma
+// una fila por cliente de la cartera y todas las tarjetas y listas del
+// dashboard se derivan de ahí con funciones puras (src/lib/admin-metrics.ts),
+// que también corren en el cliente para que los filtros de Oficina de Venta
+// y Grupo Vendedor sean instantáneos. Antes cada indicador llamaba a su
+// propia query y el snapshot se recalculaba 6 veces por render.
+//
+// El universo es la CARTERA COMPLETA, no solo los clientes con venta SAP:
+// la primera lista del Bloque 1 es justamente "clientes sin ventas en SAP",
+// y la cobertura de mercaderista se mide sobre el total de la cartera.
+//
+// Ninguna de estas queries expone cifras de Sell-in ($ ni kg/bultos) al
+// perfil Administrador: sap_sell_in_records solo se usa para saber si el
+// cliente compró o no (booleano).
 // ────────────────────────────────────────────────────────────────
 
-interface LastVisitInfo {
+interface VisitRow {
   id: string;
+  location_id: string;
   created_at: string;
   pop_present: boolean;
-  pop_price_tag: boolean | null;
   product_present: boolean;
   price_400: number | null;
   price_400_na: boolean;
@@ -29,241 +40,95 @@ interface LastVisitInfo {
   deposit_access: boolean;
 }
 
-export interface PdvExecutionRow {
-  location: Location;
-  lastVisit: LastVisitInfo | null;
-  depositoQty: number;
-}
-
-/**
- * PDVs compradores (con sell-in de Panquecitas > 0) cruzados con su última visita.
- *
- * @param demoMode — TODO(demo): quitar este parámetro y su lógica cuando haya
- * datos reales de SAP. Con demoMode=true, un PDV también cuenta como
- * "comprador" si tiene al menos una visita de mercaderista registrada, aunque
- * no tenga venta SAP — solo para poder mostrar el dashboard de Admin sin
- * depender de un reporte SAP cargado. Con demoMode=false (default) se respeta
- * la definición real del spec: comprador = con venta SAP de Panquecitas.
- */
-async function getExecutionSnapshot(demoMode = false): Promise<PdvExecutionRow[]> {
+export async function getAdminExecutionSnapshot(): Promise<AdminPdvRow[]> {
   const supabase = createSupabaseServiceClient();
+  const universo = await getUniverseLocations();
+  if (universo.length === 0) return [];
 
-  // 1. PDVs compradores de Panquecitas
+  const locationIds = universo.map((l) => l.id);
+
+  // 1. ¿Compró Panquecitas en SAP? — solo el booleano, sin volúmenes.
   const { data: sellInData } = await supabase
     .from("sap_sell_in_records")
-    .select("location_id, quantity_kg")
+    .select("location_id")
     .eq("product_id", PRODUCT_IDS.PANQUECITAS)
-    .gt("quantity_kg", 0);
+    .gt("quantity_kg", 0)
+    .in("location_id", locationIds);
 
   const compradorIds = new Set(((sellInData ?? []) as { location_id: string }[]).map((r) => r.location_id));
 
-  // TODO(demo): bloque a eliminar junto con el parámetro demoMode.
-  if (demoMode) {
-    const { data: visitedData } = await supabase.from("mercaderista_visits").select("location_id");
-    for (const v of (visitedData ?? []) as { location_id: string }[]) {
-      compradorIds.add(v.location_id);
-    }
-  }
-
-  if (compradorIds.size === 0) return [];
-
-  const { data: locData } = await supabase
-    .from("locations")
-    .select(
-      "id, name, type, sap_code, address, region, centro_poblado, municipio, tipo_cliente, oficina_venta, lat, lng"
-    )
-    .in("id", Array.from(compradorIds));
-
-  const locations = (locData ?? []) as Location[];
-
-  // 2. Última visita por PDV comprador
+  // 2. Última visita de mercaderista por PDV.
   const { data: visitsData } = await supabase
     .from("mercaderista_visits")
     .select(
-      "id, location_id, created_at, pop_present, pop_price_tag, product_present, price_400, price_400_na, price_800, price_800_na, total_units_anaquel, front_faces, deposit_access"
+      "id, location_id, created_at, pop_present, product_present, price_400, price_400_na, price_800, price_800_na, total_units_anaquel, front_faces, deposit_access"
     )
-    .in("location_id", Array.from(compradorIds))
+    .in("location_id", locationIds)
     .order("created_at", { ascending: false });
 
-  const lastVisitByLocation = new Map<string, LastVisitInfo>();
-  for (const v of (visitsData ?? []) as (LastVisitInfo & { location_id: string })[]) {
-    if (!lastVisitByLocation.has(v.location_id)) {
-      lastVisitByLocation.set(v.location_id, {
-        id: v.id,
-        created_at: v.created_at,
-        pop_present: v.pop_present,
-        pop_price_tag: v.pop_price_tag,
-        product_present: v.product_present,
-        price_400: v.price_400,
-        price_400_na: v.price_400_na,
-        price_800: v.price_800,
-        price_800_na: v.price_800_na,
-        total_units_anaquel: v.total_units_anaquel,
-        front_faces: v.front_faces,
-        deposit_access: v.deposit_access,
-      });
-    }
+  const lastVisitByLocation = new Map<string, VisitRow>();
+  for (const v of (visitsData ?? []) as VisitRow[]) {
+    if (!lastVisitByLocation.has(v.location_id)) lastVisitByLocation.set(v.location_id, v);
   }
 
+  // 3. Unidades en depósito de esas últimas visitas. El anaquel ya no vive
+  // en inventory_audits (ver decisión #6), solo la zona BODEGA.
+  //
+  // inventory_audits.quantity está en la unidad de medida de la variante:
+  // bultos para las variantes BULTO, unidades sueltas para las UNIDAD. Para
+  // comparar contra un umbral en unidades hay que multiplicar por
+  // units_per_bulk (16 para 400g, 12 para 800g, 1 para las sueltas).
   const visitIds = Array.from(lastVisitByLocation.values()).map((v) => v.id);
+  const unidadesDepositoByVisit = new Map<string, number>();
 
-  // 3. Depósito (BODEGA) de esas últimas visitas — el anaquel ya no vive
-  // en inventory_audits, ver decisión #6 en docs/decisiones-implementacion.md.
-  const depositoByVisit = new Map<string, number>();
   if (visitIds.length > 0) {
+    const { data: variantsData } = await supabase.from("variants").select("id, units_per_bulk");
+    const unitsPerBulk = new Map(
+      ((variantsData ?? []) as { id: string; units_per_bulk: number }[]).map((v) => [v.id, v.units_per_bulk])
+    );
+
     const { data: auditsData } = await supabase
       .from("inventory_audits")
-      .select("visit_id, zone, quantity")
+      .select("visit_id, variant_id, quantity")
       .eq("zone", "BODEGA")
       .in("visit_id", visitIds);
 
-    for (const a of (auditsData ?? []) as { visit_id: string; quantity: number }[]) {
-      depositoByVisit.set(a.visit_id, (depositoByVisit.get(a.visit_id) ?? 0) + a.quantity);
+    for (const a of (auditsData ?? []) as { visit_id: string; variant_id: string; quantity: number }[]) {
+      const unidades = a.quantity * (unitsPerBulk.get(a.variant_id) ?? 1);
+      unidadesDepositoByVisit.set(a.visit_id, (unidadesDepositoByVisit.get(a.visit_id) ?? 0) + unidades);
     }
   }
 
-  return locations.map((location) => {
-    const lastVisit = lastVisitByLocation.get(location.id) ?? null;
+  return universo.map((location) => {
+    const visit = lastVisitByLocation.get(location.id) ?? null;
+    const sector = sectorGroup(location.oficina_venta);
+    const target = sector ? PVP_TARGETS[sector] : null;
+
     return {
       location,
-      lastVisit,
-      depositoQty: lastVisit ? depositoByVisit.get(lastVisit.id) ?? 0 : 0,
+      comprador: compradorIds.has(location.id),
+      visitado: visit !== null,
+      ultimaVisita: visit?.created_at ?? null,
+      popPresent: visit?.pop_present ?? null,
+      productPresent: visit?.product_present ?? null,
+      frontFaces: visit?.front_faces ?? null,
+      // price_*_na = "el local no maneja esa presentación": se guarda como
+      // precio no observado (null), igual que si no se hubiera visitado.
+      price400: visit && !visit.price_400_na ? visit.price_400 : null,
+      price800: visit && !visit.price_800_na ? visit.price_800 : null,
+      target400: target?.p400 ?? null,
+      target800: target?.p800 ?? null,
+      unidadesAnaquel: visit?.total_units_anaquel ?? null,
+      unidadesDeposito: visit ? unidadesDepositoByVisit.get(visit.id) ?? 0 : 0,
+      depositAccess: visit?.deposit_access ?? null,
     };
   });
 }
 
-// ── Bloque 2: Cobertura Mercaderista ──────────────────────────────
-
-export interface CoberturaResult {
-  visitados: number;
-  faltantes: Location[];
-  total: number;
-}
-
-export async function getCoberturaMercaderista(demoMode = false): Promise<CoberturaResult> {
-  const snapshot = await getExecutionSnapshot(demoMode);
-  const faltantes = snapshot.filter((r) => r.lastVisit === null).map((r) => r.location);
-  return {
-    visitados: snapshot.length - faltantes.length,
-    faltantes,
-    total: snapshot.length,
-  };
-}
-
-// ── Bloque 1.ii: % cobertura material POP + incidencias ──────────
-// Criterio de alerta (decisión #8): material POP presente pero su
-// preciador NO tiene el precio marcado.
-
-export interface MaterialPopResult {
-  pct: number;
-  conPop: number;
-  total: number;
-  incidencias: Location[];
-}
-
-export async function getCoberturaMaterialPop(demoMode = false): Promise<MaterialPopResult> {
-  const snapshot = await getExecutionSnapshot(demoMode);
-  const visitados = snapshot.filter((r) => r.lastVisit !== null);
-  const conPop = visitados.filter((r) => r.lastVisit!.pop_present === true);
-  const incidencias = conPop.filter((r) => r.lastVisit!.pop_price_tag === false).map((r) => r.location);
-
-  return {
-    pct: visitados.length > 0 ? Math.round((conPop.length / visitados.length) * 100 * 10) / 10 : 0,
-    conPop: conPop.length,
-    total: visitados.length,
-    incidencias,
-  };
-}
-
-// ── Bloque 1.iv: Agotados en depósito ─────────────────────────────
-
-export async function getAgotadosDeposito(demoMode = false): Promise<Location[]> {
-  const snapshot = await getExecutionSnapshot(demoMode);
-  return snapshot
-    .filter((r) => r.lastVisit?.deposit_access === true && r.depositoQty === 0)
-    .map((r) => r.location);
-}
-
-// ── Bloque 1.iii: Caras frontales bajas ───────────────────────────
-// Regla nueva por tipo de cliente (decisión #9): para HIPERMERCADOS /
-// SUPERMERCADOS / DIST.VIVER/BEB NO AL / MAYOR VIVE/CONF/BEBI, alerta si
-// caras frontales < 4. Para el resto, alerta si no hay presencia de
-// producto (no hay "caras" que contar).
-
-const CARAS_4_TIPO_CLIENTE = new Set([
-  "HIPERMERCADOS",
-  "SUPERMERCADOS",
-  "DIST.VIVER/BEB NO AL",
-  "MAYOR VIVE/CONF/BEBI",
-]);
-
-export interface CarasFrontalesRow {
-  location: Location;
-  frontFaces: number | null;
-  motivo: "CARAS_INSUFICIENTES" | "SIN_PRESENCIA";
-}
-
-export async function getCarasFrontalesBajas(demoMode = false): Promise<CarasFrontalesRow[]> {
-  const snapshot = await getExecutionSnapshot(demoMode);
-  const rows: CarasFrontalesRow[] = [];
-
-  for (const r of snapshot) {
-    if (!r.lastVisit) continue;
-    const tipo = (r.location.tipo_cliente ?? "").trim().toUpperCase();
-    const umbral4 = CARAS_4_TIPO_CLIENTE.has(tipo);
-
-    if (umbral4) {
-      if (r.lastVisit.product_present && (r.lastVisit.front_faces ?? 0) < 4) {
-        rows.push({ location: r.location, frontFaces: r.lastVisit.front_faces, motivo: "CARAS_INSUFICIENTES" });
-      }
-    } else if (!r.lastVisit.product_present) {
-      rows.push({ location: r.location, frontFaces: null, motivo: "SIN_PRESENCIA" });
-    }
-  }
-
-  return rows;
-}
-
-// ── Bloque 1.i: Desviación PVP 400g/800g ──────────────────────────
-
-export interface PvpDeviationRow {
-  location: Location;
-  price04: number | null;
-  price08: number | null;
-  target04: number;
-  target08: number;
-  deviated04: boolean;
-  deviated08: boolean;
-}
-
-export async function getDesviacionPvp(demoMode = false): Promise<PvpDeviationRow[]> {
-  const snapshot = await getExecutionSnapshot(demoMode);
-  const rows: PvpDeviationRow[] = [];
-
-  for (const r of snapshot) {
-    const sector = sectorGroup(r.location.oficina_venta);
-    if (!sector) continue; // sin umbral definido fuera de los sectores piloto
-    const target = PVP_TARGETS[sector];
-    const price04 = r.lastVisit?.price_400_na ? null : r.lastVisit?.price_400 ?? null;
-    const price08 = r.lastVisit?.price_800_na ? null : r.lastVisit?.price_800 ?? null;
-
-    rows.push({
-      location: r.location,
-      price04,
-      price08,
-      target04: target.p400,
-      target08: target.p800,
-      deviated04: price04 === null || isPvpDeviated(price04, target.p400),
-      deviated08: price08 === null || isPvpDeviated(price08, target.p800),
-    });
-  }
-
-  return rows.filter((r) => r.deviated04 || r.deviated08);
-}
-
-// ── "Índice Tienda Perfecta" (renombrado desde "Tienda Ideal", ─────
-// decisión #10 — el mismo cálculo también se muestra en DIENN como
-// "Tienda Ideal" hasta que el equipo defina una fórmula distinta).
+// ── "Índice Tienda Perfecta" ──────────────────────────────────────
+// Se conserva porque el perfil DIENN lo muestra como "Tienda Ideal"
+// (decisión #10). El dashboard de Admin ya no lo usa: sus tarjetas son
+// las cinco definidas en src/lib/admin-metrics.ts.
 
 export interface IndiceTiendaPerfectaResult {
   pct: number;
@@ -271,31 +136,23 @@ export interface IndiceTiendaPerfectaResult {
   total: number;
 }
 
-export async function getIndiceTiendaPerfecta(demoMode = false): Promise<IndiceTiendaPerfectaResult> {
-  const snapshot = await getExecutionSnapshot(demoMode);
-  const evaluable = snapshot.filter((r) => sectorGroup(r.location.oficina_venta) !== null);
+export async function getIndiceTiendaPerfecta(): Promise<IndiceTiendaPerfectaResult> {
+  const rows = await getAdminExecutionSnapshot();
+  const evaluable = rows.filter((r) => r.target400 !== null);
 
   let cumplen = 0;
   for (const r of evaluable) {
-    const sector = sectorGroup(r.location.oficina_venta)!;
-    const target = PVP_TARGETS[sector];
-    const v = r.lastVisit;
-    const precioOk =
-      !!v &&
-      !v.price_400_na &&
-      v.price_400 !== null &&
-      !isPvpDeviated(v.price_400, target.p400) &&
-      !v.price_800_na &&
-      v.price_800 !== null &&
-      !isPvpDeviated(v.price_800, target.p800);
-    const popOk = v?.pop_present === true;
-    const inventarioOk = !!v && (v.total_units_anaquel ?? 0) > 0;
+    // Aquí sí se exigen ambos precios observados: la "tienda perfecta" es un
+    // índice de ejecución completa, no la medición de precio del Bloque 1.
+    const precioOk = r.price400 !== null && r.price800 !== null && !desviado400(r) && !desviado800(r);
+    const popOk = r.popPresent === true;
+    const inventarioOk = (r.unidadesAnaquel ?? 0) > 0;
 
     if (precioOk && popOk && inventarioOk) cumplen++;
   }
 
   return {
-    pct: evaluable.length > 0 ? Math.round((cumplen / evaluable.length) * 100 * 10) / 10 : 0,
+    pct: evaluable.length > 0 ? Math.round((cumplen / evaluable.length) * 1000) / 10 : 0,
     cumplen,
     total: evaluable.length,
   };

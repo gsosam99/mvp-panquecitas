@@ -9,9 +9,9 @@ export default async function AdminLayout({
   await requireDashboard();
 
   return (
-    <div className="min-h-screen bg-slate-50 flex flex-col">
+    <div className="min-h-screen bg-slate-50 flex flex-col print:min-h-0 print:bg-white">
       <AdminNav />
-      <main className="flex-1 container mx-auto px-4 py-6 max-w-7xl">
+      <main className="flex-1 container mx-auto px-4 py-6 max-w-7xl print:p-0 print:max-w-none">
         {children}
       </main>
     </div>

@@ -8,6 +8,7 @@ import {
   getUniverseLocations,
   type Sector,
 } from "@/lib/universe";
+import { LOCATION_COLUMNS } from "@/lib/location-columns";
 import type { Location, LocationType, SapPendingOrder } from "@/types";
 
 // ────────────────────────────────────────────────────────────────
@@ -355,7 +356,9 @@ export async function getPedidosPendientes(sector?: Sector): Promise<SapPendingO
   const supabase = createSupabaseServiceClient();
   const { data } = await supabase
     .from("sap_pending_orders")
-    .select("id, created_at, upload_batch_id, location_id, product_id, quantity, order_date, notes, location:locations(id, name, type, sap_code, address, region, centro_poblado, municipio, tipo_cliente, oficina_venta, lat, lng)")
+    .select(
+      `id, created_at, upload_batch_id, location_id, product_id, quantity, order_date, notes, location:locations(${LOCATION_COLUMNS})`
+    )
     .order("order_date", { ascending: true });
 
   const rows = (data ?? []) as unknown as SapPendingOrder[];
