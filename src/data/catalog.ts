@@ -55,6 +55,18 @@ export const SAP_CATEGORY_MAP: Record<string, string> = {
   // "TAG_PANQUECITAS": PRODUCT_IDS.PANQUECITAS,  ← agregar cuando esté disponible
 };
 
+// Mapeo de "Material" (código SKU, ej. "CR/Q147") del reporte SAP
+// N7_V_SD83_WEB_001 (Pedido/Entregado/Facturado) → product_id. A diferencia
+// de SAP_CATEGORY_MAP, ese reporte no trae una columna de categoría por
+// fila (viene fija como filtro del query, "Categoria de Productos:
+// Panquecas") así que el producto se resuelve por código de material.
+// Agregar aquí los códigos nuevos que aparezcan — un material no listado
+// se reporta como error en vez de asumir un producto por defecto.
+export const SAP_MATERIAL_PRODUCT_MAP: Record<string, string> = {
+  "CR/Q147": PRODUCT_IDS.PANQUECITAS, // PRIMOR MEZCLA DE HARINAS BOLSA 400Gx16UN
+  "CR/Q148": PRODUCT_IDS.PANQUECITAS, // PRIMOR MEZCLA DE HARINAS BOLSA 800Gx12UN
+};
+
 // Heurística para resolver el SKU/presentación de un despacho o Sell-Out
 // reportado (columna libre, formato SAP aún no confirmado) a un variant_id
 // de Panquecitas. Se usa la variante "UNIDAD" de cada presentación porque

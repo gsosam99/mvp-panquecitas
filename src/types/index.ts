@@ -52,6 +52,10 @@ export interface Location {
   oficina_venta: string | null;
   /** Grupo vendedor de SAP (ej. U29, U30) — subdivisión dentro de la oficina. */
   grupo_vendedor: string | null;
+  /** Esquema de Atención de SAP (Directo / Mixto / Indirecto). */
+  esquema_atencion: string | null;
+  /** Zona de Ventas de SAP (ej. V07N01, V44N02). */
+  zona_venta: string | null;
   asesor_encargado: string | null;
   fuente_sell_out: FuenteSellOut;
   lat: number | null;
@@ -170,6 +174,35 @@ export interface ParseError {
 
 export interface SapParseResult {
   valid: ParsedSapRow[];
+  errors: ParseError[];
+}
+
+// ════════════════════════════════════════════════════════════════
+// Reporte SAP N7_V_SD83_WEB_001 (Cantidad Pedido/Entregada/Facturada) —
+// export "Web Page, Single File" de SAP BW (MHTML con extensión .xls, no
+// un binario Excel real). Una sola fila trae tanto lo ya facturado como lo
+// pedido, así que una sola carga alimenta sap_sell_in_records (facturado)
+// y sap_pending_orders (pedido menos facturado). Ver src/lib/sap-mhtml-parser.ts.
+// ════════════════════════════════════════════════════════════════
+
+export interface ParsedSapFacturacionRow {
+  sap_code: string;
+  client_name: string;
+  tipo_cliente: string;
+  esquema_atencion: string;
+  grupo_vendedor: string;
+  region: string;
+  oficina_venta: string;
+  zona_venta: string;
+  material_code: string;
+  material_name: string;
+  fecha: string;
+  cantidad_pedido_kg: number;
+  cantidad_facturada_kg: number;
+}
+
+export interface SapFacturacionParseResult {
+  valid: ParsedSapFacturacionRow[];
   errors: ParseError[];
 }
 

@@ -59,17 +59,21 @@ export function SapUploadClient() {
 
         <Card className="mt-4">
           <CardHeader>
-            <CardTitle>Reporte SAP esperado</CardTitle>
+            <CardTitle>Reportes SAP esperados</CardTitle>
           </CardHeader>
-          <CardContent className="text-sm text-slate-600 space-y-1">
-            <p className="font-mono text-xs bg-slate-100 px-2 py-1 rounded">N7_V_SD88_WEB_001</p>
-            <p className="text-xs text-slate-400 mt-2">El parser extrae automáticamente:</p>
-            <p>• <span className="font-medium">Localidades</span> — crea o actualiza en BD</p>
-            <p>• <span className="font-medium">Meses</span> — detecta columnas KGL dinámicamente</p>
-            <p>• <span className="font-medium">Categoría</span> — "Harina de Maíz" → Harina PAN</p>
-            <p className="text-xs text-amber-600 mt-2">
-              Panquecitas: el tag SAP se configurará cuando esté disponible.
-            </p>
+          <CardContent className="text-sm text-slate-600 space-y-3">
+            <div>
+              <p className="font-mono text-xs bg-slate-100 px-2 py-1 rounded">N7_V_SD88_WEB_001</p>
+              <p className="text-xs text-slate-400 mt-1">.xlsx real · Harina Pan, columnas KGL por mes.</p>
+            </div>
+            <div>
+              <p className="font-mono text-xs bg-slate-100 px-2 py-1 rounded">N7_V_SD83_WEB_001</p>
+              <p className="text-xs text-slate-400 mt-1">
+                .xls export de SAP (MHTML) · Panquecitas · Cantidad Pedido/Facturada. Se sube tal cual se descarga,
+                sin convertir a Excel. Alimenta ventas y pedidos pendientes en la misma carga.
+              </p>
+            </div>
+            <p className="text-xs text-slate-400">El formato se detecta automáticamente al elegir el archivo.</p>
           </CardContent>
         </Card>
       </div>

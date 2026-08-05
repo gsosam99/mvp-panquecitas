@@ -7,4 +7,4 @@
 // no encontraba a nadie). Centralizarlo evita que vuelva a pasar al agregar
 // columnas nuevas.
 export const LOCATION_COLUMNS =
-  "id, name, type, sap_code, address, region, centro_poblado, municipio, tipo_cliente, oficina_venta, grupo_vendedor, asesor_encargado, fuente_sell_out, lat, lng";
+  "id, name, type, sap_code, address, region, centro_poblado, municipio, tipo_cliente, oficina_venta, grupo_vendedor, esquema_atencion, zona_venta, asesor_encargado, fuente_sell_out, lat, lng";

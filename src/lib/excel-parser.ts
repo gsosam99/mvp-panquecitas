@@ -132,7 +132,9 @@ const DIACRITICS_RE = new RegExp(
   "g"
 );
 
-function normalizeHeader(value: string): string {
+// Exportada para reusarla en sap-mhtml-parser.ts (mismo criterio de
+// normalización de encabezados para el reporte SAP N7_V_SD83_WEB_001).
+export function normalizeHeader(value: string): string {
   return value
     .trim()
     .toLowerCase()
