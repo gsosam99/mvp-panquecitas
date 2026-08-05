@@ -141,6 +141,9 @@ create table public.sap_sell_in_records (
   upload_batch_id  uuid not null,
   location_id      uuid not null references public.locations(id),
   product_id       uuid not null references public.products(id),
+  -- Presentación facturada (400g/800g) cuando el reporte SAP lo trae por
+  -- material; null en cargas mensuales agregadas. Ver migración 008.
+  variant_id       uuid references public.variants(id),
   quantity_kg      decimal(10,3) not null check (quantity_kg > 0),
   date_of_sale     date not null,
   created_at       timestamptz not null default now()

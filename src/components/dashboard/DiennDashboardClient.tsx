@@ -1,12 +1,13 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { KpiCard } from "@/components/dashboard/KpiCard";
 import { ExportExcelButton } from "@/components/dashboard/ExportExcelButton";
 import { ReportPrintButton } from "@/components/dashboard/ReportPrintButton";
 import { ReportPrintHeader } from "@/components/dashboard/ReportPrintHeader";
 import { PenetracionRecompraChart } from "@/components/dashboard/PenetracionRecompraChart";
 import { CoberturaComunicacionChart } from "@/components/dashboard/CoberturaComunicacionChart";
+import { PedidoVsVentasChart } from "@/components/dashboard/PedidoVsVentasChart";
 import { RoundLegend } from "@/components/dashboard/RoundLegend";
 import { SellOutChart } from "@/components/dashboard/SellOutChart";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -21,7 +22,6 @@ import {
 } from "@/components/ui/table";
 import {
   aggregateByRound,
-  aggregateMixProducto,
   computeRotacion,
   filterRecords,
   type SellOutRecord,
@@ -29,6 +29,9 @@ import {
 import type {
   CoberturaComunicacionPoint,
   DetalleSegmentoRow,
+  MixProductoTonPoint,
+  PedidoVsVentasGranularity,
+  PedidoVsVentasPeriod,
   PenetracionRecompraPoint,
   RunningVentasResult,
   TimeGranularity,
@@ -40,11 +43,20 @@ export interface SectorBundle {
   totalToneladas: number;
   /** Volumen pedido aún no facturado (Pedido − Facturado), mismo universo que totalToneladas. */
   totalToneladasPedidas: number;
+  /** Toneladas facturadas SAP por presentación (400g / 800g). */
+  mixProducto: MixProductoTonPoint[];
+  /** Pedido vs facturado por presentación, agrupado por día y por semana. */
+  pedidoVsVentas: Record<PedidoVsVentasGranularity, PedidoVsVentasPeriod[]>;
   runningVentas: RunningVentasResult;
   penetracionRecompra: Record<TimeGranularity, PenetracionRecompraPoint[]>;
   detalleSegmentos: DetalleSegmentoRow[];
   pedidosPendientes: SapPendingOrder[];
 }
+
+const PEDIDO_GRANULARITY_OPTIONS: { key: PedidoVsVentasGranularity; label: string }[] = [
+  { key: "day", label: "Día" },
+  { key: "week", label: "Semana" },
+];
 
 type FilterKey = "TOTAL" | Sector;
 type FuenteFilter = "TODOS" | "Calculado" | "Reportado_B2B";
@@ -83,6 +95,8 @@ export function DiennDashboardClient({
   const [asesorFilter, setAsesorFilter] = useState("");
   const [fuenteFilter, setFuenteFilter] = useState<FuenteFilter>("TODOS");
   const [granularity, setGranularity] = useState<TimeGranularity>("week");
+  const [pedidoGranularity, setPedidoGranularity] = useState<PedidoVsVentasGranularity>("week");
+  const [pedidoBucket, setPedidoBucket] = useState("");
   const bundle = bundles[filter];
 
   const scatterSectors = useMemo<Sector[]>(
@@ -101,9 +115,21 @@ export function DiennDashboardClient({
     [sellOutRecords, filter, zonaFilter, asesorFilter, fuenteFilter]
   );
 
-  const mixProducto = useMemo(() => aggregateMixProducto(filteredSellOut), [filteredSellOut]);
   const sellOutPorRonda = useMemo(() => aggregateByRound(filteredSellOut), [filteredSellOut]);
   const rotacion = useMemo(() => computeRotacion(filteredSellOut), [filteredSellOut]);
+  const mixProducto = bundle.mixProducto;
+
+  const pedidoPeriods = bundle.pedidoVsVentas[pedidoGranularity];
+  const pedidoPeriod = useMemo(() => {
+    if (pedidoPeriods.length === 0) return null;
+    return pedidoPeriods.find((p) => p.bucket === pedidoBucket) ?? pedidoPeriods[pedidoPeriods.length - 1];
+  }, [pedidoPeriods, pedidoBucket]);
+
+  // Al cambiar sector o granularidad, saltar al período más reciente con datos.
+  useEffect(() => {
+    const periods = bundles[filter].pedidoVsVentas[pedidoGranularity];
+    setPedidoBucket(periods.length > 0 ? periods[periods.length - 1].bucket : "");
+  }, [bundles, filter, pedidoGranularity]);
 
   const filtroTexto = filter === "TOTAL" ? "Total sectores piloto" : sectorLabels[filter];
 
@@ -204,8 +230,8 @@ export function DiennDashboardClient({
             </p>
             {mixProducto.every((m) => m.toneladas === 0) ? (
               <p className="text-sm text-slate-400">
-                Sin Sell-Out calculado aún — carga despachos SAP y al menos 2 visitas por cliente en rondas
-                distintas.
+                Sin cantidad facturada por presentación — carga el reporte SAP de Pedido/Facturado
+                (Panquecitas 400g y 800g).
               </p>
             ) : (
               <div className="flex items-baseline gap-4">
@@ -245,6 +271,64 @@ export function DiennDashboardClient({
           subtitle="Inventario promedio ÷ ritmo de Sell-Out"
         />
       </div>
+
+      {/* ── Pedido vs Ventas Panquecitas ─────────────────────────────────── */}
+      <Card className="mb-6 print-avoid-break">
+        <CardHeader className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between space-y-0">
+          <div>
+            <CardTitle>Pedido vs Ventas Panquecitas</CardTitle>
+            <p className="text-xs text-slate-400 mt-1">
+              Cantidad pedida y cantidad facturada (kg) por presentación. Cambia el período para ver cómo
+              evoluciona con cada carga diaria del reporte SAP.
+            </p>
+          </div>
+          <div className="flex flex-wrap items-center gap-2 print:hidden">
+            <div className="flex rounded-lg border border-slate-200 overflow-hidden text-xs font-medium">
+              {PEDIDO_GRANULARITY_OPTIONS.map((opt) => (
+                <button
+                  key={opt.key}
+                  onClick={() => setPedidoGranularity(opt.key)}
+                  className={`px-3 py-1.5 transition-colors ${
+                    pedidoGranularity === opt.key
+                      ? "bg-slate-900 text-white"
+                      : "bg-white text-slate-500 hover:bg-slate-50"
+                  }`}
+                >
+                  {opt.label}
+                </button>
+              ))}
+            </div>
+            {pedidoPeriods.length > 0 && (
+              <select
+                value={pedidoPeriod?.bucket ?? ""}
+                onChange={(e) => setPedidoBucket(e.target.value)}
+                className="text-sm border border-slate-200 rounded-lg px-3 py-1.5 bg-white text-slate-700"
+              >
+                {pedidoPeriods.map((p) => (
+                  <option key={p.bucket} value={p.bucket}>
+                    {p.label}
+                  </option>
+                ))}
+              </select>
+            )}
+          </div>
+        </CardHeader>
+        <CardContent>
+          {pedidoPeriod ? (
+            <PedidoVsVentasChart data={pedidoPeriod.bars} />
+          ) : (
+            <div className="h-[300px] flex items-center justify-center text-slate-400">
+              <div className="text-center">
+                <p className="text-4xl mb-2">📊</p>
+                <p>Sin pedidos ni facturas de Panquecitas por presentación.</p>
+                <p className="text-xs mt-1">
+                  Carga el reporte SAP Pedido/Facturado (con materiales 400g y 800g).
+                </p>
+              </div>
+            </div>
+          )}
+        </CardContent>
+      </Card>
 
       <Separator className="mb-4 print:hidden" />
 

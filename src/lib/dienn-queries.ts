@@ -1,5 +1,5 @@
 import { createSupabaseServiceClient } from "@/lib/supabase/server";
-import { PRODUCT_IDS } from "@/data/catalog";
+import { PRODUCT_IDS, VARIANT_IDS } from "@/data/catalog";
 import {
   PILOT_SECTORS,
   SECTOR_LABELS,
@@ -159,11 +159,177 @@ export async function getRunningVentas(sector?: Sector): Promise<RunningVentasRe
   };
 }
 
-// ── 3. Mix de Producto: se movió a src/lib/sellout-queries.ts ─────
-// (aggregateMixProducto). Ya no se calcula desde el depósito: ahora es la
-// salida directa del motor de Sell-Out por presentación (toneladas
-// vendidas 400g vs 800g) — ver decisión #6/#1 de "Arreglos app
-// Panquecitas" en docs/decisiones-implementacion.md.
+// ── 3. Mix de Producto (cantidad facturada SAP por presentación) ───
+// Toneladas facturadas 400g vs 800g desde sap_sell_in_records.variant_id
+// (llenado al cargar el reporte N7_V_SD83_WEB_001 — ver migración 008 y
+// SAP_MATERIAL_VARIANT_MAP). Ya no usa el motor de Sell-Out.
+
+export type PresentacionMix = "400g" | "800g";
+
+export interface MixProductoTonPoint {
+  variant: PresentacionMix;
+  toneladas: number;
+}
+
+const VARIANT_TO_PRESENTACION: Record<string, PresentacionMix> = {
+  [VARIANT_IDS.PANQ_04KG_UNIDAD]: "400g",
+  [VARIANT_IDS.PANQ_04KG_BULTO]: "400g",
+  [VARIANT_IDS.PANQ_08KG_UNIDAD]: "800g",
+  [VARIANT_IDS.PANQ_08KG_BULTO]: "800g",
+};
+
+export async function getMixProducto(sector?: Sector): Promise<MixProductoTonPoint[]> {
+  const supabase = createSupabaseServiceClient();
+  const ids = await getUniverseLocationIds(sector);
+
+  const { data } = await supabase
+    .from("sap_sell_in_records")
+    .select("quantity_kg, location_id, variant_id")
+    .eq("product_id", PRODUCT_IDS.PANQUECITAS)
+    .not("variant_id", "is", null);
+
+  const kgByVariant: Record<PresentacionMix, number> = { "400g": 0, "800g": 0 };
+  for (const r of (data ?? []) as { quantity_kg: number; location_id: string; variant_id: string }[]) {
+    if (!ids.has(r.location_id)) continue;
+    const presentacion = VARIANT_TO_PRESENTACION[r.variant_id];
+    if (!presentacion) continue;
+    kgByVariant[presentacion] += r.quantity_kg;
+  }
+
+  return (["400g", "800g"] as PresentacionMix[]).map((variant) => ({
+    variant,
+    toneladas: Math.round((kgByVariant[variant] / 1000) * 100) / 100,
+  }));
+}
+
+// ── 3b. Pedido vs Ventas Panquecitas (por presentación y tiempo) ───
+// Para cada día/semana y cada presentación (400g/800g):
+//   Facturada = Σ sap_sell_in_records.quantity_kg
+//   Pedida    = Facturada + Σ sap_pending_orders.quantity
+//             (= Cantidad Pedido del reporte N7_V_SD83_WEB_001)
+// El cliente elige Día/Semana y un período concreto; el eje X del gráfico
+// son las dos presentaciones, con barras Pedida vs Facturada.
+
+export type PedidoVsVentasGranularity = "day" | "week";
+
+export interface PedidoVsVentasBarPoint {
+  presentacion: PresentacionMix;
+  pedidaKg: number;
+  facturadaKg: number;
+}
+
+export interface PedidoVsVentasPeriod {
+  bucket: string;
+  label: string;
+  bars: PedidoVsVentasBarPoint[];
+}
+
+function buildPedidoVsVentasPeriods(
+  facturada: { location_id: string; date: string; variant_id: string; kg: number }[],
+  pendiente: { location_id: string; date: string; variant_id: string; kg: number }[],
+  ids: Set<string>,
+  granularity: PedidoVsVentasGranularity
+): PedidoVsVentasPeriod[] {
+  type Acc = { pedida: number; facturada: number };
+  const byBucket = new Map<string, Record<PresentacionMix, Acc>>();
+
+  function ensure(bucket: string, presentacion: PresentacionMix): Acc {
+    if (!byBucket.has(bucket)) {
+      byBucket.set(bucket, {
+        "400g": { pedida: 0, facturada: 0 },
+        "800g": { pedida: 0, facturada: 0 },
+      });
+    }
+    return byBucket.get(bucket)![presentacion];
+  }
+
+  for (const r of facturada) {
+    if (!ids.has(r.location_id) || !r.date) continue;
+    const presentacion = VARIANT_TO_PRESENTACION[r.variant_id];
+    if (!presentacion) continue;
+    const acc = ensure(bucketKeyFor(r.date, granularity), presentacion);
+    acc.facturada += r.kg;
+    acc.pedida += r.kg;
+  }
+
+  for (const r of pendiente) {
+    if (!ids.has(r.location_id) || !r.date) continue;
+    const presentacion = VARIANT_TO_PRESENTACION[r.variant_id];
+    if (!presentacion) continue;
+    const acc = ensure(bucketKeyFor(r.date, granularity), presentacion);
+    acc.pedida += r.kg;
+  }
+
+  return Array.from(byBucket.keys())
+    .sort()
+    .map((bucket) => {
+      const cell = byBucket.get(bucket)!;
+      return {
+        bucket,
+        label: bucketLabelFor(bucket, granularity),
+        bars: (["400g", "800g"] as PresentacionMix[]).map((presentacion) => ({
+          presentacion,
+          pedidaKg: Math.round(cell[presentacion].pedida * 10) / 10,
+          facturadaKg: Math.round(cell[presentacion].facturada * 10) / 10,
+        })),
+      };
+    });
+}
+
+export async function getPedidoVsVentas(
+  sector?: Sector
+): Promise<Record<PedidoVsVentasGranularity, PedidoVsVentasPeriod[]>> {
+  const empty = { day: [] as PedidoVsVentasPeriod[], week: [] as PedidoVsVentasPeriod[] };
+  const ids = await getUniverseLocationIds(sector);
+  if (ids.size === 0) return empty;
+
+  const supabase = createSupabaseServiceClient();
+  const [{ data: sellInData }, { data: pendingData }] = await Promise.all([
+    supabase
+      .from("sap_sell_in_records")
+      .select("quantity_kg, location_id, variant_id, date_of_sale")
+      .eq("product_id", PRODUCT_IDS.PANQUECITAS)
+      .not("variant_id", "is", null),
+    supabase
+      .from("sap_pending_orders")
+      .select("quantity, location_id, variant_id, order_date")
+      .eq("product_id", PRODUCT_IDS.PANQUECITAS)
+      .not("variant_id", "is", null),
+  ]);
+
+  const facturada = ((sellInData ?? []) as {
+    quantity_kg: number;
+    location_id: string;
+    variant_id: string;
+    date_of_sale: string;
+  }[]).map((r) => ({
+    location_id: r.location_id,
+    date: r.date_of_sale,
+    variant_id: r.variant_id,
+    kg: r.quantity_kg,
+  }));
+
+  const pendiente = ((pendingData ?? []) as {
+    quantity: number;
+    location_id: string;
+    variant_id: string;
+    order_date: string | null;
+  }[])
+    .filter((r) => r.order_date)
+    .map((r) => ({
+      location_id: r.location_id,
+      date: r.order_date!,
+      variant_id: r.variant_id,
+      kg: r.quantity,
+    }));
+
+  if (facturada.length === 0 && pendiente.length === 0) return empty;
+
+  return {
+    day: buildPedidoVsVentasPeriods(facturada, pendiente, ids, "day"),
+    week: buildPedidoVsVentasPeriods(facturada, pendiente, ids, "week"),
+  };
+}
 
 // ── 4. Evolución de Penetración y Tasa de Recompra ─────────────────
 
@@ -401,7 +567,7 @@ export async function getPedidosPendientes(sector?: Sector): Promise<SapPendingO
   const { data } = await supabase
     .from("sap_pending_orders")
     .select(
-      `id, created_at, upload_batch_id, location_id, product_id, quantity, order_date, notes, location:locations(${LOCATION_COLUMNS})`
+      `id, created_at, upload_batch_id, location_id, product_id, variant_id, quantity, order_date, notes, location:locations(${LOCATION_COLUMNS})`
     )
     .order("order_date", { ascending: true });
 

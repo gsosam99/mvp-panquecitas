@@ -67,6 +67,14 @@ export const SAP_MATERIAL_PRODUCT_MAP: Record<string, string> = {
   "CR/Q148": PRODUCT_IDS.PANQUECITAS, // PRIMOR MEZCLA DE HARINAS BOLSA 800Gx12UN
 };
 
+// Misma tabla de materiales, pero a nivel de presentación: alimenta el
+// Mix de Producto de DIENN (cantidad facturada 400g vs 800g). Se usa la
+// variante UNIDAD porque el reporte ya viene en kg, no en bultos.
+export const SAP_MATERIAL_VARIANT_MAP: Record<string, string> = {
+  "CR/Q147": VARIANT_IDS.PANQ_04KG_UNIDAD,
+  "CR/Q148": VARIANT_IDS.PANQ_08KG_UNIDAD,
+};
+
 // Heurística para resolver el SKU/presentación de un despacho o Sell-Out
 // reportado (columna libre, formato SAP aún no confirmado) a un variant_id
 // de Panquecitas. Se usa la variante "UNIDAD" de cada presentación porque

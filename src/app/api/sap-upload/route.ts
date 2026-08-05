@@ -1,6 +1,6 @@
 import { createSupabaseServiceClient } from "@/lib/supabase/server";
 import { hasDashboardSession } from "@/lib/session";
-import { SAP_CATEGORY_MAP, SAP_MATERIAL_PRODUCT_MAP } from "@/data/catalog";
+import { SAP_CATEGORY_MAP, SAP_MATERIAL_PRODUCT_MAP, SAP_MATERIAL_VARIANT_MAP } from "@/data/catalog";
 import { mapLocationType } from "@/lib/excel-parser";
 import type { ParsedSapRow, ParsedSapFacturacionRow } from "@/types";
 
@@ -138,13 +138,16 @@ async function handleFacturacionUpload(supabase: any, rows: ParsedSapFacturacion
     (upsertedLocs as { id: string; sap_code: string }[]).map((l) => [l.sap_code, l.id])
   );
 
-  // ── 2. Resolver product_id por material y separar facturado/pendiente ──
+  // ── 2. Resolver product_id + variant_id por material y separar
+  // facturado/pendiente. variant_id es lo que alimenta el Mix de Producto
+  // de DIENN (cantidad facturada por presentación 400g/800g).
   const unknownMaterials = new Set<string>();
   const sellInRows: {
     uploaded_by: null;
     upload_batch_id: string;
     location_id: string;
     product_id: string;
+    variant_id: string | null;
     quantity_kg: number;
     date_of_sale: string;
   }[] = [];
@@ -152,6 +155,7 @@ async function handleFacturacionUpload(supabase: any, rows: ParsedSapFacturacion
     upload_batch_id: string;
     location_id: string;
     product_id: string;
+    variant_id: string | null;
     quantity: number;
     order_date: string;
   }[] = [];
@@ -165,6 +169,7 @@ async function handleFacturacionUpload(supabase: any, rows: ParsedSapFacturacion
       unknownMaterials.add(`${row.material_code} (${row.material_name})`);
       continue;
     }
+    const variant_id = SAP_MATERIAL_VARIANT_MAP[row.material_code] ?? null;
 
     if (row.cantidad_facturada_kg > 0) {
       sellInRows.push({
@@ -172,6 +177,7 @@ async function handleFacturacionUpload(supabase: any, rows: ParsedSapFacturacion
         upload_batch_id: batchId,
         location_id,
         product_id,
+        variant_id,
         quantity_kg: row.cantidad_facturada_kg,
         date_of_sale: row.fecha,
       });
@@ -179,12 +185,15 @@ async function handleFacturacionUpload(supabase: any, rows: ParsedSapFacturacion
 
     // Solo lo que falta por facturar — si ya se facturó todo el pedido, no
     // vuelve a aparecer como pendiente (ver pregunta al usuario, confirmada).
+    // Pedida total = Facturada + Pendiente (misma fecha y presentación),
+    // que es lo que usa la gráfica Pedido vs Ventas de DIENN.
     const pendiente = row.cantidad_pedido_kg - row.cantidad_facturada_kg;
     if (pendiente > 0) {
       pendingRows.push({
         upload_batch_id: batchId,
         location_id,
         product_id,
+        variant_id,
         quantity: pendiente,
         order_date: row.fecha,
       });

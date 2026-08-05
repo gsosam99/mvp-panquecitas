@@ -231,6 +231,8 @@ export interface SapPendingOrder {
   upload_batch_id: string;
   location_id: string;
   product_id: string | null;
+  /** Presentación (400g/800g) cuando viene del reporte de facturación por material. */
+  variant_id: string | null;
   quantity: number;
   order_date: string | null;
   notes: string | null;

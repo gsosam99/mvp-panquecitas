@@ -2,6 +2,8 @@ import {
   getConversionDegustaciones,
   getCoberturaComunicacionPorSector,
   getDetalleClientesPorSegmento,
+  getMixProducto,
+  getPedidoVsVentas,
   getPedidosPendientes,
   getPenetracionRecompra,
   getRunningVentas,
@@ -17,17 +19,36 @@ import { DiennDashboardClient, type SectorBundle } from "@/components/dashboard/
 const PILOT_SECTOR_KEYS: Sector[] = ["cumana", "barquisimeto_este"];
 
 async function getBundle(sector?: Sector): Promise<SectorBundle> {
-  const [totalToneladas, totalToneladasPedidas, runningVentas, penetracionRecompra, detalleSegmentos, pedidosPendientes] =
-    await Promise.all([
-      getTotalToneladas(sector),
-      getTotalToneladasPedidas(sector),
-      getRunningVentas(sector),
-      getPenetracionRecompra(sector),
-      getDetalleClientesPorSegmento(sector),
-      getPedidosPendientes(sector),
-    ]);
+  const [
+    totalToneladas,
+    totalToneladasPedidas,
+    mixProducto,
+    pedidoVsVentas,
+    runningVentas,
+    penetracionRecompra,
+    detalleSegmentos,
+    pedidosPendientes,
+  ] = await Promise.all([
+    getTotalToneladas(sector),
+    getTotalToneladasPedidas(sector),
+    getMixProducto(sector),
+    getPedidoVsVentas(sector),
+    getRunningVentas(sector),
+    getPenetracionRecompra(sector),
+    getDetalleClientesPorSegmento(sector),
+    getPedidosPendientes(sector),
+  ]);
 
-  return { totalToneladas, totalToneladasPedidas, runningVentas, penetracionRecompra, detalleSegmentos, pedidosPendientes };
+  return {
+    totalToneladas,
+    totalToneladasPedidas,
+    mixProducto,
+    pedidoVsVentas,
+    runningVentas,
+    penetracionRecompra,
+    detalleSegmentos,
+    pedidosPendientes,
+  };
 }
 
 // El objetivo de este dashboard es reactivo en el cliente (Tabs
