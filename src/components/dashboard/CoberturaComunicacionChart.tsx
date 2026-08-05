@@ -1,8 +1,9 @@
 "use client";
 
 import dynamic from "next/dynamic";
-import type { CoberturaComunicacionPoint } from "@/lib/dienn-queries";
+import type { CoberturaComunicacionPoint, TimeGranularity } from "@/lib/dienn-queries";
 import type { Sector } from "@/lib/sectors";
+import { CAMPAIGN_WEEKS, roundForBucket, type CampaignWeek } from "@/lib/campaign-weeks";
 
 const SECTOR_COLORS: Record<Sector, { bar: string; dot: string }> = {
   cumana: { bar: "#1a65bd", dot: "#0f3d75" },
@@ -13,22 +14,70 @@ const SECTOR_LABELS_ES: Record<Sector, string> = {
   barquisimeto_este: "Barquisimeto Este",
 };
 
+interface RoundBand {
+  week: CampaignWeek;
+  x1: string;
+  x2: string;
+}
+
+// A granularidad "month" varias rondas pueden compartir el mismo bucket
+// (S2 y S4 caen ambas en "2026-08"), así que ahí no se puede marcar la
+// ronda sin ambigüedad — se omiten las bandas en esa vista (ver
+// roundForBucket en campaign-weeks.ts).
+function roundBandsFor(data: CoberturaComunicacionPoint[], granularity: TimeGranularity): RoundBand[] {
+  if (granularity === "month") return [];
+  const bands: RoundBand[] = [];
+  for (const week of CAMPAIGN_WEEKS) {
+    const matches = data.filter((d) => roundForBucket(d.bucket, granularity)?.label === week.label);
+    if (matches.length === 0) continue;
+    bands.push({ week, x1: matches[0].label, x2: matches[matches.length - 1].label });
+  }
+  return bands;
+}
+
 const Inner = dynamic(
   async () => {
-    const { ResponsiveContainer, ComposedChart, Bar, Scatter, XAxis, YAxis, CartesianGrid, Tooltip, Legend } =
-      await import("recharts");
+    const {
+      ResponsiveContainer,
+      ComposedChart,
+      Bar,
+      Scatter,
+      XAxis,
+      YAxis,
+      CartesianGrid,
+      Tooltip,
+      Legend,
+      ReferenceArea,
+    } = await import("recharts");
 
     function CoberturaComunicacionInner({
       data,
       sectors,
+      granularity,
     }: {
       data: CoberturaComunicacionPoint[];
       sectors: Sector[];
+      granularity: TimeGranularity;
     }) {
+      const bands = roundBandsFor(data, granularity);
+
       return (
         <ResponsiveContainer width="100%" height={280}>
           <ComposedChart data={data} margin={{ top: 5, right: 16, left: 0, bottom: 5 }}>
             <CartesianGrid strokeDasharray="3 3" stroke="#f1f5f9" vertical={false} />
+            {bands.map((band) => (
+              <ReferenceArea
+                key={band.week.label}
+                x1={band.x1}
+                x2={band.x2}
+                fill={band.week.color}
+                fillOpacity={0.12}
+                stroke={band.week.color}
+                strokeOpacity={0.4}
+                ifOverflow="visible"
+                label={{ value: band.week.label, position: "insideTop", fill: band.week.color, fontSize: 11, fontWeight: 600 }}
+              />
+            ))}
             <XAxis dataKey="label" tick={{ fontSize: 11, fill: "#94a3b8" }} />
             <YAxis tick={{ fontSize: 11, fill: "#94a3b8" }} unit="%" width={44} />
             <Tooltip contentStyle={{ fontSize: 12, borderRadius: 8, border: "1px solid #e2e8f0" }} />
@@ -67,9 +116,11 @@ const Inner = dynamic(
 export function CoberturaComunicacionChart({
   data,
   sectors,
+  granularity,
 }: {
   data: CoberturaComunicacionPoint[];
   sectors: Sector[];
+  granularity: TimeGranularity;
 }) {
-  return <Inner data={data} sectors={sectors} />;
+  return <Inner data={data} sectors={sectors} granularity={granularity} />;
 }

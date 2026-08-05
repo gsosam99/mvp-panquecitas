@@ -4,21 +4,30 @@ import Link from 'next/link';
 import { usePathname, useRouter } from 'next/navigation';
 import { toast } from 'sonner';
 import { Button } from '@/components/ui/button';
+import type { DashboardRole } from '@/types';
 
-const NAV_ITEMS = [
-  { href: '/dashboard', label: 'Dashboard' },
-  { href: '/sap-upload', label: 'Carga SAP' },
-  { href: '/pedidos-pendientes', label: 'Pedidos Pendientes' },
-  { href: '/despachos', label: 'Despachos SAP' },
-  { href: '/sell-out-cadenas', label: 'Sell-Out Cadenas' },
-  { href: '/cartera', label: 'Cartera de Clientes' },
-  { href: '/products', label: 'Productos' },
-  { href: '/personal', label: 'Personal de Campo' },
-];
+// Toda la carga de datos (SAP, cartera, despachos, pedidos pendientes,
+// sell-out de cadenas) vive solo en el menú de DIENN — es el único canal
+// para subir datos a la app. Administrador se queda únicamente con el
+// Dashboard, para que no se pueda subir información desde ese perfil y
+// alterar sin querer la calidad de lo que se visualiza (ver chat con
+// Alejandro, 05-08-2026).
+const NAV_ITEMS: Record<DashboardRole, { href: string; label: string }[]> = {
+  ADMIN: [{ href: '/dashboard', label: 'Dashboard' }],
+  DIENN: [
+    { href: '/dashboard', label: 'Dashboard' },
+    { href: '/sap-upload', label: 'Carga SAP' },
+    { href: '/pedidos-pendientes', label: 'Pedidos Pendientes' },
+    { href: '/despachos', label: 'Despachos SAP' },
+    { href: '/sell-out-cadenas', label: 'Sell-Out Cadenas' },
+    { href: '/cartera', label: 'Cartera de Clientes' },
+  ],
+};
 
-export function AdminNav() {
+export function AdminNav({ role }: { role: DashboardRole }) {
   const pathname = usePathname();
   const router = useRouter();
+  const items = NAV_ITEMS[role];
 
   async function handleLogout() {
     await fetch('/api/auth/logout', { method: 'POST' });
@@ -36,7 +45,7 @@ export function AdminNav() {
               Panquecitas
             </span>
             <nav className="flex items-center gap-1">
-              {NAV_ITEMS.map((item) => (
+              {items.map((item) => (
                 <Link
                   key={item.href}
                   href={item.href}

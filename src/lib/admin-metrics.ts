@@ -6,7 +6,10 @@
 import { isPvpDeviated } from "@/data/pvp-thresholds";
 import { sectorGroup, SECTOR_LABELS, type Sector } from "@/lib/sectors";
 import { bucketKeyFor, bucketLabelFor } from "@/lib/date-buckets";
+import { CAMPAIGN_WEEKS } from "@/lib/campaign-weeks";
 import type { Location } from "@/types";
+
+export { CAMPAIGN_WEEKS };
 
 /** Una fila por cliente de la cartera, con su última visita de mercaderista. */
 export interface AdminPdvRow {
@@ -243,19 +246,6 @@ export interface ActivacionPoint {
   count: number;
 }
 
-// ── Semanas de auditoría del piloto (quincenal: S2, S4, S6, S8) ────
-// Calendario fijo del plan de campo — lunes a viernes inclusive, dado por
-// Alejandro (chat 05-08-2026). No son semanas ISO: son las ventanas reales
-// en que los mercaderistas hacen su ronda de auditoría formal, y tanto el
-// gráfico de POP/precio como el de riesgo de stock-out en el tiempo se
-// leen sobre estos mismos 4 cortes.
-export const CAMPAIGN_WEEKS: { label: string; start: string; end: string }[] = [
-  { label: "S2", start: "2026-08-10", end: "2026-08-14" },
-  { label: "S4", start: "2026-08-24", end: "2026-08-28" },
-  { label: "S6", start: "2026-09-07", end: "2026-09-11" },
-  { label: "S8", start: "2026-09-21", end: "2026-09-25" },
-];
-
 /** Última visita de cada location dentro de [start, end] (inclusive), como filas AdminPdvRow reutilizables por precioEvaluable/precioIncorrecto. */
 function rowsForWeekWindow(
   visits: AdminVisitSnapshot[],
@@ -303,6 +293,8 @@ function rowsForWeekWindow(
 
 export interface EjecucionSemanalPoint {
   label: string;
+  /** Color fijo de la ronda (ver CAMPAIGN_WEEKS) — mismo color en todos los gráficos que usan rondas. */
+  color: string;
   popPct: number;
   precioPct: number;
 }
@@ -331,6 +323,7 @@ export function computeEjecucionSemanal(
 
     points.push({
       label: week.label,
+      color: week.color,
       popPct: pct(conPop, rows.length),
       precioPct: pct(correctos, evaluables.length),
     });
@@ -340,6 +333,8 @@ export function computeEjecucionSemanal(
 
 export interface RiesgoStockOutPoint {
   label: string;
+  /** Color fijo de la ronda (ver CAMPAIGN_WEEKS) — mismo color en todos los gráficos que usan rondas. */
+  color: string;
   count: number;
 }
 
@@ -369,7 +364,7 @@ export function computeRiesgoStockOutSemanal(
       const total = (v.unidadesAnaquel ?? 0) + v.unidadesDeposito;
       if (total < STOCK_OUT_UMBRAL_UNIDADES) count++;
     }
-    points.push({ label: week.label, count });
+    points.push({ label: week.label, color: week.color, count });
   }
   return points;
 }

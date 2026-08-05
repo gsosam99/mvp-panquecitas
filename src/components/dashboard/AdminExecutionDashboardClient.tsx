@@ -6,6 +6,7 @@ import { IndicatorTable, type IndicatorTableRow } from "@/components/dashboard/I
 import { ClientesActivadosChart } from "@/components/dashboard/ClientesActivadosChart";
 import { EjecucionSemanalChart } from "@/components/dashboard/EjecucionSemanalChart";
 import { RiesgoStockOutSemanalChart } from "@/components/dashboard/RiesgoStockOutSemanalChart";
+import { RoundLegend } from "@/components/dashboard/RoundLegend";
 import { ReportPrintButton } from "@/components/dashboard/ReportPrintButton";
 import { ReportPrintHeader } from "@/components/dashboard/ReportPrintHeader";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -261,10 +262,10 @@ export function AdminExecutionDashboardClient({
       <Card className="mb-6 print-avoid-break">
         <CardHeader>
           <CardTitle>Ejecución por semana de auditoría (POP y Precio)</CardTitle>
-          <p className="text-xs text-slate-400 mt-1">
-            % de clientes visitados esa semana con material POP y con precio correcto según su zona. Semanas de
-            auditoría del piloto (lunes a viernes): S2 10-14/08 · S4 24-28/08 · S6 07-11/09 · S8 21-25/09.
+          <p className="text-xs text-slate-400 mt-1 mb-2">
+            % de clientes visitados esa semana con material POP y con precio correcto según su zona.
           </p>
+          <RoundLegend />
         </CardHeader>
         <CardContent>
           {ejecucionSemanal.length > 0 ? (
@@ -284,10 +285,11 @@ export function AdminExecutionDashboardClient({
       <Card className="mb-6 print-avoid-break">
         <CardHeader>
           <CardTitle>Riesgo de stock-out en el tiempo</CardTitle>
-          <p className="text-xs text-slate-400 mt-1">
+          <p className="text-xs text-slate-400 mt-1 mb-2">
             Clientes con menos de {STOCK_OUT_UMBRAL_UNIDADES} unidades entre anaquel y depósito, al cierre de cada
             semana de auditoría (acumulado: usa la última visita conocida de cada PDV hasta esa fecha).
           </p>
+          <RoundLegend />
         </CardHeader>
         <CardContent>
           {riesgoStockOutSemanal.length > 0 ? (

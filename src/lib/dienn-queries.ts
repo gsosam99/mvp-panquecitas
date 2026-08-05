@@ -47,6 +47,26 @@ export async function getTotalToneladas(sector?: Sector): Promise<number> {
   return Math.round((totalKg / 1000) * 100) / 100;
 }
 
+// ── 1b. Total Ton pedidas (aún no facturadas) ──────────────────────
+// Mismo criterio que getTotalToneladas: solo Panquecitas, mismo universo de
+// PDVs por sector. sap_pending_orders.quantity ya viene en kg y solo
+// representa lo que falta por facturar (Pedido − Facturado, ver
+// handleFacturacionUpload en /api/sap-upload) — no se solapa con lo ya
+// contado en getTotalToneladas.
+
+export async function getTotalToneladasPedidas(sector?: Sector): Promise<number> {
+  const supabase = createSupabaseServiceClient();
+  const { data } = await supabase
+    .from("sap_pending_orders")
+    .select("quantity, location_id")
+    .eq("product_id", PRODUCT_IDS.PANQUECITAS);
+
+  const ids = await getUniverseLocationIds(sector);
+  const rows = (data ?? []) as { quantity: number; location_id: string }[];
+  const totalKg = rows.filter((r) => ids.has(r.location_id)).reduce((s, r) => s + r.quantity, 0);
+  return Math.round((totalKg / 1000) * 100) / 100;
+}
+
 // ── 2. Running de Ventas ──────────────────────────────────────────
 // Kg_Semanal_Promedio = Total_Kg_Vendidos / Numero_Semanas_Evaluadas
 // (fórmula dada en el documento). Días de inventario = inventario

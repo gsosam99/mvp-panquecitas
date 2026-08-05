@@ -6,6 +6,7 @@ import {
   getPenetracionRecompra,
   getRunningVentas,
   getTotalToneladas,
+  getTotalToneladasPedidas,
 } from "@/lib/dienn-queries";
 import { getIndiceTiendaPerfecta } from "@/lib/admin-queries";
 import { computeSellOut } from "@/lib/sellout-queries";
@@ -16,15 +17,17 @@ import { DiennDashboardClient, type SectorBundle } from "@/components/dashboard/
 const PILOT_SECTOR_KEYS: Sector[] = ["cumana", "barquisimeto_este"];
 
 async function getBundle(sector?: Sector): Promise<SectorBundle> {
-  const [totalToneladas, runningVentas, penetracionRecompra, detalleSegmentos, pedidosPendientes] = await Promise.all([
-    getTotalToneladas(sector),
-    getRunningVentas(sector),
-    getPenetracionRecompra(sector),
-    getDetalleClientesPorSegmento(sector),
-    getPedidosPendientes(sector),
-  ]);
+  const [totalToneladas, totalToneladasPedidas, runningVentas, penetracionRecompra, detalleSegmentos, pedidosPendientes] =
+    await Promise.all([
+      getTotalToneladas(sector),
+      getTotalToneladasPedidas(sector),
+      getRunningVentas(sector),
+      getPenetracionRecompra(sector),
+      getDetalleClientesPorSegmento(sector),
+      getPedidosPendientes(sector),
+    ]);
 
-  return { totalToneladas, runningVentas, penetracionRecompra, detalleSegmentos, pedidosPendientes };
+  return { totalToneladas, totalToneladasPedidas, runningVentas, penetracionRecompra, detalleSegmentos, pedidosPendientes };
 }
 
 // El objetivo de este dashboard es reactivo en el cliente (Tabs

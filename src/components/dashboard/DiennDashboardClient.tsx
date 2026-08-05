@@ -7,6 +7,7 @@ import { ReportPrintButton } from "@/components/dashboard/ReportPrintButton";
 import { ReportPrintHeader } from "@/components/dashboard/ReportPrintHeader";
 import { PenetracionRecompraChart } from "@/components/dashboard/PenetracionRecompraChart";
 import { CoberturaComunicacionChart } from "@/components/dashboard/CoberturaComunicacionChart";
+import { RoundLegend } from "@/components/dashboard/RoundLegend";
 import { SellOutChart } from "@/components/dashboard/SellOutChart";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Separator } from "@/components/ui/separator";
@@ -37,6 +38,8 @@ import type { SapPendingOrder } from "@/types";
 
 export interface SectorBundle {
   totalToneladas: number;
+  /** Volumen pedido aún no facturado (Pedido − Facturado), mismo universo que totalToneladas. */
+  totalToneladasPedidas: number;
   runningVentas: RunningVentasResult;
   penetracionRecompra: Record<TimeGranularity, PenetracionRecompraPoint[]>;
   detalleSegmentos: DetalleSegmentoRow[];
@@ -153,11 +156,18 @@ export function DiennDashboardClient({
       </div>
 
       {/* ── Tarjetas de KPIs dinámicos ─────────────────────────────────── */}
-      <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mb-6 print-avoid-break">
+      <div className="grid grid-cols-1 md:grid-cols-4 gap-4 mb-6 print-avoid-break">
         <KpiCard
           title="Total Ton"
           value={`${bundle.totalToneladas.toLocaleString("es-VE", { maximumFractionDigits: 2 })} Ton`}
-          subtitle="Volumen acumulado de Panquecitas"
+          subtitle="Volumen acumulado facturado de Panquecitas"
+          product="panquecitas"
+        />
+
+        <KpiCard
+          title="Total Ton Pedidas"
+          value={`${bundle.totalToneladasPedidas.toLocaleString("es-VE", { maximumFractionDigits: 2 })} Ton`}
+          subtitle="Volumen pedido aún sin facturar"
           product="panquecitas"
         />
 
@@ -279,13 +289,19 @@ export function DiennDashboardClient({
       <Card className="mb-6 print-avoid-break">
         <CardHeader>
           <CardTitle>Cobertura y Comunicación por Ciudad (% vs Universo)</CardTitle>
-          <p className="text-xs text-slate-400 mt-1">
+          <p className="text-xs text-slate-400 mt-1 mb-2">
             Proxy con datos disponibles: cobertura = % PDV visitados; comunicación = % PDV con material POP.
+            {granularity === "month" && " Las rondas de auditoría no se distinguen en vista mensual — cambia a Día o Semana."}
           </p>
+          <RoundLegend />
         </CardHeader>
         <CardContent>
           {coberturaComunicacion[granularity].length > 0 ? (
-            <CoberturaComunicacionChart data={coberturaComunicacion[granularity]} sectors={scatterSectors} />
+            <CoberturaComunicacionChart
+              data={coberturaComunicacion[granularity]}
+              sectors={scatterSectors}
+              granularity={granularity}
+            />
           ) : (
             <div className="h-[280px] flex items-center justify-center text-slate-400">
               <div className="text-center">
