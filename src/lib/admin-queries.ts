@@ -3,7 +3,7 @@ import { PRODUCT_IDS } from "@/data/catalog";
 import { getUniverseLocations } from "@/lib/universe";
 import { sectorGroup } from "@/lib/sectors";
 import { PVP_TARGETS } from "@/data/pvp-thresholds";
-import { desviado400, desviado800, type AdminPdvRow } from "@/lib/admin-metrics";
+import { desviado400, desviado800, type AdminPdvRow, type AdminVisitSnapshot } from "@/lib/admin-metrics";
 
 // ────────────────────────────────────────────────────────────────
 // Perfil Administrador — Auditoría, Control de Ejecución en PDV.
@@ -134,6 +134,75 @@ export async function getAdminExecutionSnapshot(): Promise<AdminPdvRow[]> {
       depositAccess: visit?.deposit_access ?? null,
     };
   });
+}
+
+// ── Historial completo de visitas (no solo la última) ─────────────
+// getAdminExecutionSnapshot() solo se queda con la última visita por PDV —
+// suficiente para las tarjetas y listas de "ahora mismo", pero no permite
+// reconstruir una serie en el tiempo. Los gráficos de ejecución semanal
+// (POP/precio por semana S2/S4/S6/S8) y de riesgo de stock-out en el
+// tiempo necesitan el historial completo para poder recortarlo por
+// ventana de fecha en el cliente (mismo patrón de "una sola query, todo el
+// filtrado en memoria" que el resto del dashboard).
+
+export async function getAdminVisitHistory(): Promise<AdminVisitSnapshot[]> {
+  const supabase = createSupabaseServiceClient();
+  const universo = await getUniverseLocations();
+  if (universo.length === 0) return [];
+  const locationIds = universo.map((l) => l.id);
+
+  const { data: visitsData } = await supabase
+    .from("mercaderista_visits")
+    .select(
+      "id, location_id, created_at, pop_present, price_400, price_400_na, price_800, price_800_na, total_units_anaquel, deposit_access"
+    )
+    .in("location_id", locationIds)
+    .order("created_at", { ascending: true });
+
+  const visits = (visitsData ?? []) as {
+    id: string;
+    location_id: string;
+    created_at: string;
+    pop_present: boolean;
+    price_400: number | null;
+    price_400_na: boolean;
+    price_800: number | null;
+    price_800_na: boolean;
+    total_units_anaquel: number | null;
+    deposit_access: boolean;
+  }[];
+  if (visits.length === 0) return [];
+
+  // Unidades en depósito por visita — mismo criterio de conversión
+  // bultos→unidades que getInventarioDepositoKg en dienn-queries.ts.
+  const visitIds = visits.map((v) => v.id);
+  const { data: variantsData } = await supabase.from("variants").select("id, units_per_bulk");
+  const unitsPerBulk = new Map(
+    ((variantsData ?? []) as { id: string; units_per_bulk: number }[]).map((v) => [v.id, v.units_per_bulk])
+  );
+
+  const { data: auditsData } = await supabase
+    .from("inventory_audits")
+    .select("visit_id, variant_id, quantity")
+    .eq("zone", "BODEGA")
+    .in("visit_id", visitIds);
+
+  const unidadesDepositoByVisit = new Map<string, number>();
+  for (const a of (auditsData ?? []) as { visit_id: string; variant_id: string; quantity: number }[]) {
+    const unidades = a.quantity * (unitsPerBulk.get(a.variant_id) ?? 1);
+    unidadesDepositoByVisit.set(a.visit_id, (unidadesDepositoByVisit.get(a.visit_id) ?? 0) + unidades);
+  }
+
+  return visits.map((v) => ({
+    locationId: v.location_id,
+    createdAt: v.created_at,
+    popPresent: v.pop_present,
+    price400: v.price_400_na ? null : v.price_400,
+    price800: v.price_800_na ? null : v.price_800,
+    unidadesAnaquel: v.total_units_anaquel,
+    unidadesDeposito: unidadesDepositoByVisit.get(v.id) ?? 0,
+    depositAccess: v.deposit_access,
+  }));
 }
 
 // ── "Índice Tienda Perfecta" ──────────────────────────────────────

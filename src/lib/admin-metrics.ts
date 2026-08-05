@@ -31,6 +31,18 @@ export interface AdminPdvRow {
   depositAccess: boolean | null;
 }
 
+/** Una visita de mercaderista, sin recortar a "la última" — para series en el tiempo (ver getAdminVisitHistory). */
+export interface AdminVisitSnapshot {
+  locationId: string;
+  createdAt: string;
+  popPresent: boolean;
+  price400: number | null;
+  price800: number | null;
+  unidadesAnaquel: number | null;
+  unidadesDeposito: number;
+  depositAccess: boolean;
+}
+
 /** Un cliente con menos unidades que esto (anaquel + depósito) está en riesgo. */
 export const STOCK_OUT_UMBRAL_UNIDADES = 2;
 
@@ -229,6 +241,137 @@ export interface ActivacionPoint {
   label: string;
   pct: number;
   count: number;
+}
+
+// ── Semanas de auditoría del piloto (quincenal: S2, S4, S6, S8) ────
+// Calendario fijo del plan de campo — lunes a viernes inclusive, dado por
+// Alejandro (chat 05-08-2026). No son semanas ISO: son las ventanas reales
+// en que los mercaderistas hacen su ronda de auditoría formal, y tanto el
+// gráfico de POP/precio como el de riesgo de stock-out en el tiempo se
+// leen sobre estos mismos 4 cortes.
+export const CAMPAIGN_WEEKS: { label: string; start: string; end: string }[] = [
+  { label: "S2", start: "2026-08-10", end: "2026-08-14" },
+  { label: "S4", start: "2026-08-24", end: "2026-08-28" },
+  { label: "S6", start: "2026-09-07", end: "2026-09-11" },
+  { label: "S8", start: "2026-09-21", end: "2026-09-25" },
+];
+
+/** Última visita de cada location dentro de [start, end] (inclusive), como filas AdminPdvRow reutilizables por precioEvaluable/precioIncorrecto. */
+function rowsForWeekWindow(
+  visits: AdminVisitSnapshot[],
+  window: { start: string; end: string },
+  locationsById: Map<string, Location>,
+  targetsByLocation: Map<string, { target400: number | null; target800: number | null }>,
+  allowedLocationIds: Set<string>
+): AdminPdvRow[] {
+  const inWindow = visits.filter((v) => {
+    const day = v.createdAt.slice(0, 10);
+    return day >= window.start && day <= window.end && allowedLocationIds.has(v.locationId);
+  });
+
+  const lastByLocation = new Map<string, AdminVisitSnapshot>();
+  for (const v of inWindow) {
+    const prev = lastByLocation.get(v.locationId);
+    if (!prev || v.createdAt > prev.createdAt) lastByLocation.set(v.locationId, v);
+  }
+
+  const rows: AdminPdvRow[] = [];
+  for (const [locationId, v] of lastByLocation) {
+    const location = locationsById.get(locationId);
+    if (!location) continue;
+    const targets = targetsByLocation.get(locationId) ?? { target400: null, target800: null };
+    rows.push({
+      location,
+      comprador: false,
+      primeraCompra: null,
+      visitado: true,
+      ultimaVisita: v.createdAt,
+      popPresent: v.popPresent,
+      productPresent: null,
+      frontFaces: null,
+      price400: v.price400,
+      price800: v.price800,
+      target400: targets.target400,
+      target800: targets.target800,
+      unidadesAnaquel: v.unidadesAnaquel,
+      unidadesDeposito: v.unidadesDeposito,
+      depositAccess: v.depositAccess,
+    });
+  }
+  return rows;
+}
+
+export interface EjecucionSemanalPoint {
+  label: string;
+  popPct: number;
+  precioPct: number;
+}
+
+/**
+ * % de clientes con material POP y % con precio correcto, por semana de
+ * auditoría (S2/S4/S6/S8) — sobre los clientes VISITADOS esa semana (mismo
+ * criterio que las tarjetas de KPI: % POP = con POP / visitados, % precio
+ * correcto = correctos / evaluables). Una semana sin visitas en el corte de
+ * filtros vigente simplemente no aparece en el gráfico.
+ */
+export function computeEjecucionSemanal(
+  visits: AdminVisitSnapshot[],
+  locationsById: Map<string, Location>,
+  targetsByLocation: Map<string, { target400: number | null; target800: number | null }>,
+  allowedLocationIds: Set<string>
+): EjecucionSemanalPoint[] {
+  const points: EjecucionSemanalPoint[] = [];
+  for (const week of CAMPAIGN_WEEKS) {
+    const rows = rowsForWeekWindow(visits, week, locationsById, targetsByLocation, allowedLocationIds);
+    if (rows.length === 0) continue;
+
+    const conPop = rows.filter((r) => r.popPresent === true).length;
+    const evaluables = rows.filter(precioEvaluable);
+    const correctos = evaluables.filter((r) => !precioIncorrecto(r)).length;
+
+    points.push({
+      label: week.label,
+      popPct: pct(conPop, rows.length),
+      precioPct: pct(correctos, evaluables.length),
+    });
+  }
+  return points;
+}
+
+export interface RiesgoStockOutPoint {
+  label: string;
+  count: number;
+}
+
+/**
+ * Clientes en riesgo de stock-out "al cierre" de cada semana de auditoría
+ * (S2/S4/S6/S8): usa la última visita conocida de cada PDV hasta esa fecha
+ * (acumulado, no solo las visitas de esa semana puntual) — así un cliente
+ * visitado en S2 y no revisitado en S4 sigue contando con su dato de S2.
+ */
+export function computeRiesgoStockOutSemanal(
+  visits: AdminVisitSnapshot[],
+  allowedLocationIds: Set<string>
+): RiesgoStockOutPoint[] {
+  const points: RiesgoStockOutPoint[] = [];
+  for (const week of CAMPAIGN_WEEKS) {
+    const upToClose = visits.filter((v) => v.createdAt.slice(0, 10) <= week.end && allowedLocationIds.has(v.locationId));
+    if (upToClose.length === 0) continue;
+
+    const lastByLocation = new Map<string, AdminVisitSnapshot>();
+    for (const v of upToClose) {
+      const prev = lastByLocation.get(v.locationId);
+      if (!prev || v.createdAt > prev.createdAt) lastByLocation.set(v.locationId, v);
+    }
+
+    let count = 0;
+    for (const v of lastByLocation.values()) {
+      const total = (v.unidadesAnaquel ?? 0) + v.unidadesDeposito;
+      if (total < STOCK_OUT_UMBRAL_UNIDADES) count++;
+    }
+    points.push({ label: week.label, count });
+  }
+  return points;
 }
 
 export function computeActivacionSemanal(rows: AdminPdvRow[]): ActivacionPoint[] {

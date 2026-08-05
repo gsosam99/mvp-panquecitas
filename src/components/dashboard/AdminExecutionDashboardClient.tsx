@@ -4,12 +4,15 @@ import { useMemo, useState } from "react";
 import { KpiCard } from "@/components/dashboard/KpiCard";
 import { IndicatorTable, type IndicatorTableRow } from "@/components/dashboard/IndicatorTable";
 import { ClientesActivadosChart } from "@/components/dashboard/ClientesActivadosChart";
+import { EjecucionSemanalChart } from "@/components/dashboard/EjecucionSemanalChart";
+import { RiesgoStockOutSemanalChart } from "@/components/dashboard/RiesgoStockOutSemanalChart";
 import { ReportPrintButton } from "@/components/dashboard/ReportPrintButton";
 import { ReportPrintHeader } from "@/components/dashboard/ReportPrintHeader";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Separator } from "@/components/ui/separator";
 import { SECTOR_LABELS, type Sector } from "@/lib/sectors";
+import type { Location } from "@/types";
 import {
   CARAS_FRONTALES_MINIMO,
   STOCK_OUT_UMBRAL_UNIDADES,
@@ -22,6 +25,8 @@ import {
   clientesSinVentaSap,
   computeActivacionSemanal,
   computeAdminKpis,
+  computeEjecucionSemanal,
+  computeRiesgoStockOutSemanal,
   desviado400,
   desviado800,
   filterAdminRows,
@@ -30,6 +35,7 @@ import {
   tipoClienteOptions,
   unidadesTotales,
   type AdminPdvRow,
+  type AdminVisitSnapshot,
   type OficinaFilter,
 } from "@/lib/admin-metrics";
 
@@ -61,7 +67,13 @@ function toRow(row: AdminPdvRow, extra?: React.ReactNode, extraText?: string): I
   };
 }
 
-export function AdminExecutionDashboardClient({ rows }: { rows: AdminPdvRow[] }) {
+export function AdminExecutionDashboardClient({
+  rows,
+  visits,
+}: {
+  rows: AdminPdvRow[];
+  visits: AdminVisitSnapshot[];
+}) {
   const [oficina, setOficina] = useState<OficinaFilter>("TOTAL");
   const [grupoVendedor, setGrupoVendedor] = useState("");
   const [tipoClienteFilter, setTipoClienteFilter] = useState("");
@@ -75,6 +87,30 @@ export function AdminExecutionDashboardClient({ rows }: { rows: AdminPdvRow[] })
 
   const kpis = useMemo(() => computeAdminKpis(filtered), [filtered]);
   const activacion = useMemo(() => computeActivacionSemanal(filtered), [filtered]);
+
+  // Mapas de apoyo para los gráficos semanales (S2/S4/S6/S8): se derivan de
+  // `rows` completo (universo entero, no `filtered`) porque el recorte por
+  // Oficina/Grupo Vendedor se aplica aparte, vía el set de IDs permitidos.
+  const locationsById = useMemo(() => {
+    const map = new Map<string, Location>();
+    for (const r of rows) map.set(r.location.id, r.location);
+    return map;
+  }, [rows]);
+  const targetsByLocation = useMemo(() => {
+    const map = new Map<string, { target400: number | null; target800: number | null }>();
+    for (const r of rows) map.set(r.location.id, { target400: r.target400, target800: r.target800 });
+    return map;
+  }, [rows]);
+  const allowedLocationIds = useMemo(() => new Set(filtered.map((r) => r.location.id)), [filtered]);
+
+  const ejecucionSemanal = useMemo(
+    () => computeEjecucionSemanal(visits, locationsById, targetsByLocation, allowedLocationIds),
+    [visits, locationsById, targetsByLocation, allowedLocationIds]
+  );
+  const riesgoStockOutSemanal = useMemo(
+    () => computeRiesgoStockOutSemanal(visits, allowedLocationIds),
+    [visits, allowedLocationIds]
+  );
 
   const sinVenta = useMemo(() => clientesSinVentaSap(filtered), [filtered]);
   const conVentaBase = useMemo(() => clientesConVentaSap(filtered), [filtered]);
@@ -215,6 +251,52 @@ export function AdminExecutionDashboardClient({ rows }: { rows: AdminPdvRow[] })
               <div className="text-center">
                 <p className="text-4xl mb-2">📈</p>
                 <p>Sin ventas facturadas de Panquecitas todavía. Carga el reporte SAP.</p>
+              </div>
+            </div>
+          )}
+        </CardContent>
+      </Card>
+
+      {/* ── Gráfico: % Material POP y % Precio correcto por semana ────── */}
+      <Card className="mb-6 print-avoid-break">
+        <CardHeader>
+          <CardTitle>Ejecución por semana de auditoría (POP y Precio)</CardTitle>
+          <p className="text-xs text-slate-400 mt-1">
+            % de clientes visitados esa semana con material POP y con precio correcto según su zona. Semanas de
+            auditoría del piloto (lunes a viernes): S2 10-14/08 · S4 24-28/08 · S6 07-11/09 · S8 21-25/09.
+          </p>
+        </CardHeader>
+        <CardContent>
+          {ejecucionSemanal.length > 0 ? (
+            <EjecucionSemanalChart data={ejecucionSemanal} />
+          ) : (
+            <div className="h-[280px] flex items-center justify-center text-slate-400">
+              <div className="text-center">
+                <p className="text-4xl mb-2">📊</p>
+                <p>Sin visitas registradas todavía en ninguna semana de auditoría (S2/S4/S6/S8).</p>
+              </div>
+            </div>
+          )}
+        </CardContent>
+      </Card>
+
+      {/* ── Gráfico: riesgo de stock-out en el tiempo ──────────────────── */}
+      <Card className="mb-6 print-avoid-break">
+        <CardHeader>
+          <CardTitle>Riesgo de stock-out en el tiempo</CardTitle>
+          <p className="text-xs text-slate-400 mt-1">
+            Clientes con menos de {STOCK_OUT_UMBRAL_UNIDADES} unidades entre anaquel y depósito, al cierre de cada
+            semana de auditoría (acumulado: usa la última visita conocida de cada PDV hasta esa fecha).
+          </p>
+        </CardHeader>
+        <CardContent>
+          {riesgoStockOutSemanal.length > 0 ? (
+            <RiesgoStockOutSemanalChart data={riesgoStockOutSemanal} />
+          ) : (
+            <div className="h-[280px] flex items-center justify-center text-slate-400">
+              <div className="text-center">
+                <p className="text-4xl mb-2">📉</p>
+                <p>Sin visitas registradas todavía en ninguna semana de auditoría (S2/S4/S6/S8).</p>
               </div>
             </div>
           )}
