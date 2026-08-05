@@ -9,10 +9,17 @@ import {
   type Sector,
 } from "@/lib/universe";
 import { LOCATION_COLUMNS } from "@/lib/location-columns";
-import { bucketKeyFor, bucketLabelFor, type TimeGranularity } from "@/lib/date-buckets";
+import {
+  bucketKeyFor,
+  bucketLabelFor,
+  panBucketKeyFor,
+  panBucketLabelFor,
+  type PanComparisonGranularity,
+  type TimeGranularity,
+} from "@/lib/date-buckets";
 import type { Location, LocationType, SapPendingOrder } from "@/types";
 
-export type { TimeGranularity };
+export type { PanComparisonGranularity, TimeGranularity };
 
 // ────────────────────────────────────────────────────────────────
 // Perfil DIENN — Dashboard estratégico reconstruido desde 0 (ver
@@ -32,39 +39,83 @@ async function getUniverseLocationIds(sector?: Sector): Promise<Set<string>> {
   return new Set(filtered.map((l) => l.id));
 }
 
-// ── 1. Total Ton ───────────────────────────────────────────────────
+// ── 1. Total Ton / 1b. Total Ton pedidas / 3. Mix de Producto ──────
+// Las tres cifras (Total Ton facturado, Total Ton pendiente por facturar,
+// y el desglose por presentación 400g/800g) se calculan de UNA sola pasada
+// sobre las mismas filas, para que la suma de las presentaciones del Mix
+// de Producto coincida siempre, exactamente, con el total global — antes
+// getTotalToneladas sumaba TODAS las filas de sap_sell_in_records
+// (product_id = Panquecitas) mientras que el Mix solo contaba las que
+// traían variant_id, así que una fila sin presentación reconocida se
+// contaba en el total pero desaparecía del desglose por SKU. Fuente única
+// de verdad: sap_sell_in_records (facturado) + sap_pending_orders
+// (pendiente), ambas filtradas por variant_id no nulo — ver migraciones
+// 008/009 y SAP_MATERIAL_VARIANT_MAP en catalog.ts.
 
-export async function getTotalToneladas(sector?: Sector): Promise<number> {
-  const supabase = createSupabaseServiceClient();
-  const { data } = await supabase
-    .from("sap_sell_in_records")
-    .select("quantity_kg, location_id")
-    .eq("product_id", PRODUCT_IDS.PANQUECITAS);
-
-  const ids = await getUniverseLocationIds(sector);
-  const rows = (data ?? []) as { quantity_kg: number; location_id: string }[];
-  const totalKg = rows.filter((r) => ids.has(r.location_id)).reduce((s, r) => s + r.quantity_kg, 0);
-  return Math.round((totalKg / 1000) * 100) / 100;
+interface VentasPorPresentacion {
+  facturadaKgByVariant: Record<PresentacionMix, number>;
+  facturadaKgTotal: number;
+  /** Pedido total (facturado + pendiente) por presentación — "Cantidad Pedido" del reporte SAP. */
+  pedidaKgByVariant: Record<PresentacionMix, number>;
+  pedidaKgTotal: number;
 }
 
-// ── 1b. Total Ton pedidas (aún no facturadas) ──────────────────────
-// Mismo criterio que getTotalToneladas: solo Panquecitas, mismo universo de
-// PDVs por sector. sap_pending_orders.quantity ya viene en kg y solo
-// representa lo que falta por facturar (Pedido − Facturado, ver
-// handleFacturacionUpload en /api/sap-upload) — no se solapa con lo ya
-// contado en getTotalToneladas.
-
-export async function getTotalToneladasPedidas(sector?: Sector): Promise<number> {
+async function getVentasPorPresentacion(sector?: Sector): Promise<VentasPorPresentacion> {
   const supabase = createSupabaseServiceClient();
-  const { data } = await supabase
-    .from("sap_pending_orders")
-    .select("quantity, location_id")
-    .eq("product_id", PRODUCT_IDS.PANQUECITAS);
-
   const ids = await getUniverseLocationIds(sector);
-  const rows = (data ?? []) as { quantity: number; location_id: string }[];
-  const totalKg = rows.filter((r) => ids.has(r.location_id)).reduce((s, r) => s + r.quantity, 0);
-  return Math.round((totalKg / 1000) * 100) / 100;
+
+  const [{ data: sellInData }, { data: pendingData }] = await Promise.all([
+    supabase
+      .from("sap_sell_in_records")
+      .select("quantity_kg, location_id, variant_id")
+      .eq("product_id", PRODUCT_IDS.PANQUECITAS)
+      .not("variant_id", "is", null),
+    supabase
+      .from("sap_pending_orders")
+      .select("quantity, location_id, variant_id")
+      .eq("product_id", PRODUCT_IDS.PANQUECITAS)
+      .not("variant_id", "is", null),
+  ]);
+
+  const facturadaKgByVariant: Record<PresentacionMix, number> = { "400g": 0, "800g": 0 };
+  for (const r of (sellInData ?? []) as { quantity_kg: number; location_id: string; variant_id: string }[]) {
+    if (!ids.has(r.location_id)) continue;
+    const presentacion = VARIANT_TO_PRESENTACION[r.variant_id];
+    if (!presentacion) continue;
+    facturadaKgByVariant[presentacion] += r.quantity_kg;
+  }
+
+  const pedidaKgByVariant: Record<PresentacionMix, number> = {
+    "400g": facturadaKgByVariant["400g"],
+    "800g": facturadaKgByVariant["800g"],
+  };
+  for (const r of (pendingData ?? []) as { quantity: number; location_id: string; variant_id: string }[]) {
+    if (!ids.has(r.location_id)) continue;
+    const presentacion = VARIANT_TO_PRESENTACION[r.variant_id];
+    if (!presentacion) continue;
+    pedidaKgByVariant[presentacion] += r.quantity;
+  }
+
+  return {
+    facturadaKgByVariant,
+    facturadaKgTotal: facturadaKgByVariant["400g"] + facturadaKgByVariant["800g"],
+    pedidaKgByVariant,
+    pedidaKgTotal: pedidaKgByVariant["400g"] + pedidaKgByVariant["800g"],
+  };
+}
+
+export async function getTotalToneladas(sector?: Sector): Promise<number> {
+  const { facturadaKgTotal } = await getVentasPorPresentacion(sector);
+  return Math.round((facturadaKgTotal / 1000) * 100) / 100;
+}
+
+// "Pedidas" = lo pedido que aún no se ha facturado (Pedido total − Facturado),
+// mismo número que antes sumaba directo de sap_pending_orders.quantity, pero
+// ahora reconciliado con el mismo origen de datos que el Mix de Producto.
+export async function getTotalToneladasPedidas(sector?: Sector): Promise<number> {
+  const { facturadaKgTotal, pedidaKgTotal } = await getVentasPorPresentacion(sector);
+  const pendienteKgTotal = pedidaKgTotal - facturadaKgTotal;
+  return Math.round((pendienteKgTotal / 1000) * 100) / 100;
 }
 
 // ── 2. Running de Ventas ──────────────────────────────────────────
@@ -162,13 +213,17 @@ export async function getRunningVentas(sector?: Sector): Promise<RunningVentasRe
 // ── 3. Mix de Producto (cantidad facturada SAP por presentación) ───
 // Toneladas facturadas 400g vs 800g desde sap_sell_in_records.variant_id
 // (llenado al cargar el reporte N7_V_SD83_WEB_001 — ver migración 008 y
-// SAP_MATERIAL_VARIANT_MAP). Ya no usa el motor de Sell-Out.
+// SAP_MATERIAL_VARIANT_MAP). Ya no usa el motor de Sell-Out. La suma de
+// las dos presentaciones coincide siempre con getTotalToneladas porque
+// ambas salen de getVentasPorPresentacion (ver arriba).
 
 export type PresentacionMix = "400g" | "800g";
 
 export interface MixProductoTonPoint {
   variant: PresentacionMix;
   toneladas: number;
+  /** % que representa el facturado de esta presentación sobre el total pedido combinado (400g+800g, facturado+pendiente). */
+  pctSobrePedido: number;
 }
 
 const VARIANT_TO_PRESENTACION: Record<string, PresentacionMix> = {
@@ -179,26 +234,13 @@ const VARIANT_TO_PRESENTACION: Record<string, PresentacionMix> = {
 };
 
 export async function getMixProducto(sector?: Sector): Promise<MixProductoTonPoint[]> {
-  const supabase = createSupabaseServiceClient();
-  const ids = await getUniverseLocationIds(sector);
-
-  const { data } = await supabase
-    .from("sap_sell_in_records")
-    .select("quantity_kg, location_id, variant_id")
-    .eq("product_id", PRODUCT_IDS.PANQUECITAS)
-    .not("variant_id", "is", null);
-
-  const kgByVariant: Record<PresentacionMix, number> = { "400g": 0, "800g": 0 };
-  for (const r of (data ?? []) as { quantity_kg: number; location_id: string; variant_id: string }[]) {
-    if (!ids.has(r.location_id)) continue;
-    const presentacion = VARIANT_TO_PRESENTACION[r.variant_id];
-    if (!presentacion) continue;
-    kgByVariant[presentacion] += r.quantity_kg;
-  }
+  const { facturadaKgByVariant, pedidaKgTotal } = await getVentasPorPresentacion(sector);
 
   return (["400g", "800g"] as PresentacionMix[]).map((variant) => ({
     variant,
-    toneladas: Math.round((kgByVariant[variant] / 1000) * 100) / 100,
+    toneladas: Math.round((facturadaKgByVariant[variant] / 1000) * 100) / 100,
+    pctSobrePedido:
+      pedidaKgTotal > 0 ? Math.round((facturadaKgByVariant[variant] / pedidaKgTotal) * 1000) / 10 : 0,
   }));
 }
 
@@ -328,6 +370,123 @@ export async function getPedidoVsVentas(
   return {
     day: buildPedidoVsVentasPeriods(facturada, pendiente, ids, "day"),
     week: buildPedidoVsVentasPeriods(facturada, pendiente, ids, "week"),
+  };
+}
+
+// ── 3c. Panquecitas vs Harina PAN (por tiempo) ─────────────────────
+// Compara volumen (pedido + facturado, sumados) de Panquecitas contra
+// Harina PAN, día/mes/trimestre, sobre dos poblaciones posibles:
+//   - "clientes": solo PDV que sí tienen actividad SAP de Panquecitas
+//     (pedido y/o factura — mismo criterio que AdminPdvRow.comprador).
+//   - "universo": los 358 PDV del piloto, hayan comprado Panquecitas o no.
+// OJO: Harina PAN llega solo por el reporte mensual agregado
+// (handleMonthlyUpload), que no genera sap_pending_orders ni variant_id —
+// así que su serie "pedido+facturado" es en la práctica solo facturado.
+
+export type PanComparisonPoblacion = "clientes" | "universo";
+
+export interface PanVsHarinaPanPoint {
+  bucket: string;
+  label: string;
+  panquecitasKg: number;
+  harinaPanKg: number;
+}
+
+async function getPanVsHarinaPanUniverse(
+  sector: Sector | undefined,
+  poblacion: PanComparisonPoblacion
+): Promise<Set<string>> {
+  const universo = await getUniverseLocations();
+  const universoFiltrado = sector ? universo.filter((l) => sectorGroup(l.oficina_venta) === sector) : universo;
+  const ids = new Set(universoFiltrado.map((l) => l.id));
+  if (poblacion === "universo" || ids.size === 0) return ids;
+
+  const supabase = createSupabaseServiceClient();
+  const [{ data: sellInData }, { data: pendingData }] = await Promise.all([
+    supabase.from("sap_sell_in_records").select("location_id").eq("product_id", PRODUCT_IDS.PANQUECITAS).gt("quantity_kg", 0),
+    supabase.from("sap_pending_orders").select("location_id").eq("product_id", PRODUCT_IDS.PANQUECITAS).gt("quantity", 0),
+  ]);
+
+  const compradorIds = new Set<string>();
+  for (const r of (sellInData ?? []) as { location_id: string }[]) compradorIds.add(r.location_id);
+  for (const r of (pendingData ?? []) as { location_id: string }[]) compradorIds.add(r.location_id);
+
+  return new Set([...ids].filter((id) => compradorIds.has(id)));
+}
+
+function computePanVsHarinaPanPoints(
+  facturada: { product_id: string; date: string; kg: number }[],
+  pendiente: { product_id: string | null; date: string | null; kg: number }[],
+  granularity: PanComparisonGranularity
+): PanVsHarinaPanPoint[] {
+  const byBucket = new Map<string, { panquecitas: number; harinaPan: number }>();
+  function ensure(bucket: string) {
+    if (!byBucket.has(bucket)) byBucket.set(bucket, { panquecitas: 0, harinaPan: 0 });
+    return byBucket.get(bucket)!;
+  }
+  for (const r of facturada) {
+    const acc = ensure(panBucketKeyFor(r.date, granularity));
+    if (r.product_id === PRODUCT_IDS.PANQUECITAS) acc.panquecitas += r.kg;
+    else if (r.product_id === PRODUCT_IDS.HARINA_PAN) acc.harinaPan += r.kg;
+  }
+  for (const r of pendiente) {
+    if (!r.date || !r.product_id) continue;
+    const acc = ensure(panBucketKeyFor(r.date, granularity));
+    if (r.product_id === PRODUCT_IDS.PANQUECITAS) acc.panquecitas += r.kg;
+    else if (r.product_id === PRODUCT_IDS.HARINA_PAN) acc.harinaPan += r.kg;
+  }
+
+  return Array.from(byBucket.keys())
+    .sort()
+    .map((bucket) => {
+      const cell = byBucket.get(bucket)!;
+      return {
+        bucket,
+        label: panBucketLabelFor(bucket, granularity),
+        panquecitasKg: Math.round(cell.panquecitas * 10) / 10,
+        harinaPanKg: Math.round(cell.harinaPan * 10) / 10,
+      };
+    });
+}
+
+export async function getPanVsHarinaPan(
+  sector: Sector | undefined,
+  poblacion: PanComparisonPoblacion
+): Promise<Record<PanComparisonGranularity, PanVsHarinaPanPoint[]>> {
+  const empty = { day: [], month: [], quarter: [] };
+  const ids = await getPanVsHarinaPanUniverse(sector, poblacion);
+  if (ids.size === 0) return empty;
+
+  const supabase = createSupabaseServiceClient();
+  const [{ data: sellInData }, { data: pendingData }] = await Promise.all([
+    supabase
+      .from("sap_sell_in_records")
+      .select("location_id, product_id, quantity_kg, date_of_sale")
+      .in("product_id", [PRODUCT_IDS.PANQUECITAS, PRODUCT_IDS.HARINA_PAN]),
+    supabase
+      .from("sap_pending_orders")
+      .select("location_id, product_id, quantity, order_date")
+      .in("product_id", [PRODUCT_IDS.PANQUECITAS, PRODUCT_IDS.HARINA_PAN]),
+  ]);
+
+  const facturada = (
+    (sellInData ?? []) as { location_id: string; product_id: string; quantity_kg: number; date_of_sale: string }[]
+  )
+    .filter((r) => ids.has(r.location_id))
+    .map((r) => ({ product_id: r.product_id, date: r.date_of_sale, kg: r.quantity_kg }));
+
+  const pendiente = (
+    (pendingData ?? []) as { location_id: string; product_id: string | null; quantity: number; order_date: string | null }[]
+  )
+    .filter((r) => ids.has(r.location_id))
+    .map((r) => ({ product_id: r.product_id, date: r.order_date, kg: r.quantity }));
+
+  if (facturada.length === 0 && pendiente.length === 0) return empty;
+
+  return {
+    day: computePanVsHarinaPanPoints(facturada, pendiente, "day"),
+    month: computePanVsHarinaPanPoints(facturada, pendiente, "month"),
+    quarter: computePanVsHarinaPanPoints(facturada, pendiente, "quarter"),
   };
 }
 

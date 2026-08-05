@@ -8,6 +8,7 @@ import { ReportPrintHeader } from "@/components/dashboard/ReportPrintHeader";
 import { PenetracionRecompraChart } from "@/components/dashboard/PenetracionRecompraChart";
 import { CoberturaComunicacionChart } from "@/components/dashboard/CoberturaComunicacionChart";
 import { PedidoVsVentasChart } from "@/components/dashboard/PedidoVsVentasChart";
+import { PanVsHarinaPanChart } from "@/components/dashboard/PanVsHarinaPanChart";
 import { RoundLegend } from "@/components/dashboard/RoundLegend";
 import { SellOutChart } from "@/components/dashboard/SellOutChart";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -30,6 +31,9 @@ import type {
   CoberturaComunicacionPoint,
   DetalleSegmentoRow,
   MixProductoTonPoint,
+  PanComparisonGranularity,
+  PanComparisonPoblacion,
+  PanVsHarinaPanPoint,
   PedidoVsVentasGranularity,
   PedidoVsVentasPeriod,
   PenetracionRecompraPoint,
@@ -47,6 +51,8 @@ export interface SectorBundle {
   mixProducto: MixProductoTonPoint[];
   /** Pedido vs facturado por presentación, agrupado por día y por semana. */
   pedidoVsVentas: Record<PedidoVsVentasGranularity, PedidoVsVentasPeriod[]>;
+  /** Panquecitas vs Harina PAN (pedido+facturado) por población y granularidad. */
+  panVsHarinaPan: Record<PanComparisonPoblacion, Record<PanComparisonGranularity, PanVsHarinaPanPoint[]>>;
   runningVentas: RunningVentasResult;
   penetracionRecompra: Record<TimeGranularity, PenetracionRecompraPoint[]>;
   detalleSegmentos: DetalleSegmentoRow[];
@@ -56,6 +62,17 @@ export interface SectorBundle {
 const PEDIDO_GRANULARITY_OPTIONS: { key: PedidoVsVentasGranularity; label: string }[] = [
   { key: "day", label: "Día" },
   { key: "week", label: "Semana" },
+];
+
+const PAN_POBLACION_OPTIONS: { key: PanComparisonPoblacion; label: string }[] = [
+  { key: "clientes", label: "PAN Clientes" },
+  { key: "universo", label: "PAN Universo" },
+];
+
+const PAN_GRANULARITY_OPTIONS: { key: PanComparisonGranularity; label: string }[] = [
+  { key: "day", label: "Día" },
+  { key: "month", label: "Mes" },
+  { key: "quarter", label: "3 Meses" },
 ];
 
 type FilterKey = "TOTAL" | Sector;
@@ -97,6 +114,8 @@ export function DiennDashboardClient({
   const [granularity, setGranularity] = useState<TimeGranularity>("week");
   const [pedidoGranularity, setPedidoGranularity] = useState<PedidoVsVentasGranularity>("week");
   const [pedidoBucket, setPedidoBucket] = useState("");
+  const [panPoblacion, setPanPoblacion] = useState<PanComparisonPoblacion>("clientes");
+  const [panGranularity, setPanGranularity] = useState<PanComparisonGranularity>("month");
   const bundle = bundles[filter];
 
   const scatterSectors = useMemo<Sector[]>(
@@ -118,6 +137,8 @@ export function DiennDashboardClient({
   const sellOutPorRonda = useMemo(() => aggregateByRound(filteredSellOut), [filteredSellOut]);
   const rotacion = useMemo(() => computeRotacion(filteredSellOut), [filteredSellOut]);
   const mixProducto = bundle.mixProducto;
+
+  const panPoints = bundle.panVsHarinaPan[panPoblacion][panGranularity];
 
   const pedidoPeriods = bundle.pedidoVsVentas[pedidoGranularity];
   const pedidoPeriod = useMemo(() => {
@@ -191,7 +212,7 @@ export function DiennDashboardClient({
         />
 
         <KpiCard
-          title="Total Ton Pedidas"
+          title="Total ton vendidas"
           value={`${bundle.totalToneladasPedidas.toLocaleString("es-VE", { maximumFractionDigits: 2 })} Ton`}
           subtitle="Volumen pedido aún sin facturar"
           product="panquecitas"
@@ -239,6 +260,7 @@ export function DiennDashboardClient({
                   <div key={m.variant}>
                     <p className="text-2xl font-bold text-slate-900">{m.toneladas} Ton</p>
                     <p className="text-xs text-slate-500">{m.variant}</p>
+                    <p className="text-xs text-slate-400">{m.pctSobrePedido}% del pedido total</p>
                   </div>
                 ))}
               </div>
@@ -324,6 +346,65 @@ export function DiennDashboardClient({
                 <p className="text-xs mt-1">
                   Carga el reporte SAP Pedido/Facturado (con materiales 400g y 800g).
                 </p>
+              </div>
+            </div>
+          )}
+        </CardContent>
+      </Card>
+
+      {/* ── Panquecitas vs Harina PAN ──────────────────────────────────── */}
+      <Card className="mb-6 print-avoid-break">
+        <CardHeader className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between space-y-0">
+          <div>
+            <CardTitle>Panquecitas vs Harina PAN</CardTitle>
+            <p className="text-xs text-slate-400 mt-1">
+              Volumen pedido + facturado (kg) desde la primera hasta la última fecha cargada.{" "}
+              {panPoblacion === "clientes"
+                ? "Solo clientes con actividad SAP de Panquecitas (pedido y/o factura)."
+                : "Los 358 clientes del universo del piloto, hayan comprado Panquecitas o no."}{" "}
+              Harina PAN solo trae el reporte mensual agregado, sin desglose de pedidos pendientes.
+            </p>
+          </div>
+          <div className="flex flex-wrap items-center gap-2 print:hidden">
+            <div className="flex rounded-lg border border-slate-200 overflow-hidden text-xs font-medium">
+              {PAN_POBLACION_OPTIONS.map((opt) => (
+                <button
+                  key={opt.key}
+                  onClick={() => setPanPoblacion(opt.key)}
+                  className={`px-3 py-1.5 transition-colors ${
+                    panPoblacion === opt.key ? "bg-slate-900 text-white" : "bg-white text-slate-500 hover:bg-slate-50"
+                  }`}
+                >
+                  {opt.label}
+                </button>
+              ))}
+            </div>
+            <div className="flex rounded-lg border border-slate-200 overflow-hidden text-xs font-medium">
+              {PAN_GRANULARITY_OPTIONS.map((opt) => (
+                <button
+                  key={opt.key}
+                  onClick={() => setPanGranularity(opt.key)}
+                  className={`px-3 py-1.5 transition-colors ${
+                    panGranularity === opt.key
+                      ? "bg-slate-900 text-white"
+                      : "bg-white text-slate-500 hover:bg-slate-50"
+                  }`}
+                >
+                  {opt.label}
+                </button>
+              ))}
+            </div>
+          </div>
+        </CardHeader>
+        <CardContent>
+          {panPoints.length > 0 ? (
+            <PanVsHarinaPanChart data={panPoints} />
+          ) : (
+            <div className="h-[300px] flex items-center justify-center text-slate-400">
+              <div className="text-center">
+                <p className="text-4xl mb-2">📊</p>
+                <p>Sin datos de Panquecitas o Harina PAN todavía.</p>
+                <p className="text-xs mt-1">Carga el reporte SAP de facturación de ambos productos.</p>
               </div>
             </div>
           )}
