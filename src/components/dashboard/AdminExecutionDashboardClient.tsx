@@ -209,7 +209,7 @@ export function AdminExecutionDashboardClient({
         <KpiCard
           title="% Clientes que compraron"
           value={`${kpis.compraron.pct}%`}
-          subtitle={`${kpis.compraron.count} de ${kpis.compraron.total} clientes de la cartera`}
+          subtitle={`${kpis.compraron.count} de ${kpis.compraron.total} con pedido o factura en SAP`}
         />
         <KpiCard
           title="% Precio correcto por zona"
@@ -343,19 +343,27 @@ export function AdminExecutionDashboardClient({
         <Card className="mb-6">
           <CardHeader>
             <CardTitle>1. Clientes sin ventas en SAP</CardTitle>
+            <p className="text-xs text-slate-400 mt-1">
+              Cartera inicial sin pedido ni factura de Panquecitas cargados en SAP.
+            </p>
           </CardHeader>
           <CardContent>
             <IndicatorTable
               rows={sinVenta.map((r) => toRow(r))}
               exportName="Clientes sin ventas en SAP"
-              emptyMessage="Todos los clientes de la cartera registran venta de Panquecitas en SAP."
+              emptyMessage="Todos los clientes de la cartera tienen pedido o factura de Panquecitas en SAP."
             />
           </CardContent>
         </Card>
 
         <Card className="mb-6">
           <CardHeader className="flex flex-row items-start justify-between gap-3 space-y-0">
-            <CardTitle>2. Clientes con ventas en SAP</CardTitle>
+            <div>
+              <CardTitle>2. Clientes con ventas en SAP</CardTitle>
+              <p className="text-xs text-slate-400 mt-1">
+                Incluye quienes armaron un pedido y quienes ya tienen factura.
+              </p>
+            </div>
             <div className="flex items-center gap-2 print:hidden">
               <label htmlFor="tipo-cliente" className="text-sm text-slate-500">
                 Tipo de cliente
@@ -386,7 +394,7 @@ export function AdminExecutionDashboardClient({
             <IndicatorTable
               rows={conVenta.map((r) => toRow(r))}
               exportName="Clientes con ventas en SAP"
-              emptyMessage="Ningún cliente de la cartera registra venta de Panquecitas en SAP."
+              emptyMessage="Ningún cliente de la cartera tiene pedido ni factura de Panquecitas en SAP."
             />
           </CardContent>
         </Card>

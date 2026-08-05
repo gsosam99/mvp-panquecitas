@@ -14,9 +14,9 @@ export { CAMPAIGN_WEEKS };
 /** Una fila por cliente de la cartera, con su última visita de mercaderista. */
 export interface AdminPdvRow {
   location: Location;
-  /** Registró venta de Panquecitas en SAP (booleano, sin volúmenes). */
+  /** Tiene volumen SAP de Panquecitas: pedido y/o factura (booleano, sin kg). */
   comprador: boolean;
-  /** Fecha de la primera venta facturada en SAP, o null si nunca compró. */
+  /** Fecha de la primera actividad SAP (pedido o factura), o null si no tiene. */
   primeraCompra: string | null;
   visitado: boolean;
   ultimaVisita: string | null;
@@ -189,7 +189,7 @@ export function clientesFaltaPorVisitar(rows: AdminPdvRow[]): AdminPdvRow[] {
 // ── Tarjetas de KPI ───────────────────────────────────────────────
 
 export interface AdminKpis {
-  /** % de la cartera que registró venta en SAP. */
+  /** % de la cartera con pedido y/o factura de Panquecitas en SAP. */
   compraron: { pct: number; count: number; total: number };
   /** % de clientes evaluables con el precio de su zona correcto. */
   precioCorrecto: { pct: number; count: number; total: number };

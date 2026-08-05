@@ -47,24 +47,43 @@ export async function getAdminExecutionSnapshot(): Promise<AdminPdvRow[]> {
 
   const locationIds = universo.map((l) => l.id);
 
-  // 1. ¿Compró Panquecitas en SAP? — booleano, sin volúmenes, más la fecha
-  // de la primera venta facturada por PDV (para el gráfico de activación de
-  // clientes en el tiempo). Se pide ordenado ascendente por date_of_sale
-  // para que la primera fecha que se vea por location_id sea la primera
-  // compra real.
-  const { data: sellInData } = await supabase
-    .from("sap_sell_in_records")
-    .select("location_id, date_of_sale")
-    .eq("product_id", PRODUCT_IDS.PANQUECITAS)
-    .gt("quantity_kg", 0)
-    .in("location_id", locationIds)
-    .order("date_of_sale", { ascending: true });
+  // 1. ¿Tiene volumen SAP de Panquecitas? Cuenta tanto quien ya tiene
+  // factura (sap_sell_in_records) como quien solo armó pedido aún no
+  // facturado (sap_pending_orders). "Sin ventas en SAP" = cartera sin
+  // ninguna de las dos. La fecha de primera actividad es la más temprana
+  // entre pedido y factura (para el gráfico de activación).
+  const [{ data: sellInData }, { data: pendingData }] = await Promise.all([
+    supabase
+      .from("sap_sell_in_records")
+      .select("location_id, date_of_sale")
+      .eq("product_id", PRODUCT_IDS.PANQUECITAS)
+      .gt("quantity_kg", 0)
+      .in("location_id", locationIds)
+      .order("date_of_sale", { ascending: true }),
+    supabase
+      .from("sap_pending_orders")
+      .select("location_id, order_date")
+      .eq("product_id", PRODUCT_IDS.PANQUECITAS)
+      .gt("quantity", 0)
+      .in("location_id", locationIds)
+      .order("order_date", { ascending: true }),
+  ]);
 
   const compradorIds = new Set<string>();
   const primeraCompraByLocation = new Map<string, string>();
+
+  function markActividad(locationId: string, fecha: string | null) {
+    compradorIds.add(locationId);
+    if (!fecha) return;
+    const prev = primeraCompraByLocation.get(locationId);
+    if (!prev || fecha < prev) primeraCompraByLocation.set(locationId, fecha);
+  }
+
   for (const r of (sellInData ?? []) as { location_id: string; date_of_sale: string }[]) {
-    compradorIds.add(r.location_id);
-    if (!primeraCompraByLocation.has(r.location_id)) primeraCompraByLocation.set(r.location_id, r.date_of_sale);
+    markActividad(r.location_id, r.date_of_sale);
+  }
+  for (const r of (pendingData ?? []) as { location_id: string; order_date: string | null }[]) {
+    markActividad(r.location_id, r.order_date);
   }
 
   // 2. Última visita de mercaderista por PDV.
