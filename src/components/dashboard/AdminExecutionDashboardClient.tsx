@@ -3,6 +3,7 @@
 import { useMemo, useState } from "react";
 import { KpiCard } from "@/components/dashboard/KpiCard";
 import { IndicatorTable, type IndicatorTableRow } from "@/components/dashboard/IndicatorTable";
+import { ClientesActivadosChart } from "@/components/dashboard/ClientesActivadosChart";
 import { ReportPrintButton } from "@/components/dashboard/ReportPrintButton";
 import { ReportPrintHeader } from "@/components/dashboard/ReportPrintHeader";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -12,18 +13,21 @@ import { SECTOR_LABELS, type Sector } from "@/lib/sectors";
 import {
   CARAS_FRONTALES_MINIMO,
   STOCK_OUT_UMBRAL_UNIDADES,
+  clientesConVentaSap,
   clientesExhibicionDeficiente,
   clientesFaltaPorVisitar,
   clientesPrecioIncorrecto,
   clientesRiesgoStockOut,
   clientesSinMaterialPop,
   clientesSinVentaSap,
+  computeActivacionSemanal,
   computeAdminKpis,
   desviado400,
   desviado800,
   filterAdminRows,
   grupoVendedorOptions,
   oficinaLabel,
+  tipoClienteOptions,
   unidadesTotales,
   type AdminPdvRow,
   type OficinaFilter,
@@ -60,6 +64,7 @@ function toRow(row: AdminPdvRow, extra?: React.ReactNode, extraText?: string): I
 export function AdminExecutionDashboardClient({ rows }: { rows: AdminPdvRow[] }) {
   const [oficina, setOficina] = useState<OficinaFilter>("TOTAL");
   const [grupoVendedor, setGrupoVendedor] = useState("");
+  const [tipoClienteFilter, setTipoClienteFilter] = useState("");
 
   const grupos = useMemo(() => grupoVendedorOptions(rows), [rows]);
 
@@ -69,8 +74,21 @@ export function AdminExecutionDashboardClient({ rows }: { rows: AdminPdvRow[] })
   );
 
   const kpis = useMemo(() => computeAdminKpis(filtered), [filtered]);
+  const activacion = useMemo(() => computeActivacionSemanal(filtered), [filtered]);
 
   const sinVenta = useMemo(() => clientesSinVentaSap(filtered), [filtered]);
+  const conVentaBase = useMemo(() => clientesConVentaSap(filtered), [filtered]);
+  // Opciones del <select> de tipo de cliente: se derivan de `rows` (sin
+  // filtrar por Oficina/Grupo Vendedor) para que la lista no salte al
+  // cambiar esos otros filtros — mismo criterio que `grupos` arriba.
+  const tiposCliente = useMemo(() => tipoClienteOptions(clientesConVentaSap(rows)), [rows]);
+  const conVenta = useMemo(
+    () =>
+      tipoClienteFilter
+        ? conVentaBase.filter((r) => r.location.tipo_cliente?.trim() === tipoClienteFilter)
+        : conVentaBase,
+    [conVentaBase, tipoClienteFilter]
+  );
   const precioIncorrecto = useMemo(() => clientesPrecioIncorrecto(filtered), [filtered]);
   const sinPop = useMemo(() => clientesSinMaterialPop(filtered), [filtered]);
   const riesgoStockOut = useMemo(() => clientesRiesgoStockOut(filtered), [filtered]);
@@ -180,6 +198,29 @@ export function AdminExecutionDashboardClient({ rows }: { rows: AdminPdvRow[] })
         />
       </div>
 
+      {/* ── Gráfico: activación de clientes en el tiempo ──────────────── */}
+      <Card className="mb-6 print-avoid-break">
+        <CardHeader>
+          <CardTitle>Activación de clientes en el tiempo</CardTitle>
+          <p className="text-xs text-slate-400 mt-1">
+            % acumulado de la cartera (según los filtros vigentes) con al menos una venta facturada en SAP, semana a
+            semana.
+          </p>
+        </CardHeader>
+        <CardContent>
+          {activacion.length > 0 ? (
+            <ClientesActivadosChart data={activacion} />
+          ) : (
+            <div className="h-[280px] flex items-center justify-center text-slate-400">
+              <div className="text-center">
+                <p className="text-4xl mb-2">📈</p>
+                <p>Sin ventas facturadas de Panquecitas todavía. Carga el reporte SAP.</p>
+              </div>
+            </div>
+          )}
+        </CardContent>
+      </Card>
+
       {/* ── Resumen de cantidades: solo en el PDF ──────────────────────
           En pantalla estas cifras ya se ven como el largo de cada lista;
           en la lámina las listas se ocultan y quedan solo las cantidades. */}
@@ -229,8 +270,46 @@ export function AdminExecutionDashboardClient({ rows }: { rows: AdminPdvRow[] })
         </Card>
 
         <Card className="mb-6">
+          <CardHeader className="flex flex-row items-start justify-between gap-3 space-y-0">
+            <CardTitle>2. Clientes con ventas en SAP</CardTitle>
+            <div className="flex items-center gap-2 print:hidden">
+              <label htmlFor="tipo-cliente" className="text-sm text-slate-500">
+                Tipo de cliente
+              </label>
+              <select
+                id="tipo-cliente"
+                value={tipoClienteFilter}
+                onChange={(e) => setTipoClienteFilter(e.target.value)}
+                disabled={tiposCliente.length === 0}
+                className="text-sm border border-slate-200 rounded-lg px-3 py-1.5 bg-white text-slate-700 disabled:opacity-60"
+              >
+                {tiposCliente.length === 0 ? (
+                  <option value="">Sin tipo de cliente en la cartera</option>
+                ) : (
+                  <>
+                    <option value="">Todos los tipos</option>
+                    {tiposCliente.map((t) => (
+                      <option key={t} value={t}>
+                        {t}
+                      </option>
+                    ))}
+                  </>
+                )}
+              </select>
+            </div>
+          </CardHeader>
+          <CardContent>
+            <IndicatorTable
+              rows={conVenta.map((r) => toRow(r))}
+              exportName="Clientes con ventas en SAP"
+              emptyMessage="Ningún cliente de la cartera registra venta de Panquecitas en SAP."
+            />
+          </CardContent>
+        </Card>
+
+        <Card className="mb-6">
           <CardHeader>
-            <CardTitle>2. Clientes con precio incorrecto según su zona</CardTitle>
+            <CardTitle>3. Clientes con precio incorrecto según su zona</CardTitle>
           </CardHeader>
           <CardContent>
             <IndicatorTable
@@ -259,7 +338,7 @@ export function AdminExecutionDashboardClient({ rows }: { rows: AdminPdvRow[] })
 
         <Card className="mb-6">
           <CardHeader>
-            <CardTitle>3. Clientes sin material POP</CardTitle>
+            <CardTitle>4. Clientes sin material POP</CardTitle>
           </CardHeader>
           <CardContent>
             <IndicatorTable
@@ -273,7 +352,7 @@ export function AdminExecutionDashboardClient({ rows }: { rows: AdminPdvRow[] })
 
         <Card className="mb-6">
           <CardHeader>
-            <CardTitle>4. Clientes en riesgo de stock out</CardTitle>
+            <CardTitle>5. Clientes en riesgo de stock out</CardTitle>
             <p className="text-xs text-slate-400 mt-1">
               Menos de {STOCK_OUT_UMBRAL_UNIDADES} unidades sumando anaquel y depósito en la última visita.
             </p>
@@ -299,7 +378,7 @@ export function AdminExecutionDashboardClient({ rows }: { rows: AdminPdvRow[] })
 
         <Card className="mb-8">
           <CardHeader>
-            <CardTitle>5. Exhibición del producto</CardTitle>
+            <CardTitle>6. Exhibición del producto</CardTitle>
             <p className="text-xs text-slate-400 mt-1">
               Hipermercados, supermercados, distribuidores y mayoristas se evalúan por caras frontales (mínimo{" "}
               {CARAS_FRONTALES_MINIMO}); el resto de los formatos, por presencia del producto.

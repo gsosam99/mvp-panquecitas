@@ -47,15 +47,25 @@ export async function getAdminExecutionSnapshot(): Promise<AdminPdvRow[]> {
 
   const locationIds = universo.map((l) => l.id);
 
-  // 1. ¿Compró Panquecitas en SAP? — solo el booleano, sin volúmenes.
+  // 1. ¿Compró Panquecitas en SAP? — booleano, sin volúmenes, más la fecha
+  // de la primera venta facturada por PDV (para el gráfico de activación de
+  // clientes en el tiempo). Se pide ordenado ascendente por date_of_sale
+  // para que la primera fecha que se vea por location_id sea la primera
+  // compra real.
   const { data: sellInData } = await supabase
     .from("sap_sell_in_records")
-    .select("location_id")
+    .select("location_id, date_of_sale")
     .eq("product_id", PRODUCT_IDS.PANQUECITAS)
     .gt("quantity_kg", 0)
-    .in("location_id", locationIds);
+    .in("location_id", locationIds)
+    .order("date_of_sale", { ascending: true });
 
-  const compradorIds = new Set(((sellInData ?? []) as { location_id: string }[]).map((r) => r.location_id));
+  const compradorIds = new Set<string>();
+  const primeraCompraByLocation = new Map<string, string>();
+  for (const r of (sellInData ?? []) as { location_id: string; date_of_sale: string }[]) {
+    compradorIds.add(r.location_id);
+    if (!primeraCompraByLocation.has(r.location_id)) primeraCompraByLocation.set(r.location_id, r.date_of_sale);
+  }
 
   // 2. Última visita de mercaderista por PDV.
   const { data: visitsData } = await supabase
@@ -107,6 +117,7 @@ export async function getAdminExecutionSnapshot(): Promise<AdminPdvRow[]> {
     return {
       location,
       comprador: compradorIds.has(location.id),
+      primeraCompra: primeraCompraByLocation.get(location.id) ?? null,
       visitado: visit !== null,
       ultimaVisita: visit?.created_at ?? null,
       popPresent: visit?.pop_present ?? null,

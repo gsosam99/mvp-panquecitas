@@ -113,7 +113,6 @@ export function AuditWizard({ locations }: AuditWizardProps) {
   const [anaquel400, setAnaquel400] = useState("");
   const [anaquel800, setAnaquel800] = useState("");
   const [frontFaces, setFrontFaces] = useState("");
-  const [harinaTrigoFaces, setHarinaTrigoFaces] = useState("");
 
   const [depositAccess, setDepositAccess] = useState<boolean | null>(null);
 
@@ -233,9 +232,8 @@ export function AuditWizard({ locations }: AuditWizardProps) {
     const total = Number(totalUnitsAnaquel);
     const faces = Number(frontFaces);
     if (total < faces) return false;
-    if (faces <= 2 && harinaTrigoFaces === "") return false;
     return true;
-  }, [totalUnitsAnaquel, frontFaces, harinaTrigoFaces, anaquelSplitValid]);
+  }, [totalUnitsAnaquel, frontFaces, anaquelSplitValid]);
 
   const anaquelCountOrderError =
     totalUnitsAnaquel !== "" && frontFaces !== "" && Number(totalUnitsAnaquel) < Number(frontFaces);
@@ -275,7 +273,6 @@ export function AuditWizard({ locations }: AuditWizardProps) {
     setAnaquel400("");
     setAnaquel800("");
     setFrontFaces("");
-    setHarinaTrigoFaces("");
     setDepositAccess(null);
     setDone(false);
   }
@@ -353,7 +350,7 @@ export function AuditWizard({ locations }: AuditWizardProps) {
           anaquel_400_units: productPresent ? Number(anaquel400) || 0 : null,
           anaquel_800_units: productPresent ? Number(anaquel800) || 0 : null,
           front_faces: productPresent ? Number(frontFaces) || 0 : null,
-          harina_trigo_faces: productPresent && Number(frontFaces) <= 2 ? Number(harinaTrigoFaces) || 0 : null,
+          harina_trigo_faces: null, // pregunta retirada del formulario (ya no se recolecta)
           deposit_access: depositAccess,
           deposito,
         }),
@@ -609,7 +606,6 @@ export function AuditWizard({ locations }: AuditWizardProps) {
                       setAnaquel400("");
                       setAnaquel800("");
                       setFrontFaces("");
-                      setHarinaTrigoFaces("");
                     }
                   }}
                   className={`h-28 rounded-2xl border-2 text-2xl font-bold transition-all ${
@@ -907,40 +903,6 @@ export function AuditWizard({ locations }: AuditWizardProps) {
               </p>
             )}
 
-            {frontFaces !== "" && Number(frontFaces) <= 2 && (
-              <div className="mt-6 border-t border-slate-100 pt-6">
-                <p className="text-xs font-semibold text-slate-500 mb-2 uppercase tracking-wide text-center">
-                  Caras de harina de trigo en el PDV
-                </p>
-                <div className="flex items-center justify-center gap-4">
-                  <button
-                    type="button"
-                    onClick={() => setHarinaTrigoFaces((f) => String(Math.max(0, (Number(f) || 0) - 1)))}
-                    className="w-16 h-16 rounded-full border-2 border-slate-300 text-3xl font-bold text-slate-600 flex items-center justify-center hover:bg-slate-100 active:scale-95 transition-all disabled:opacity-40"
-                    disabled={(Number(harinaTrigoFaces) || 0) === 0}
-                  >
-                    −
-                  </button>
-                  <input
-                    type="text"
-                    inputMode="numeric"
-                    pattern="[0-9]*"
-                    value={harinaTrigoFaces}
-                    placeholder="0"
-                    onChange={(e) => setHarinaTrigoFaces(e.target.value.replace(/\D/g, ""))}
-                    className="w-24 h-16 text-4xl font-bold text-slate-900 text-center bg-transparent border-b-2 border-slate-300 focus:border-panquecitas focus:outline-none tabular-nums"
-                  />
-                  <button
-                    type="button"
-                    onClick={() => setHarinaTrigoFaces((f) => String((Number(f) || 0) + 1))}
-                    className="w-16 h-16 rounded-full bg-panquecitas text-white text-3xl font-bold flex items-center justify-center hover:opacity-90 active:scale-95 transition-all"
-                  >
-                    +
-                  </button>
-                </div>
-              </div>
-            )}
-
             <Button className="w-full mt-8 h-14 text-base" disabled={!anaquelCountValid} onClick={advance}>
               Continuar →
             </Button>
@@ -1144,12 +1106,6 @@ export function AuditWizard({ locations }: AuditWizardProps) {
                   <span className="text-slate-500 text-sm">Caras frontales</span>
                   <span className="font-semibold text-slate-900">{frontFaces || 0}</span>
                 </div>
-                {Number(frontFaces) <= 2 && (
-                  <div className="flex justify-between items-center py-3 border-b border-slate-100">
-                    <span className="text-slate-500 text-sm">Caras de harina de trigo</span>
-                    <span className="font-semibold text-slate-900">{harinaTrigoFaces || 0}</span>
-                  </div>
-                )}
               </>
             )}
 

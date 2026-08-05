@@ -5,6 +5,7 @@
 
 import { isPvpDeviated } from "@/data/pvp-thresholds";
 import { sectorGroup, SECTOR_LABELS, type Sector } from "@/lib/sectors";
+import { bucketKeyFor, bucketLabelFor } from "@/lib/date-buckets";
 import type { Location } from "@/types";
 
 /** Una fila por cliente de la cartera, con su última visita de mercaderista. */
@@ -12,6 +13,8 @@ export interface AdminPdvRow {
   location: Location;
   /** Registró venta de Panquecitas en SAP (booleano, sin volúmenes). */
   comprador: boolean;
+  /** Fecha de la primera venta facturada en SAP, o null si nunca compró. */
+  primeraCompra: string | null;
   visitado: boolean;
   ultimaVisita: string | null;
   popPresent: boolean | null;
@@ -76,6 +79,16 @@ export function grupoVendedorOptions(rows: AdminPdvRow[]): string[] {
   return Array.from(set).sort();
 }
 
+/** Tipos de cliente presentes en las filas dadas, ordenados (para el <select> de la lista "Clientes con ventas en SAP"). */
+export function tipoClienteOptions(rows: AdminPdvRow[]): string[] {
+  const set = new Set<string>();
+  for (const r of rows) {
+    const tipo = r.location.tipo_cliente?.trim();
+    if (tipo) set.add(tipo);
+  }
+  return Array.from(set).sort();
+}
+
 export function oficinaLabel(location: Location): string | null {
   const sector = sectorGroup(location.oficina_venta);
   return sector ? SECTOR_LABELS[sector] : location.oficina_venta;
@@ -114,6 +127,10 @@ export function unidadesTotales(row: AdminPdvRow): number {
 
 export function clientesSinVentaSap(rows: AdminPdvRow[]): AdminPdvRow[] {
   return rows.filter((r) => !r.comprador);
+}
+
+export function clientesConVentaSap(rows: AdminPdvRow[]): AdminPdvRow[] {
+  return rows.filter((r) => r.comprador);
 }
 
 export function clientesPrecioIncorrecto(rows: AdminPdvRow[]): AdminPdvRow[] {
@@ -197,4 +214,34 @@ export function computeAdminKpis(rows: AdminPdvRow[]): AdminKpis {
     coberturaMercaderista: { pct: pct(visitados.length, total), count: visitados.length, total },
     faltaPorVisitar: { pct: pct(faltantes, total), count: faltantes, total },
   };
+}
+
+// ── Gráfico: activación de clientes en el tiempo ───────────────────
+// % acumulado de la cartera (del corte de filtros vigente — Oficina de
+// Venta / Grupo Vendedor) que ya registró su primera venta facturada en
+// SAP, semana a semana. Se calcula 100% en el cliente a partir de
+// `primeraCompra` (fecha de la primera venta facturada por PDV, ya resuelta
+// en getAdminExecutionSnapshot) para que reaccione a los mismos filtros
+// instantáneos que el resto del dashboard, sin ida y vuelta al servidor.
+
+export interface ActivacionPoint {
+  bucket: string;
+  label: string;
+  pct: number;
+  count: number;
+}
+
+export function computeActivacionSemanal(rows: AdminPdvRow[]): ActivacionPoint[] {
+  const total = rows.length;
+  if (total === 0) return [];
+
+  const conFecha = rows.filter((r): r is AdminPdvRow & { primeraCompra: string } => r.primeraCompra !== null);
+  if (conFecha.length === 0) return [];
+
+  const buckets = Array.from(new Set(conFecha.map((r) => bucketKeyFor(r.primeraCompra, "week")))).sort();
+
+  return buckets.map((bucket) => {
+    const count = conFecha.filter((r) => bucketKeyFor(r.primeraCompra, "week") <= bucket).length;
+    return { bucket, label: bucketLabelFor(bucket, "week"), pct: pct(count, total), count };
+  });
 }
