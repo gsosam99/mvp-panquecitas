@@ -3,7 +3,7 @@ import {
   getCoberturaComunicacionPorSector,
   getDetalleClientesPorSegmento,
   getPedidosPendientes,
-  getPenetracionRecompraSemanal,
+  getPenetracionRecompra,
   getRunningVentas,
   getTotalToneladas,
 } from "@/lib/dienn-queries";
@@ -19,7 +19,7 @@ async function getBundle(sector?: Sector): Promise<SectorBundle> {
   const [totalToneladas, runningVentas, penetracionRecompra, detalleSegmentos, pedidosPendientes] = await Promise.all([
     getTotalToneladas(sector),
     getRunningVentas(sector),
-    getPenetracionRecompraSemanal(sector),
+    getPenetracionRecompra(sector),
     getDetalleClientesPorSegmento(sector),
     getPedidosPendientes(sector),
   ]);

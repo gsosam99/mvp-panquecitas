@@ -30,6 +30,7 @@ import type {
   DetalleSegmentoRow,
   PenetracionRecompraPoint,
   RunningVentasResult,
+  TimeGranularity,
 } from "@/lib/dienn-queries";
 import type { Sector } from "@/lib/sectors";
 import type { SapPendingOrder } from "@/types";
@@ -37,7 +38,7 @@ import type { SapPendingOrder } from "@/types";
 export interface SectorBundle {
   totalToneladas: number;
   runningVentas: RunningVentasResult;
-  penetracionRecompra: PenetracionRecompraPoint[];
+  penetracionRecompra: Record<TimeGranularity, PenetracionRecompraPoint[]>;
   detalleSegmentos: DetalleSegmentoRow[];
   pedidosPendientes: SapPendingOrder[];
 }
@@ -45,9 +46,15 @@ export interface SectorBundle {
 type FilterKey = "TOTAL" | Sector;
 type FuenteFilter = "TODOS" | "Calculado" | "Reportado_B2B";
 
+const GRANULARITY_OPTIONS: { key: TimeGranularity; label: string }[] = [
+  { key: "day", label: "Día" },
+  { key: "week", label: "Semana" },
+  { key: "month", label: "Mes" },
+];
+
 interface Props {
   bundles: Record<FilterKey, SectorBundle>;
-  coberturaComunicacion: CoberturaComunicacionPoint[];
+  coberturaComunicacion: Record<TimeGranularity, CoberturaComunicacionPoint[]>;
   conversionDegustaciones: { samples: number; conversions: number; rate: number };
   tiendaIdeal: { pct: number; cumplen: number; total: number };
   sectorLabels: Record<Sector, string>;
@@ -72,6 +79,7 @@ export function DiennDashboardClient({
   const [zonaFilter, setZonaFilter] = useState("");
   const [asesorFilter, setAsesorFilter] = useState("");
   const [fuenteFilter, setFuenteFilter] = useState<FuenteFilter>("TODOS");
+  const [granularity, setGranularity] = useState<TimeGranularity>("week");
   const bundle = bundles[filter];
 
   const scatterSectors = useMemo<Sector[]>(
@@ -228,7 +236,25 @@ export function DiennDashboardClient({
         />
       </div>
 
-      <Separator className="mb-6 print:hidden" />
+      <Separator className="mb-4 print:hidden" />
+
+      {/* ── Filtro de granularidad temporal (comparte los gráficos 1 y 2) ── */}
+      <div className="flex items-center gap-2 mb-6 print:hidden">
+        <span className="text-xs font-semibold uppercase tracking-widest text-muted-foreground">Ver por</span>
+        <div className="flex rounded-lg border border-slate-200 overflow-hidden text-xs font-medium">
+          {GRANULARITY_OPTIONS.map((opt) => (
+            <button
+              key={opt.key}
+              onClick={() => setGranularity(opt.key)}
+              className={`px-3 py-1.5 transition-colors ${
+                granularity === opt.key ? "bg-slate-900 text-white" : "bg-white text-slate-500 hover:bg-slate-50"
+              }`}
+            >
+              {opt.label}
+            </button>
+          ))}
+        </div>
+      </div>
 
       {/* ── Gráfico 1: Evolución de Penetración y Tasa de Recompra ───────── */}
       <Card className="mb-6 print-avoid-break">
@@ -236,8 +262,8 @@ export function DiennDashboardClient({
           <CardTitle>Evolución de Penetración y Tasa de Recompra</CardTitle>
         </CardHeader>
         <CardContent>
-          {bundle.penetracionRecompra.length > 0 ? (
-            <PenetracionRecompraChart data={bundle.penetracionRecompra} />
+          {bundle.penetracionRecompra[granularity].length > 0 ? (
+            <PenetracionRecompraChart data={bundle.penetracionRecompra[granularity]} />
           ) : (
             <div className="h-[280px] flex items-center justify-center text-slate-400">
               <div className="text-center">
@@ -258,8 +284,8 @@ export function DiennDashboardClient({
           </p>
         </CardHeader>
         <CardContent>
-          {coberturaComunicacion.length > 0 ? (
-            <CoberturaComunicacionChart data={coberturaComunicacion} sectors={scatterSectors} />
+          {coberturaComunicacion[granularity].length > 0 ? (
+            <CoberturaComunicacionChart data={coberturaComunicacion[granularity]} sectors={scatterSectors} />
           ) : (
             <div className="h-[280px] flex items-center justify-center text-slate-400">
               <div className="text-center">

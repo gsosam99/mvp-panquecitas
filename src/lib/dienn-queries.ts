@@ -18,7 +18,19 @@ import type { Location, LocationType, SapPendingOrder } from "@/types";
 // cifras de Sell-in y al ratio Panquecitas/HMP.
 // ────────────────────────────────────────────────────────────────
 
-// ── Helpers de semana (ISO week, lunes a domingo) ─────────────────
+// ── Granularidad de tiempo (día / semana / mes) ────────────────────
+// Las series de "Evolución de Penetración y Recompra" y "Cobertura y
+// Comunicación" son acumuladas (% acumulado hasta ese punto) — cambiar la
+// granularidad solo cambia cada cuánto se corta la acumulación, nunca el
+// significado del cálculo (ver decisión en el chat con Alejandro,
+// 05-08-2026: un punto acumulado por cada día/semana/mes con datos).
+
+export type TimeGranularity = "day" | "week" | "month";
+
+const MESES_ES = [
+  "enero", "febrero", "marzo", "abril", "mayo", "junio",
+  "julio", "agosto", "septiembre", "octubre", "noviembre", "diciembre",
+];
 
 function isoWeekKey(dateStr: string): string {
   const d = new Date(dateStr + "T00:00:00Z");
@@ -29,6 +41,37 @@ function isoWeekKey(dateStr: string): string {
   const weekNr =
     1 + Math.round(((target.getTime() - firstThursday.getTime()) / 86400000 - 3 + ((firstThursday.getUTCDay() + 6) % 7)) / 7);
   return `${target.getUTCFullYear()}-W${String(weekNr).padStart(2, "0")}`;
+}
+
+/** Clave de bucket — también sirve como clave de orden cronológico (comparación de strings). */
+function bucketKeyFor(dateStr: string, granularity: TimeGranularity): string {
+  if (granularity === "day") return dateStr;
+  if (granularity === "month") return dateStr.slice(0, 7);
+  return isoWeekKey(dateStr);
+}
+
+function shortDate(d: Date): string {
+  return `${d.getUTCDate()} ${MESES_ES[d.getUTCMonth()].slice(0, 3)}`;
+}
+
+/** Etiqueta legible para el eje X — nunca la clave cruda ("2026-W32"). */
+function bucketLabelFor(bucket: string, granularity: TimeGranularity): string {
+  if (granularity === "day") {
+    return shortDate(new Date(bucket + "T00:00:00Z"));
+  }
+  if (granularity === "month") {
+    const mes = MESES_ES[Number(bucket.slice(5, 7)) - 1];
+    return mes.charAt(0).toUpperCase() + mes.slice(1);
+  }
+  // Semana ISO ("YYYY-Www") → rango lunes-domingo. El lunes de la semana 1
+  // es el lunes de la semana que contiene el 4 de enero (regla ISO 8601).
+  const [yyyyStr, wStr] = bucket.split("-W");
+  const jan4 = new Date(Date.UTC(Number(yyyyStr), 0, 4));
+  const jan4DayNr = (jan4.getUTCDay() + 6) % 7;
+  const week1Monday = new Date(jan4.getTime() - jan4DayNr * 86400000);
+  const monday = new Date(week1Monday.getTime() + (Number(wStr) - 1) * 7 * 86400000);
+  const sunday = new Date(monday.getTime() + 6 * 86400000);
+  return `${shortDate(monday)} - ${shortDate(sunday)}`;
 }
 
 // ── Filtro reactivo de segmento (Tabs TOTAL / sector) ──────────────
@@ -155,18 +198,54 @@ export async function getRunningVentas(sector?: Sector): Promise<RunningVentasRe
 // vendidas 400g vs 800g) — ver decisión #6/#1 de "Arreglos app
 // Panquecitas" en docs/decisiones-implementacion.md.
 
-// ── 4. Evolución de Penetración y Tasa de Recompra (semanal) ──────
+// ── 4. Evolución de Penetración y Tasa de Recompra ─────────────────
 
 export interface PenetracionRecompraPoint {
-  week: string;
+  bucket: string; // clave cronológica interna ("2026-08-04" | "2026-W32" | "2026-08")
+  label: string; // lo que se muestra en el eje X
   penetracionPct: number;
   recompraPct: number;
 }
 
-export async function getPenetracionRecompraSemanal(sector?: Sector): Promise<PenetracionRecompraPoint[]> {
+function computePenetracionRecompraPoints(
+  rows: { location_id: string; date_of_sale: string }[],
+  universoSize: number,
+  granularity: TimeGranularity
+): PenetracionRecompraPoint[] {
+  if (rows.length === 0 || universoSize === 0) return [];
+  const buckets = Array.from(new Set(rows.map((r) => bucketKeyFor(r.date_of_sale, granularity)))).sort();
+
+  const points: PenetracionRecompraPoint[] = [];
+  for (const bucket of buckets) {
+    const rowsUpToBucket = rows.filter((r) => bucketKeyFor(r.date_of_sale, granularity) <= bucket);
+
+    const monthsByLocation = new Map<string, Set<string>>();
+    for (const r of rowsUpToBucket) {
+      const month = r.date_of_sale.slice(0, 7);
+      if (!monthsByLocation.has(r.location_id)) monthsByLocation.set(r.location_id, new Set());
+      monthsByLocation.get(r.location_id)!.add(month);
+    }
+
+    const compradores = monthsByLocation.size;
+    const conRecompra = Array.from(monthsByLocation.values()).filter((m) => m.size >= 2).length;
+
+    points.push({
+      bucket,
+      label: bucketLabelFor(bucket, granularity),
+      penetracionPct: Math.round((compradores / universoSize) * 1000) / 10,
+      recompraPct: compradores > 0 ? Math.round((conRecompra / compradores) * 1000) / 10 : 0,
+    });
+  }
+
+  return points;
+}
+
+/** Un punto acumulado por cada día/semana/mes con datos — las tres calculadas de una sola pasada por Supabase. */
+export async function getPenetracionRecompra(sector?: Sector): Promise<Record<TimeGranularity, PenetracionRecompraPoint[]>> {
+  const empty = { day: [], week: [], month: [] };
   const universo = await getUniverseLocations();
   const universoFiltrado = sector ? universo.filter((l) => sectorGroup(l.oficina_venta) === sector) : universo;
-  if (universoFiltrado.length === 0) return [];
+  if (universoFiltrado.length === 0) return empty;
   const ids = new Set(universoFiltrado.map((l) => l.id));
 
   const supabase = createSupabaseServiceClient();
@@ -178,32 +257,13 @@ export async function getPenetracionRecompraSemanal(sector?: Sector): Promise<Pe
     .order("date_of_sale");
 
   const rows = ((data ?? []) as { location_id: string; date_of_sale: string }[]).filter((r) => ids.has(r.location_id));
-  if (rows.length === 0) return [];
+  if (rows.length === 0) return empty;
 
-  const weeks = Array.from(new Set(rows.map((r) => isoWeekKey(r.date_of_sale)))).sort();
-
-  const points: PenetracionRecompraPoint[] = [];
-  for (const week of weeks) {
-    const rowsUpToWeek = rows.filter((r) => isoWeekKey(r.date_of_sale) <= week);
-
-    const monthsByLocation = new Map<string, Set<string>>();
-    for (const r of rowsUpToWeek) {
-      const month = r.date_of_sale.slice(0, 7);
-      if (!monthsByLocation.has(r.location_id)) monthsByLocation.set(r.location_id, new Set());
-      monthsByLocation.get(r.location_id)!.add(month);
-    }
-
-    const compradores = monthsByLocation.size;
-    const conRecompra = Array.from(monthsByLocation.values()).filter((m) => m.size >= 2).length;
-
-    points.push({
-      week,
-      penetracionPct: Math.round((compradores / universoFiltrado.length) * 1000) / 10,
-      recompraPct: compradores > 0 ? Math.round((conRecompra / compradores) * 1000) / 10 : 0,
-    });
-  }
-
-  return points;
+  return {
+    day: computePenetracionRecompraPoints(rows, universoFiltrado.length, "day"),
+    week: computePenetracionRecompraPoints(rows, universoFiltrado.length, "week"),
+    month: computePenetracionRecompraPoints(rows, universoFiltrado.length, "month"),
+  };
 }
 
 // ── 5. Cobertura y Comunicación por sector (semanal) ───────────────
@@ -214,13 +274,45 @@ export async function getPenetracionRecompraSemanal(sector?: Sector): Promise<Pe
 // "Ciudad" = sector (Barquisimeto Este / Cumaná); "meta" = universo del sector.
 
 export interface CoberturaComunicacionPoint {
-  week: string;
+  bucket: string; // clave cronológica interna ("2026-08-04" | "2026-W32" | "2026-08")
+  label: string; // lo que se muestra en el eje X
   [key: string]: string | number; // `${sector}_cobertura` / `${sector}_comunicacion`
 }
 
-export async function getCoberturaComunicacionPorSector(): Promise<CoberturaComunicacionPoint[]> {
+function computeCoberturaComunicacionPoints(
+  relevantRows: { location_id: string; created_at: string; pop_present: boolean }[],
+  sectorByLocation: Map<string, Sector | null>,
+  universoBySector: Map<Sector, number>,
+  granularity: TimeGranularity
+): CoberturaComunicacionPoint[] {
+  if (relevantRows.length === 0) return [];
+  const buckets = Array.from(new Set(relevantRows.map((r) => bucketKeyFor(r.created_at.slice(0, 10), granularity)))).sort();
+
+  const points: CoberturaComunicacionPoint[] = [];
+  for (const bucket of buckets) {
+    const rowsUpToBucket = relevantRows.filter((r) => bucketKeyFor(r.created_at.slice(0, 10), granularity) <= bucket);
+
+    const point: CoberturaComunicacionPoint = { bucket, label: bucketLabelFor(bucket, granularity) };
+    for (const sector of ["cumana", "barquisimeto_este"] as Sector[]) {
+      const sectorRows = rowsUpToBucket.filter((r) => sectorByLocation.get(r.location_id) === sector);
+      const visitados = new Set(sectorRows.map((r) => r.location_id));
+      const conPop = new Set(sectorRows.filter((r) => r.pop_present).map((r) => r.location_id));
+      const universoSector = universoBySector.get(sector) ?? 0;
+
+      point[`${sector}_cobertura`] = universoSector > 0 ? Math.round((visitados.size / universoSector) * 1000) / 10 : 0;
+      point[`${sector}_comunicacion`] = universoSector > 0 ? Math.round((conPop.size / universoSector) * 1000) / 10 : 0;
+    }
+    points.push(point);
+  }
+
+  return points;
+}
+
+/** Un punto acumulado por cada día/semana/mes con datos — las tres calculadas de una sola pasada por Supabase. */
+export async function getCoberturaComunicacionPorSector(): Promise<Record<TimeGranularity, CoberturaComunicacionPoint[]>> {
+  const empty = { day: [], week: [], month: [] };
   const universo = await getUniverseLocations();
-  if (universo.length === 0) return [];
+  if (universo.length === 0) return empty;
 
   const universoBySector = new Map<Sector, number>();
   for (const sector of ["cumana", "barquisimeto_este"] as Sector[]) {
@@ -236,28 +328,13 @@ export async function getCoberturaComunicacionPorSector(): Promise<CoberturaComu
 
   const rows = (data ?? []) as { location_id: string; created_at: string; pop_present: boolean }[];
   const relevantRows = rows.filter((r) => sectorByLocation.has(r.location_id));
-  if (relevantRows.length === 0) return [];
+  if (relevantRows.length === 0) return empty;
 
-  const weeks = Array.from(new Set(relevantRows.map((r) => isoWeekKey(r.created_at.slice(0, 10))))).sort();
-
-  const points: CoberturaComunicacionPoint[] = [];
-  for (const week of weeks) {
-    const rowsUpToWeek = relevantRows.filter((r) => isoWeekKey(r.created_at.slice(0, 10)) <= week);
-
-    const point: CoberturaComunicacionPoint = { week };
-    for (const sector of ["cumana", "barquisimeto_este"] as Sector[]) {
-      const sectorRows = rowsUpToWeek.filter((r) => sectorByLocation.get(r.location_id) === sector);
-      const visitados = new Set(sectorRows.map((r) => r.location_id));
-      const conPop = new Set(sectorRows.filter((r) => r.pop_present).map((r) => r.location_id));
-      const universoSector = universoBySector.get(sector) ?? 0;
-
-      point[`${sector}_cobertura`] = universoSector > 0 ? Math.round((visitados.size / universoSector) * 1000) / 10 : 0;
-      point[`${sector}_comunicacion`] = universoSector > 0 ? Math.round((conPop.size / universoSector) * 1000) / 10 : 0;
-    }
-    points.push(point);
-  }
-
-  return points;
+  return {
+    day: computeCoberturaComunicacionPoints(relevantRows, sectorByLocation, universoBySector, "day"),
+    week: computeCoberturaComunicacionPoints(relevantRows, sectorByLocation, universoBySector, "week"),
+    month: computeCoberturaComunicacionPoints(relevantRows, sectorByLocation, universoBySector, "month"),
+  };
 }
 
 // ── 6. Detalle de Clientes por Segmento ────────────────────────────
