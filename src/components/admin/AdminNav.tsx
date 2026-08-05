@@ -6,12 +6,9 @@ import { toast } from 'sonner';
 import { Button } from '@/components/ui/button';
 import type { DashboardRole } from '@/types';
 
-// Toda la carga de datos (SAP, cartera, despachos, pedidos pendientes,
-// sell-out de cadenas) vive solo en el menú de DIENN — es el único canal
-// para subir datos a la app. Administrador se queda únicamente con el
-// Dashboard, para que no se pueda subir información desde ese perfil y
-// alterar sin querer la calidad de lo que se visualiza (ver chat con
-// Alejandro, 05-08-2026).
+// La carga de datos y la gestión de catálogo/personal viven en DIENN.
+// Administrador se queda solo con el Dashboard de ejecución, para no
+// alterar desde ese perfil la calidad de lo que se visualiza.
 const NAV_ITEMS: Record<DashboardRole, { href: string; label: string }[]> = {
   ADMIN: [{ href: '/dashboard', label: 'Dashboard' }],
   DIENN: [
@@ -21,6 +18,8 @@ const NAV_ITEMS: Record<DashboardRole, { href: string; label: string }[]> = {
     { href: '/despachos', label: 'Despachos SAP' },
     { href: '/sell-out-cadenas', label: 'Sell-Out Cadenas' },
     { href: '/cartera', label: 'Cartera de Clientes' },
+    { href: '/products', label: 'Productos' },
+    { href: '/personal', label: 'Personal de Campo' },
   ],
 };
 
