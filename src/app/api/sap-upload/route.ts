@@ -10,6 +10,37 @@ type SapUploadBody =
   // Reporte N7_V_SD83_WEB_001 (Panquecitas, Cantidad Pedido/Facturada).
   | { format: "facturacion"; rows: ParsedSapFacturacionRow[]; batchId: string };
 
+// Misma fila (cliente + fecha + producto/presentación) ya cargada en un batch
+// anterior → se descarta en vez de duplicar el KG. null se normaliza a un
+// string fijo porque el reporte mensual nunca trae variant_id.
+function dedupeKey(location_id: string, product_id: string, variant_id: string | null | undefined, date: string) {
+  return `${location_id}|${product_id}|${variant_id ?? "null"}|${date}`;
+}
+
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+async function fetchExistingKeys(
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  supabase: any,
+  table: string,
+  dateColumn: string,
+  locationIds: string[],
+  dates: string[]
+) {
+  if (!locationIds.length || !dates.length) return new Set<string>();
+  const { data, error } = await supabase
+    .from(table)
+    .select(`location_id, product_id, variant_id, ${dateColumn}`)
+    .in("location_id", locationIds)
+    .in(dateColumn, dates);
+  if (error) throw error;
+  return new Set(
+    (data as { location_id: string; product_id: string; variant_id: string | null }[]).map((r) =>
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      dedupeKey(r.location_id, r.product_id, r.variant_id, (r as any)[dateColumn])
+    )
+  );
+}
+
 export async function POST(req: Request) {
   try {
     if (!(await hasDashboardSession())) {
@@ -92,13 +123,33 @@ async function handleMonthlyUpload(supabase: any, rows: ParsedSapRow[], batchId:
     }, { status: 422 });
   }
 
-  // ── 3. Insert sell-in records ────────────────────────────────────────────
-  const { error: insertError } = await supabase.from("sap_sell_in_records").insert(sellInRecords);
-  if (insertError) throw insertError;
+  // ── 3. Descartar filas ya cargadas (mismo cliente + fecha + producto) ──
+  const existingKeys = await fetchExistingKeys(
+    supabase,
+    "sap_sell_in_records",
+    "date_of_sale",
+    [...new Set(sellInRecords.map((r) => r.location_id))],
+    [...new Set(sellInRecords.map((r) => r.date_of_sale))]
+  );
+  const seenInBatch = new Set<string>();
+  const newSellInRecords = sellInRecords.filter((r) => {
+    const key = dedupeKey(r.location_id, r.product_id, null, r.date_of_sale);
+    if (existingKeys.has(key) || seenInBatch.has(key)) return false;
+    seenInBatch.add(key);
+    return true;
+  });
+  const duplicates = sellInRecords.length - newSellInRecords.length;
+
+  // ── 4. Insert sell-in records ────────────────────────────────────────────
+  if (newSellInRecords.length > 0) {
+    const { error: insertError } = await supabase.from("sap_sell_in_records").insert(newSellInRecords);
+    if (insertError) throw insertError;
+  }
 
   return Response.json({
     format: "monthly",
-    inserted: sellInRecords.length,
+    inserted: newSellInRecords.length,
+    duplicates_skipped: duplicates,
     locations_upserted: locationsToUpsert.length,
   });
 }
@@ -206,20 +257,59 @@ async function handleFacturacionUpload(supabase: any, rows: ParsedSapFacturacion
     }, { status: 422 });
   }
 
-  if (sellInRows.length > 0) {
-    const { error } = await supabase.from("sap_sell_in_records").insert(sellInRows);
+  // ── 3. Descartar filas ya cargadas (mismo cliente + fecha + material) ──
+  const allLocationIds = [
+    ...new Set([...sellInRows.map((r) => r.location_id), ...pendingRows.map((r) => r.location_id)]),
+  ];
+  const [existingSellInKeys, existingPendingKeys] = await Promise.all([
+    fetchExistingKeys(
+      supabase,
+      "sap_sell_in_records",
+      "date_of_sale",
+      allLocationIds,
+      [...new Set(sellInRows.map((r) => r.date_of_sale))]
+    ),
+    fetchExistingKeys(
+      supabase,
+      "sap_pending_orders",
+      "order_date",
+      allLocationIds,
+      [...new Set(pendingRows.map((r) => r.order_date))]
+    ),
+  ]);
+
+  const seenSellIn = new Set<string>();
+  const newSellInRows = sellInRows.filter((r) => {
+    const key = dedupeKey(r.location_id, r.product_id, r.variant_id, r.date_of_sale);
+    if (existingSellInKeys.has(key) || seenSellIn.has(key)) return false;
+    seenSellIn.add(key);
+    return true;
+  });
+
+  const seenPending = new Set<string>();
+  const newPendingRows = pendingRows.filter((r) => {
+    const key = dedupeKey(r.location_id, r.product_id, r.variant_id, r.order_date);
+    if (existingPendingKeys.has(key) || seenPending.has(key)) return false;
+    seenPending.add(key);
+    return true;
+  });
+
+  // ── 4. Insert ────────────────────────────────────────────────────────────
+  if (newSellInRows.length > 0) {
+    const { error } = await supabase.from("sap_sell_in_records").insert(newSellInRows);
     if (error) throw error;
   }
-  if (pendingRows.length > 0) {
-    const { error } = await supabase.from("sap_pending_orders").insert(pendingRows);
+  if (newPendingRows.length > 0) {
+    const { error } = await supabase.from("sap_pending_orders").insert(newPendingRows);
     if (error) throw error;
   }
 
   return Response.json({
     format: "facturacion",
     locations_upserted: locationsToUpsert.length,
-    ventas_inserted: sellInRows.length,
-    pendientes_inserted: pendingRows.length,
+    ventas_inserted: newSellInRows.length,
+    pendientes_inserted: newPendingRows.length,
+    duplicates_skipped: (sellInRows.length - newSellInRows.length) + (pendingRows.length - newPendingRows.length),
   });
 }
 

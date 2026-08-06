@@ -88,6 +88,7 @@ export function SapDropzone({ onCommitSuccess }: SapDropzoneProps) {
         ventas_inserted?: number;
         pendientes_inserted?: number;
         locations_upserted?: number;
+        duplicates_skipped?: number;
         error?: string;
       };
       if (!res.ok) {
@@ -96,17 +97,18 @@ export function SapDropzone({ onCommitSuccess }: SapDropzoneProps) {
         return;
       }
       setState("done");
+      const duplicatesNote = data.duplicates_skipped ? ` · ${data.duplicates_skipped} duplicados omitidos (ya cargados)` : "";
       if (parsed.format === "facturacion") {
         const count = (data.ventas_inserted ?? 0) + (data.pendientes_inserted ?? 0);
         onCommitSuccess(batchId, count, data.locations_upserted ?? 0);
         setDoneSummary(
-          `${data.ventas_inserted} registros de ventas · ${data.pendientes_inserted} pedidos pendientes · ${data.locations_upserted} localidades actualizadas`
+          `${data.ventas_inserted} registros de ventas · ${data.pendientes_inserted} pedidos pendientes · ${data.locations_upserted} localidades actualizadas${duplicatesNote}`
         );
         toast.success("Carga completada");
       } else {
         onCommitSuccess(batchId, data.inserted ?? 0, data.locations_upserted ?? 0);
-        setDoneSummary(`${data.inserted} registros de sell-in cargados · ${data.locations_upserted} localidades actualizadas`);
-        toast.success(`${data.inserted} registros de sell-in cargados · ${data.locations_upserted} localidades actualizadas`);
+        setDoneSummary(`${data.inserted} registros de sell-in cargados · ${data.locations_upserted} localidades actualizadas${duplicatesNote}`);
+        toast.success(`${data.inserted} registros de sell-in cargados · ${data.locations_upserted} localidades actualizadas${duplicatesNote}`);
       }
     } catch {
       toast.error("Error de conexión. Intenta de nuevo.");

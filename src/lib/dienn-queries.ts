@@ -533,15 +533,16 @@ function computePenetracionRecompraPoints(
   for (const bucket of buckets) {
     const rowsUpToBucket = rows.filter((r) => bucketKeyFor(r.date_of_sale, granularity) <= bucket);
 
-    const monthsByLocation = new Map<string, Set<string>>();
+    const datesByLocation = new Map<string, Set<string>>();
     for (const r of rowsUpToBucket) {
-      const month = r.date_of_sale.slice(0, 7);
-      if (!monthsByLocation.has(r.location_id)) monthsByLocation.set(r.location_id, new Set());
-      monthsByLocation.get(r.location_id)!.add(month);
+      if (!datesByLocation.has(r.location_id)) datesByLocation.set(r.location_id, new Set());
+      datesByLocation.get(r.location_id)!.add(r.date_of_sale);
     }
 
-    const compradores = monthsByLocation.size;
-    const conRecompra = Array.from(monthsByLocation.values()).filter((m) => m.size >= 2).length;
+    const compradores = datesByLocation.size;
+    // Recompra = ≥2 fechas de compra distintas, sin exigir que caigan en
+    // meses distintos — dos compras en la misma semana también cuentan.
+    const conRecompra = Array.from(datesByLocation.values()).filter((d) => d.size >= 2).length;
 
     points.push({
       bucket,
@@ -704,10 +705,11 @@ export async function getDetalleClientesPorSegmento(sector?: Sector): Promise<De
     .gt("quantity_kg", 0);
 
   const salesRows = (data ?? []) as { location_id: string; date_of_sale: string }[];
-  const monthsByLocation = new Map<string, Set<string>>();
+  // Recompra = ≥2 fechas de compra distintas, sin exigir meses distintos.
+  const datesByLocation = new Map<string, Set<string>>();
   for (const r of salesRows) {
-    if (!monthsByLocation.has(r.location_id)) monthsByLocation.set(r.location_id, new Set());
-    monthsByLocation.get(r.location_id)!.add(r.date_of_sale.slice(0, 7));
+    if (!datesByLocation.has(r.location_id)) datesByLocation.set(r.location_id, new Set());
+    datesByLocation.get(r.location_id)!.add(r.date_of_sale);
   }
 
   const universoTotalHmpKg = universo.reduce((s, l) => s + (hmpTotals.get(l.id) ?? 0), 0);
@@ -722,7 +724,7 @@ export async function getDetalleClientesPorSegmento(sector?: Sector): Promise<De
   const rows: DetalleSegmentoRow[] = [];
   for (const [segmento, locs] of bySegmento.entries()) {
     const facturados = locs.filter((l) => (panqFacturadoTotals.get(l.id) ?? 0) > 0);
-    const conRecompra = facturados.filter((l) => (monthsByLocation.get(l.id)?.size ?? 0) >= 2);
+    const conRecompra = facturados.filter((l) => (datesByLocation.get(l.id)?.size ?? 0) >= 2);
 
     const segHmpKg = locs.reduce((s, l) => s + (hmpTotals.get(l.id) ?? 0), 0);
     const segPanqKg = locs.reduce((s, l) => s + (panqPedidoTotals.get(l.id) ?? 0), 0);
