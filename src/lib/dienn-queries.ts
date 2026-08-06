@@ -109,13 +109,30 @@ export async function getTotalToneladas(sector?: Sector): Promise<number> {
   return Math.round((facturadaKgTotal / 1000) * 100) / 100;
 }
 
-// "Pedidas" = lo pedido que aún no se ha facturado (Pedido total − Facturado),
-// mismo número que antes sumaba directo de sap_pending_orders.quantity, pero
-// ahora reconciliado con el mismo origen de datos que el Mix de Producto.
+// "Total ton vendidas" = Cantidad Pedido SAP (facturado + pendiente),
+// sin filtrar por variant_id, para coincidir con Panquecitas vs Harina PAN.
 export async function getTotalToneladasPedidas(sector?: Sector): Promise<number> {
-  const { facturadaKgTotal, pedidaKgTotal } = await getVentasPorPresentacion(sector);
-  const pendienteKgTotal = pedidaKgTotal - facturadaKgTotal;
-  return Math.round((pendienteKgTotal / 1000) * 100) / 100;
+  const ids = await getUniverseLocationIds(sector);
+  const supabase = createSupabaseServiceClient();
+  const [{ data: sellInData }, { data: pendingData }] = await Promise.all([
+    supabase
+      .from("sap_sell_in_records")
+      .select("quantity_kg, location_id")
+      .eq("product_id", PRODUCT_IDS.PANQUECITAS),
+    supabase
+      .from("sap_pending_orders")
+      .select("quantity, location_id")
+      .eq("product_id", PRODUCT_IDS.PANQUECITAS),
+  ]);
+
+  let pedidaKgTotal = 0;
+  for (const r of (sellInData ?? []) as { quantity_kg: number; location_id: string }[]) {
+    if (ids.has(r.location_id)) pedidaKgTotal += r.quantity_kg;
+  }
+  for (const r of (pendingData ?? []) as { quantity: number; location_id: string }[]) {
+    if (ids.has(r.location_id)) pedidaKgTotal += r.quantity;
+  }
+  return Math.round((pedidaKgTotal / 1000) * 100) / 100;
 }
 
 // ── 2. Running de Ventas ──────────────────────────────────────────
@@ -374,14 +391,17 @@ export async function getPedidoVsVentas(
 }
 
 // ── 3c. Panquecitas vs Harina PAN (por tiempo) ─────────────────────
-// Compara volumen (pedido + facturado, sumados) de Panquecitas contra
-// Harina PAN, día/mes/trimestre, sobre dos poblaciones posibles:
+// Compara Cantidad Pedido de Panquecitas vs Harina PAN (día/semana/mes/
+// trimestre). Volumen = facturado + pendiente (= pedido total SAP;
+// no es una suma doble de conceptos distintos). Dos poblaciones:
 //   - "clientes": solo PDV que sí tienen actividad SAP de Panquecitas
 //     (pedido y/o factura — mismo criterio que AdminPdvRow.comprador).
-//   - "universo": los 358 PDV del piloto, hayan comprado Panquecitas o no.
-// OJO: Harina PAN llega solo por el reporte mensual agregado
-// (handleMonthlyUpload), que no genera sap_pending_orders ni variant_id —
-// así que su serie "pedido+facturado" es en la práctica solo facturado.
+//   - "universo": los 363 clientes del piloto (incluye 0 Panquecitas).
+// Harina PAN llega solo por el reporte mensual agregado
+// (handleMonthlyUpload), sin sap_pending_orders — su serie es facturado.
+
+/** Población global fija del piloto — denominador de % Penetración en TOTAL. */
+const UNIVERSAL_CLIENTES_PILOTO = 363;
 
 export type PanComparisonPoblacion = "clientes" | "universo";
 
@@ -453,7 +473,7 @@ export async function getPanVsHarinaPan(
   sector: Sector | undefined,
   poblacion: PanComparisonPoblacion
 ): Promise<Record<PanComparisonGranularity, PanVsHarinaPanPoint[]>> {
-  const empty = { day: [], month: [], quarter: [] };
+  const empty = { day: [], week: [], month: [], quarter: [] };
   const ids = await getPanVsHarinaPanUniverse(sector, poblacion);
   if (ids.size === 0) return empty;
 
@@ -469,6 +489,7 @@ export async function getPanVsHarinaPan(
       .in("product_id", [PRODUCT_IDS.PANQUECITAS, PRODUCT_IDS.HARINA_PAN]),
   ]);
 
+  // Cantidad Pedido = facturado (sell_in) + pendiente; no doble conteo.
   const facturada = (
     (sellInData ?? []) as { location_id: string; product_id: string; quantity_kg: number; date_of_sale: string }[]
   )
@@ -485,6 +506,7 @@ export async function getPanVsHarinaPan(
 
   return {
     day: computePanVsHarinaPanPoints(facturada, pendiente, "day"),
+    week: computePanVsHarinaPanPoints(facturada, pendiente, "week"),
     month: computePanVsHarinaPanPoints(facturada, pendiente, "month"),
     quarter: computePanVsHarinaPanPoints(facturada, pendiente, "quarter"),
   };
@@ -539,6 +561,9 @@ export async function getPenetracionRecompra(sector?: Sector): Promise<Record<Ti
   const universoFiltrado = sector ? universo.filter((l) => sectorGroup(l.oficina_venta) === sector) : universo;
   if (universoFiltrado.length === 0) return empty;
   const ids = new Set(universoFiltrado.map((l) => l.id));
+  // % Penetración = clientes facturados / universo global (363) en TOTAL;
+  // con filtro de sector, el denominador es el universo de ese sector.
+  const universoSize = sector ? universoFiltrado.length : UNIVERSAL_CLIENTES_PILOTO;
 
   const supabase = createSupabaseServiceClient();
   const { data } = await supabase
@@ -552,9 +577,9 @@ export async function getPenetracionRecompra(sector?: Sector): Promise<Record<Ti
   if (rows.length === 0) return empty;
 
   return {
-    day: computePenetracionRecompraPoints(rows, universoFiltrado.length, "day"),
-    week: computePenetracionRecompraPoints(rows, universoFiltrado.length, "week"),
-    month: computePenetracionRecompraPoints(rows, universoFiltrado.length, "month"),
+    day: computePenetracionRecompraPoints(rows, universoSize, "day"),
+    week: computePenetracionRecompraPoints(rows, universoSize, "week"),
+    month: computePenetracionRecompraPoints(rows, universoSize, "month"),
   };
 }
 
@@ -633,6 +658,24 @@ export async function getCoberturaComunicacionPorSector(): Promise<Record<TimeGr
 // Segmento = tipo_cliente (decisión #5). %HPM TOTAL / %HPM vs Base:
 // ver decisión #12.
 
+/** Cantidad Pedido (kg) por PDV = facturado + pendiente, sin doble conteo. */
+async function getCantidadPedidoTotalsByLocation(productId: string): Promise<Map<string, number>> {
+  const supabase = createSupabaseServiceClient();
+  const [{ data: sellInData }, { data: pendingData }] = await Promise.all([
+    supabase.from("sap_sell_in_records").select("location_id, quantity_kg").eq("product_id", productId),
+    supabase.from("sap_pending_orders").select("location_id, quantity").eq("product_id", productId),
+  ]);
+
+  const totals = new Map<string, number>();
+  for (const row of (sellInData ?? []) as { location_id: string; quantity_kg: number }[]) {
+    totals.set(row.location_id, (totals.get(row.location_id) ?? 0) + row.quantity_kg);
+  }
+  for (const row of (pendingData ?? []) as { location_id: string; quantity: number }[]) {
+    totals.set(row.location_id, (totals.get(row.location_id) ?? 0) + row.quantity);
+  }
+  return totals;
+}
+
 export interface DetalleSegmentoRow {
   segmento: string;
   penetracionPct: number;
@@ -646,8 +689,12 @@ export async function getDetalleClientesPorSegmento(sector?: Sector): Promise<De
   const universo = sector ? universoTotal.filter((l) => sectorGroup(l.oficina_venta) === sector) : universoTotal;
   if (universo.length === 0) return [];
 
-  const panqTotals = await getSellInTotalsByLocation(PRODUCT_IDS.PANQUECITAS);
+  // Penetración: clientes facturados (sell_in > 0). Volumen HPM vs Base:
+  // Cantidad Pedido de Panquecitas (facturado + pendiente).
+  const panqFacturadoTotals = await getSellInTotalsByLocation(PRODUCT_IDS.PANQUECITAS);
+  const panqPedidoTotals = await getCantidadPedidoTotalsByLocation(PRODUCT_IDS.PANQUECITAS);
   const hmpTotals = await getSellInTotalsByLocation(PRODUCT_IDS.HARINA_PAN);
+  const denomPenetracion = sector ? universo.length : UNIVERSAL_CLIENTES_PILOTO;
 
   const supabase = createSupabaseServiceClient();
   const { data } = await supabase
@@ -674,16 +721,19 @@ export async function getDetalleClientesPorSegmento(sector?: Sector): Promise<De
 
   const rows: DetalleSegmentoRow[] = [];
   for (const [segmento, locs] of bySegmento.entries()) {
-    const compradores = locs.filter((l) => (panqTotals.get(l.id) ?? 0) > 0);
-    const conRecompra = compradores.filter((l) => (monthsByLocation.get(l.id)?.size ?? 0) >= 2);
+    const facturados = locs.filter((l) => (panqFacturadoTotals.get(l.id) ?? 0) > 0);
+    const conRecompra = facturados.filter((l) => (monthsByLocation.get(l.id)?.size ?? 0) >= 2);
 
     const segHmpKg = locs.reduce((s, l) => s + (hmpTotals.get(l.id) ?? 0), 0);
-    const segPanqKg = locs.reduce((s, l) => s + (panqTotals.get(l.id) ?? 0), 0);
+    const segPanqKg = locs.reduce((s, l) => s + (panqPedidoTotals.get(l.id) ?? 0), 0);
 
     rows.push({
       segmento,
-      penetracionPct: Math.round((compradores.length / locs.length) * 1000) / 10,
-      recompraPct: compradores.length > 0 ? Math.round((conRecompra.length / compradores.length) * 1000) / 10 : 0,
+      // % Penetración = facturados del segmento / universo (363 en TOTAL)
+      penetracionPct:
+        denomPenetracion > 0 ? Math.round((facturados.length / denomPenetracion) * 1000) / 10 : 0,
+      // Tasa de Recompra = repetidores / clientes con ≥1 compra (facturada)
+      recompraPct: facturados.length > 0 ? Math.round((conRecompra.length / facturados.length) * 1000) / 10 : 0,
       hpmVsBasePct: segHmpKg > 0 ? Math.round((segPanqKg / segHmpKg) * 1000) / 10 : 0,
       hpmTotalPct: universoTotalHmpKg > 0 ? Math.round((segHmpKg / universoTotalHmpKg) * 1000) / 10 : 0,
     });

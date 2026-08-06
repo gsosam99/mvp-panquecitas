@@ -71,6 +71,7 @@ const PAN_POBLACION_OPTIONS: { key: PanComparisonPoblacion; label: string }[] = 
 
 const PAN_GRANULARITY_OPTIONS: { key: PanComparisonGranularity; label: string }[] = [
   { key: "day", label: "Día" },
+  { key: "week", label: "Semana" },
   { key: "month", label: "Mes" },
   { key: "quarter", label: "3 Meses" },
 ];
@@ -214,7 +215,7 @@ export function DiennDashboardClient({
         <KpiCard
           title="Total ton vendidas"
           value={`${bundle.totalToneladasPedidas.toLocaleString("es-VE", { maximumFractionDigits: 2 })} Ton`}
-          subtitle="Volumen pedido aún sin facturar"
+          subtitle="Cantidad Pedido acumulada (SAP)"
           product="panquecitas"
         />
 
@@ -358,10 +359,10 @@ export function DiennDashboardClient({
           <div>
             <CardTitle>Panquecitas vs Harina PAN</CardTitle>
             <p className="text-xs text-slate-400 mt-1">
-              Volumen pedido + facturado (kg) desde la primera hasta la última fecha cargada.{" "}
+              Cantidad Pedido (kg) desde la primera hasta la última fecha cargada.{" "}
               {panPoblacion === "clientes"
-                ? "Solo clientes con actividad SAP de Panquecitas (pedido y/o factura)."
-                : "Los 358 clientes del universo del piloto, hayan comprado Panquecitas o no."}{" "}
+                ? "Solo clientes que pidieron/compraron Panquecitas."
+                : "Los 363 clientes del universo del piloto, hayan comprado Panquecitas o no."}{" "}
               Harina PAN solo trae el reporte mensual agregado, sin desglose de pedidos pendientes.
             </p>
           </div>

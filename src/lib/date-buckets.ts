@@ -52,13 +52,11 @@ export function bucketLabelFor(bucket: string, granularity: TimeGranularity): st
   return `${shortDate(monday)} - ${shortDate(sunday)}`;
 }
 
-// ── Día / Mes / Trimestre ────────────────────────────────────────
-// Granularidad separada de TimeGranularity (que es día/semana/mes, sin
-// trimestre) para no tocar los gráficos que ya dependen de esa unión de 3
-// valores — usada solo por el comparativo Panquecitas vs Harina PAN de
-// DIENN, que pidió específicamente día/mes/trimestre (sin semana).
+// ── Día / Semana / Mes / Trimestre ────────────────────────────────
+// Granularidad del comparativo Panquecitas vs Harina PAN (DIENN).
+// Reutiliza day/week/month de TimeGranularity y añade trimestre.
 
-export type PanComparisonGranularity = "day" | "month" | "quarter";
+export type PanComparisonGranularity = "day" | "week" | "month" | "quarter";
 
 function quarterKeyFor(dateStr: string): string {
   const [yyyy, mm] = dateStr.split("-");
