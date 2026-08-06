@@ -102,6 +102,8 @@ export function SapDropzone({ mode, onCommitSuccess }: SapDropzoneProps) {
         inserted?: number;
         updated?: number;
         stale_skipped?: number;
+        deleted?: number;
+        non_positive_skipped?: number;
         ventas_inserted?: number;
         pendientes_inserted?: number;
         locations_upserted?: number;
@@ -129,9 +131,11 @@ export function SapDropzone({ mode, onCommitSuccess }: SapDropzoneProps) {
       } else {
         const updatedNote = data.updated ? ` · ${data.updated} acumulados actualizados` : "";
         const staleNote = data.stale_skipped ? ` · ${data.stale_skipped} filas obsoletas ignoradas` : "";
+        const deletedNote = data.deleted ? ` · ${data.deleted} acumulados eliminados (crédito/devolución dejó el mes en 0)` : "";
+        const nonPositiveNote = data.non_positive_skipped ? ` · ${data.non_positive_skipped} filas en 0 o negativo sin acumulado previo` : "";
         onCommitSuccess(batchId, (data.inserted ?? 0) + (data.updated ?? 0), data.locations_upserted ?? 0);
         setDoneSummary(
-          `${data.inserted} registros nuevos${updatedNote}${staleNote} · ${data.locations_upserted} localidades actualizadas${foraCarteraNote}`
+          `${data.inserted} registros nuevos${updatedNote}${staleNote}${deletedNote}${nonPositiveNote} · ${data.locations_upserted} localidades actualizadas${foraCarteraNote}`
         );
         toast.success(`${data.inserted} registros nuevos${updatedNote}${foraCarteraNote}`);
       }

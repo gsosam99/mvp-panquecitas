@@ -39,6 +39,7 @@ import type {
   PenetracionRecompraPoint,
   RunningVentasResult,
   TimeGranularity,
+  VolumenRadarAcumulado,
 } from "@/lib/dienn-queries";
 import type { Sector } from "@/lib/sectors";
 import type { SapPendingOrder } from "@/types";
@@ -47,8 +48,8 @@ export interface SectorBundle {
   totalToneladas: number;
   /** Volumen pedido aún no facturado (Pedido − Facturado), mismo universo que totalToneladas. */
   totalToneladasPedidas: number;
-  /** Toneladas reales despachadas/facturadas (Panquecitas + Harina PAN) según "Carga Radar". */
-  volumenRadarAcumulado: number;
+  /** Toneladas reales despachadas/facturadas según "Carga Radar", por producto. */
+  volumenRadarAcumulado: VolumenRadarAcumulado;
   /** Toneladas facturadas SAP por presentación (400g / 800g). */
   mixProducto: MixProductoTonPoint[];
   /** Pedido vs facturado por presentación, agrupado por día y por semana. */
@@ -206,7 +207,7 @@ export function DiennDashboardClient({
       </div>
 
       {/* ── Tarjetas de KPIs dinámicos ─────────────────────────────────── */}
-      <div className="grid grid-cols-1 md:grid-cols-5 gap-4 mb-6 print-avoid-break">
+      <div className="grid grid-cols-1 md:grid-cols-6 gap-4 mb-6 print-avoid-break">
         <KpiCard
           title="Total Ton"
           value={`${bundle.totalToneladas.toLocaleString("es-VE", { maximumFractionDigits: 2 })} Ton`}
@@ -222,10 +223,17 @@ export function DiennDashboardClient({
         />
 
         <KpiCard
-          title="Volumen de venta acumulada en radar"
-          value={`${bundle.volumenRadarAcumulado.toLocaleString("es-VE", { maximumFractionDigits: 2 })} Ton`}
-          subtitle="Panquecitas + Harina PAN despachadas (Carga Radar)"
-          product="both"
+          title="Vol. acumulado en radar — Panquecitas"
+          value={`${bundle.volumenRadarAcumulado.panquecitasTon.toLocaleString("es-VE", { maximumFractionDigits: 2 })} Ton`}
+          subtitle="Panquecitas despachada (Carga Radar)"
+          product="panquecitas"
+        />
+
+        <KpiCard
+          title="Vol. acumulado en radar — Harina PAN"
+          value={`${bundle.volumenRadarAcumulado.harinaPanTon.toLocaleString("es-VE", { maximumFractionDigits: 2 })} Ton`}
+          subtitle="Harina PAN despachada (Carga Radar)"
+          product="pan"
         />
 
         <Card>

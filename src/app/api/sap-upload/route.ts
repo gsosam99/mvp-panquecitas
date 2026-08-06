@@ -187,9 +187,26 @@ async function handleRadarUpload(supabase: any, rows: ParsedSapRadarRow[], batch
 
   const toInsert: (typeof sellInRows) = [];
   const toUpdate: { id: string; quantity_kg: number; date_of_sale: string }[] = [];
+  const toDelete: string[] = [];
   let staleSkipped = 0;
+  let nonPositiveSkipped = 0;
   for (const [key, r] of byKey) {
     const existing = existingByKey.get(key);
+
+    // sap_sell_in_records exige quantity_kg > 0 (ver schema.sql). Un
+    // acumulado <= 0 en el archivo (créditos/devoluciones que dejan el mes
+    // en cero o negativo) no se puede guardar tal cual: si ya había un
+    // acumulado positivo guardado para esa llave, se elimina en vez de
+    // dejarlo desactualizado; si no había nada, simplemente no se inserta.
+    if (r.quantity_kg <= 0) {
+      if (existing && r.date_of_sale >= existing.date_of_sale) {
+        toDelete.push(existing.id);
+      } else {
+        nonPositiveSkipped++;
+      }
+      continue;
+    }
+
     if (!existing) {
       toInsert.push(r);
     } else if (r.date_of_sale >= existing.date_of_sale) {
@@ -218,12 +235,18 @@ async function handleRadarUpload(supabase: any, rows: ParsedSapRadarRow[], batch
     const failed = results.find((r: any) => r.error);
     if (failed) throw failed.error;
   }
+  if (toDelete.length > 0) {
+    const { error: deleteError } = await supabase.from("sap_sell_in_records").delete().in("id", toDelete);
+    if (deleteError) throw deleteError;
+  }
 
   return Response.json({
     format: "radar",
     inserted: toInsert.length,
     updated: toUpdate.length,
+    deleted: toDelete.length,
     stale_skipped: staleSkipped,
+    non_positive_skipped: nonPositiveSkipped,
     clientes_fuera_cartera: clientesFueraCartera,
     locations_upserted: locationsUpdated,
   });

@@ -135,23 +135,34 @@ export async function getTotalToneladasPedidas(sector?: Sector): Promise<number>
   return Math.round((pedidaKgTotal / 1000) * 100) / 100;
 }
 
-// "Volumen de venta acumulada en radar" = todo lo despachado/facturado real
-// que trae "Carga Radar" (sap_sell_in_records), Panquecitas + Harina PAN
-// juntos — el número real de toneladas vendidas y despachadas a clientes de
-// la cartera del piloto.
-export async function getVolumenRadarAcumulado(sector?: Sector): Promise<number> {
+// "Volumen de venta acumulada en radar" = lo despachado/facturado real que
+// trae "Carga Radar" (sap_sell_in_records) — el número real de toneladas
+// vendidas y despachadas a clientes de la cartera del piloto. Separado por
+// producto porque cada uno alimenta la tarjeta de KPI correspondiente.
+export interface VolumenRadarAcumulado {
+  panquecitasTon: number;
+  harinaPanTon: number;
+}
+
+export async function getVolumenRadarAcumulado(sector?: Sector): Promise<VolumenRadarAcumulado> {
   const ids = await getUniverseLocationIds(sector);
   const supabase = createSupabaseServiceClient();
   const { data } = await supabase
     .from("sap_sell_in_records")
-    .select("quantity_kg, location_id")
+    .select("quantity_kg, location_id, product_id")
     .in("product_id", [PRODUCT_IDS.PANQUECITAS, PRODUCT_IDS.HARINA_PAN]);
 
-  let totalKg = 0;
-  for (const r of (data ?? []) as { quantity_kg: number; location_id: string }[]) {
-    if (ids.has(r.location_id)) totalKg += r.quantity_kg;
+  let panquecitasKg = 0;
+  let harinaPanKg = 0;
+  for (const r of (data ?? []) as { quantity_kg: number; location_id: string; product_id: string }[]) {
+    if (!ids.has(r.location_id)) continue;
+    if (r.product_id === PRODUCT_IDS.PANQUECITAS) panquecitasKg += r.quantity_kg;
+    else if (r.product_id === PRODUCT_IDS.HARINA_PAN) harinaPanKg += r.quantity_kg;
   }
-  return Math.round((totalKg / 1000) * 100) / 100;
+  return {
+    panquecitasTon: Math.round((panquecitasKg / 1000) * 100) / 100,
+    harinaPanTon: Math.round((harinaPanKg / 1000) * 100) / 100,
+  };
 }
 
 // ── 2. Running de Ventas ──────────────────────────────────────────
