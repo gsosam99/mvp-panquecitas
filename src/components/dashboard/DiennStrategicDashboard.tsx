@@ -10,6 +10,7 @@ import {
   getRunningVentas,
   getTotalToneladas,
   getTotalToneladasPedidas,
+  getVolumenRadarAcumulado,
 } from "@/lib/dienn-queries";
 import { getIndiceTiendaPerfecta } from "@/lib/admin-queries";
 import { computeSellOut } from "@/lib/sellout-queries";
@@ -23,6 +24,7 @@ async function getBundle(sector?: Sector): Promise<SectorBundle> {
   const [
     totalToneladas,
     totalToneladasPedidas,
+    volumenRadarAcumulado,
     mixProducto,
     pedidoVsVentas,
     panVsHarinaPanClientes,
@@ -34,6 +36,7 @@ async function getBundle(sector?: Sector): Promise<SectorBundle> {
   ] = await Promise.all([
     getTotalToneladas(sector),
     getTotalToneladasPedidas(sector),
+    getVolumenRadarAcumulado(sector),
     getMixProducto(sector),
     getPedidoVsVentas(sector),
     getPanVsHarinaPan(sector, "clientes"),
@@ -47,6 +50,7 @@ async function getBundle(sector?: Sector): Promise<SectorBundle> {
   return {
     totalToneladas,
     totalToneladasPedidas,
+    volumenRadarAcumulado,
     mixProducto,
     pedidoVsVentas,
     panVsHarinaPan: { clientes: panVsHarinaPanClientes, universo: panVsHarinaPanUniverso },

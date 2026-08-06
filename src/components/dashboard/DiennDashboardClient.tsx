@@ -47,6 +47,8 @@ export interface SectorBundle {
   totalToneladas: number;
   /** Volumen pedido aún no facturado (Pedido − Facturado), mismo universo que totalToneladas. */
   totalToneladasPedidas: number;
+  /** Toneladas reales despachadas/facturadas (Panquecitas + Harina PAN) según "Carga Radar". */
+  volumenRadarAcumulado: number;
   /** Toneladas facturadas SAP por presentación (400g / 800g). */
   mixProducto: MixProductoTonPoint[];
   /** Pedido vs facturado por presentación, agrupado por día y por semana. */
@@ -204,7 +206,7 @@ export function DiennDashboardClient({
       </div>
 
       {/* ── Tarjetas de KPIs dinámicos ─────────────────────────────────── */}
-      <div className="grid grid-cols-1 md:grid-cols-4 gap-4 mb-6 print-avoid-break">
+      <div className="grid grid-cols-1 md:grid-cols-5 gap-4 mb-6 print-avoid-break">
         <KpiCard
           title="Total Ton"
           value={`${bundle.totalToneladas.toLocaleString("es-VE", { maximumFractionDigits: 2 })} Ton`}
@@ -217,6 +219,13 @@ export function DiennDashboardClient({
           value={`${bundle.totalToneladasPedidas.toLocaleString("es-VE", { maximumFractionDigits: 2 })} Ton`}
           subtitle="Cantidad Pedido acumulada (SAP)"
           product="panquecitas"
+        />
+
+        <KpiCard
+          title="Volumen de venta acumulada en radar"
+          value={`${bundle.volumenRadarAcumulado.toLocaleString("es-VE", { maximumFractionDigits: 2 })} Ton`}
+          subtitle="Panquecitas + Harina PAN despachadas (Carga Radar)"
+          product="both"
         />
 
         <Card>
@@ -362,7 +371,7 @@ export function DiennDashboardClient({
               Cantidad Pedido (kg) desde la primera hasta la última fecha cargada.{" "}
               {panPoblacion === "clientes"
                 ? "Solo clientes que pidieron/compraron Panquecitas."
-                : "Los 363 clientes del universo del piloto, hayan comprado Panquecitas o no."}{" "}
+                : "Los 358 clientes del universo del piloto, hayan comprado Panquecitas o no."}{" "}
               Harina PAN solo trae el reporte mensual agregado, sin desglose de pedidos pendientes.
             </p>
           </div>

@@ -1,4 +1,10 @@
-import type { ParsedSapFacturacionRow, ParseError, SapFacturacionParseResult } from "@/types";
+import type {
+  ParsedSapFacturacionRow,
+  ParsedSapRadarRow,
+  ParseError,
+  SapFacturacionParseResult,
+  SapRadarParseResult,
+} from "@/types";
 import { normalizeHeader } from "@/lib/excel-parser";
 
 // ════════════════════════════════════════════════════════════════
@@ -108,6 +114,185 @@ export function parseSapFacturacionMhtml(buffer: ArrayBuffer): SapFacturacionPar
     });
   }
 
+  if (valid.length === 0 && errors.length === 0) {
+    errors.push({ row: 0, field: "datos", message: "No se encontraron filas de datos en el reporte." });
+  }
+
+  return { valid, errors };
+}
+
+// ════════════════════════════════════════════════════════════════
+// Reporte "Radar" SAP — mismo mecanismo MHTML, pero con un solo ratio:
+// "Venta Acumulada" (KG), el real DESPACHADO acumulado en lo que va del
+// mes para ese cliente + material. Sirve tanto para Harina PAN ("Radar
+// HPM.xls") como para Panquecitas ("Radar panquecitas.xls") — el código de
+// material en cada fila decide el producto (ver
+// SAP_RADAR_MATERIAL_PRODUCT_MAP en catalog.ts), así que un solo parser
+// cubre ambos archivos sin distinguir el formato de antemano.
+//
+// El export de SAP a veces trae, para el mismo cliente+material, más de
+// una fila con "Día" (fecha de corte del acumulado) distinta — residuo de
+// snapshots intermedios dentro del mismo archivo. Como "Venta Acumulada"
+// es un corte que solo crece dentro del mes, se conserva únicamente la
+// fila con el "Día" más reciente por cliente+material.
+// ════════════════════════════════════════════════════════════════
+
+interface RadarColumnMap {
+  clienteCodigo: number;
+  clienteNombre: number;
+  tipoCliente: number;
+  esquemaAtencion: number;
+  grupoVendedorCodigo: number;
+  grupoVendedorNombre: number;
+  materialCodigo: number;
+  materialNombre: number;
+  oficinaVenta: number;
+  zonaVenta: number;
+  dia: number;
+}
+
+function findRadarColumns(headerRow: string[]): RadarColumnMap | null {
+  const norm = headerRow.map(normalizeHeader);
+  const cliente = indicesOf(norm, "clientet");
+  const tipoCliente = indicesOf(norm, "tipodeclienten");
+  const esquema = indicesOf(norm, "esquemadeatencionn");
+  const grupoVendedores = indicesOf(norm, "grupodevendedoresn");
+  const material = indicesOf(norm, "material");
+  const oficinaVenta = indicesOf(norm, "areadeventasoficvtan");
+  const zonaVenta = indicesOf(norm, "zonadeventasn");
+  const dia = indicesOf(norm, "dia");
+
+  if (
+    cliente.length < 2 ||
+    tipoCliente.length < 1 ||
+    esquema.length < 1 ||
+    grupoVendedores.length < 2 ||
+    material.length < 2 ||
+    oficinaVenta.length < 1 ||
+    zonaVenta.length < 1 ||
+    dia.length < 1
+  ) {
+    return null;
+  }
+
+  return {
+    clienteCodigo: cliente[0],
+    clienteNombre: cliente[1],
+    tipoCliente: tipoCliente[0],
+    esquemaAtencion: esquema[0],
+    grupoVendedorCodigo: grupoVendedores[0],
+    grupoVendedorNombre: grupoVendedores[1],
+    materialCodigo: material[0],
+    materialNombre: material[1],
+    oficinaVenta: oficinaVenta[0],
+    zonaVenta: zonaVenta[0],
+    dia: dia[0],
+  };
+}
+
+/**
+ * "Venta Acumulada" vive unas filas arriba del encabezado — mismo patrón
+ * que los ratios de Pedido/Facturado, pero el radar de HPM intercala una
+ * fila extra de filtro ("Año natural/Mes: AGO 2026") entre el nombre del
+ * ratio y el encabezado real, que el radar de Panquecitas no trae. Por eso
+ * se escanea hacia arriba en vez de mirar solo la fila inmediata anterior.
+ */
+function findRadarRatioColumn(grid: string[][], headerRowIdx: number): number | null {
+  for (let r = headerRowIdx - 1; r >= 0 && r >= headerRowIdx - 4; r--) {
+    const idx = grid[r].map(normalizeHeader).indexOf("ventaacumulada");
+    if (idx >= 0) return idx;
+  }
+  return null;
+}
+
+export function parseSapRadarMhtml(buffer: ArrayBuffer): SapRadarParseResult {
+  const errors: ParseError[] = [];
+
+  let html: string;
+  try {
+    html = extractHtmlFromMhtml(buffer);
+  } catch (e) {
+    return {
+      valid: [],
+      errors: [{ row: 0, field: "file", message: `No se pudo leer el archivo SAP: ${e instanceof Error ? e.message : String(e)}` }],
+    };
+  }
+
+  const grid = parseHtmlTableGrid(html);
+  if (grid.length === 0) {
+    return { valid: [], errors: [{ row: 0, field: "file", message: "No se encontró ninguna tabla en el archivo." }] };
+  }
+
+  let headerRowIdx = -1;
+  let cols: RadarColumnMap | null = null;
+  for (let r = 0; r < grid.length; r++) {
+    const found = findRadarColumns(grid[r]);
+    if (found) {
+      headerRowIdx = r;
+      cols = found;
+      break;
+    }
+  }
+
+  if (headerRowIdx < 0 || !cols) {
+    return {
+      valid: [],
+      errors: [
+        {
+          row: 0,
+          field: "formato",
+          message:
+            'No se encontraron las columnas esperadas ("Cliente (T)", "Material", "Día", etc.). Verifica que sea el reporte Radar de SAP (Harina PAN o Panquecitas).',
+        },
+      ],
+    };
+  }
+
+  const ratioCol = findRadarRatioColumn(grid, headerRowIdx);
+  if (ratioCol === null) {
+    return {
+      valid: [],
+      errors: [{ row: 0, field: "formato", message: 'No se encontró la columna "Venta Acumulada" sobre el encabezado.' }],
+    };
+  }
+
+  // Última fila por cliente+material (mayor "Día") — descarta snapshots intermedios del mismo archivo.
+  const latestByKey = new Map<string, ParsedSapRadarRow>();
+  for (let r = headerRowIdx + 1; r < grid.length; r++) {
+    const row = grid[r];
+    const sapCode = (row[cols.clienteCodigo] ?? "").trim();
+    if (!sapCode) continue;
+    if (normalizeHeader(sapCode) === "resultadototal") break; // fila de totales: fin de los datos
+
+    const diaRaw = (row[cols.dia] ?? "").trim();
+    const fecha = parseSapDate(diaRaw);
+    if (!fecha) {
+      errors.push({ row: r + 1, field: "dia", message: `"Día" inválido: "${diaRaw}".` });
+      continue;
+    }
+
+    const materialCode = (row[cols.materialCodigo] ?? "").trim();
+    const key = `${sapCode}|${materialCode}`;
+    const existing = latestByKey.get(key);
+    if (existing && existing.fecha >= fecha) continue; // ya hay una fila más reciente para esta llave
+
+    latestByKey.set(key, {
+      sap_code: sapCode,
+      client_name: (row[cols.clienteNombre] ?? "").trim(),
+      tipo_cliente: (row[cols.tipoCliente] ?? "").trim().toUpperCase(),
+      esquema_atencion: (row[cols.esquemaAtencion] ?? "").trim(),
+      grupo_vendedor: (row[cols.grupoVendedorCodigo] ?? "").trim().toUpperCase(),
+      region: (row[cols.grupoVendedorNombre] ?? "").trim().toUpperCase(),
+      oficina_venta: (row[cols.oficinaVenta] ?? "").trim().toUpperCase(),
+      zona_venta: (row[cols.zonaVenta] ?? "").trim().toUpperCase(),
+      material_code: materialCode,
+      material_name: (row[cols.materialNombre] ?? "").trim(),
+      fecha,
+      quantity_kg: parseLatinNumber(row[ratioCol]),
+    });
+  }
+
+  const valid = Array.from(latestByKey.values());
   if (valid.length === 0 && errors.length === 0) {
     errors.push({ row: 0, field: "datos", message: "No se encontraron filas de datos en el reporte." });
   }

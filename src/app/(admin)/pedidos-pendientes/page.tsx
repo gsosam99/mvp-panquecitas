@@ -1,19 +1,21 @@
 import type { Metadata } from "next";
-import { PendingOrdersUploadClient } from "@/components/admin/PendingOrdersUploadClient";
+import { SapUploadClient } from "@/components/admin/SapUploadClient";
 
-export const metadata: Metadata = { title: "Pedidos Pendientes — Panquecitas" };
+export const metadata: Metadata = { title: "Pedidos y Facturado — Panquecitas" };
 
 export default function PedidosPendientesPage() {
   return (
     <div>
       <div className="mb-6">
-        <h1 className="text-2xl font-bold text-slate-900">Pedidos Pendientes por Entregar</h1>
+        <h1 className="text-2xl font-bold text-slate-900">Pedidos y Facturado</h1>
         <p className="text-slate-500 mt-1">
-          Carga el reporte SAP de pedidos pendientes. Se muestra en el dashboard DIENN (PDV, ubicación y
-          cantidad).
+          Carga el reporte de pedidos y facturación de Panquecitas (clientes que hicieron pedidos y a nombre de
+          quién se facturó). Alimenta los volúmenes facturado/pedido — no determina el universo de clientes
+          reales (eso lo define Carga Radar cruzado con la Cartera de Clientes), porque este reporte incluye
+          distribuidoras intermediarias que no son puntos de venta finales.
         </p>
       </div>
-      <PendingOrdersUploadClient />
+      <SapUploadClient mode="facturacion" />
     </div>
   );
 }

@@ -135,6 +135,25 @@ export async function getTotalToneladasPedidas(sector?: Sector): Promise<number>
   return Math.round((pedidaKgTotal / 1000) * 100) / 100;
 }
 
+// "Volumen de venta acumulada en radar" = todo lo despachado/facturado real
+// que trae "Carga Radar" (sap_sell_in_records), Panquecitas + Harina PAN
+// juntos — el número real de toneladas vendidas y despachadas a clientes de
+// la cartera del piloto.
+export async function getVolumenRadarAcumulado(sector?: Sector): Promise<number> {
+  const ids = await getUniverseLocationIds(sector);
+  const supabase = createSupabaseServiceClient();
+  const { data } = await supabase
+    .from("sap_sell_in_records")
+    .select("quantity_kg, location_id")
+    .in("product_id", [PRODUCT_IDS.PANQUECITAS, PRODUCT_IDS.HARINA_PAN]);
+
+  let totalKg = 0;
+  for (const r of (data ?? []) as { quantity_kg: number; location_id: string }[]) {
+    if (ids.has(r.location_id)) totalKg += r.quantity_kg;
+  }
+  return Math.round((totalKg / 1000) * 100) / 100;
+}
+
 // ── 2. Running de Ventas ──────────────────────────────────────────
 // Kg_Semanal_Promedio = Total_Kg_Vendidos / Numero_Semanas_Evaluadas
 // (fórmula dada en el documento). Días de inventario = inventario
@@ -396,12 +415,12 @@ export async function getPedidoVsVentas(
 // no es una suma doble de conceptos distintos). Dos poblaciones:
 //   - "clientes": solo PDV que sí tienen actividad SAP de Panquecitas
 //     (pedido y/o factura — mismo criterio que AdminPdvRow.comprador).
-//   - "universo": los 363 clientes del piloto (incluye 0 Panquecitas).
+//   - "universo": los 358 clientes del piloto (incluye 0 Panquecitas).
 // Harina PAN llega solo por el reporte mensual agregado
 // (handleMonthlyUpload), sin sap_pending_orders — su serie es facturado.
 
 /** Población global fija del piloto — denominador de % Penetración en TOTAL. */
-const UNIVERSAL_CLIENTES_PILOTO = 363;
+const UNIVERSAL_CLIENTES_PILOTO = 358;
 
 export type PanComparisonPoblacion = "clientes" | "universo";
 
@@ -562,7 +581,7 @@ export async function getPenetracionRecompra(sector?: Sector): Promise<Record<Ti
   const universoFiltrado = sector ? universo.filter((l) => sectorGroup(l.oficina_venta) === sector) : universo;
   if (universoFiltrado.length === 0) return empty;
   const ids = new Set(universoFiltrado.map((l) => l.id));
-  // % Penetración = clientes facturados / universo global (363) en TOTAL;
+  // % Penetración = clientes facturados / universo global (358) en TOTAL;
   // con filtro de sector, el denominador es el universo de ese sector.
   const universoSize = sector ? universoFiltrado.length : UNIVERSAL_CLIENTES_PILOTO;
 
@@ -731,7 +750,7 @@ export async function getDetalleClientesPorSegmento(sector?: Sector): Promise<De
 
     rows.push({
       segmento,
-      // % Penetración = facturados del segmento / universo (363 en TOTAL)
+      // % Penetración = facturados del segmento / universo (358 en TOTAL)
       penetracionPct:
         denomPenetracion > 0 ? Math.round((facturados.length / denomPenetracion) * 1000) / 10 : 0,
       // Tasa de Recompra = repetidores / clientes con ≥1 compra (facturada)

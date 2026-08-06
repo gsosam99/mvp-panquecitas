@@ -11,7 +11,11 @@ interface UploadRecord {
   timestamp: Date;
 }
 
-export function SapUploadClient() {
+interface SapUploadClientProps {
+  mode: "radar" | "facturacion";
+}
+
+export function SapUploadClient({ mode }: SapUploadClientProps) {
   const [history, setHistory] = useState<UploadRecord[]>([]);
 
   function handleCommitSuccess(batchId: string, count: number, locationsCount: number) {
@@ -26,7 +30,7 @@ export function SapUploadClient() {
             <CardTitle>Importar archivo Excel</CardTitle>
           </CardHeader>
           <CardContent>
-            <SapDropzone onCommitSuccess={handleCommitSuccess} />
+            <SapDropzone mode={mode} onCommitSuccess={handleCommitSuccess} />
           </CardContent>
         </Card>
       </div>
@@ -59,21 +63,37 @@ export function SapUploadClient() {
 
         <Card className="mt-4">
           <CardHeader>
-            <CardTitle>Reportes SAP esperados</CardTitle>
+            <CardTitle>{mode === "radar" ? "Reportes Radar esperados" : "Reporte esperado"}</CardTitle>
           </CardHeader>
           <CardContent className="text-sm text-slate-600 space-y-3">
-            <div>
-              <p className="font-mono text-xs bg-slate-100 px-2 py-1 rounded">N7_V_SD88_WEB_001</p>
-              <p className="text-xs text-slate-400 mt-1">.xlsx real · Harina Pan, columnas KGL por mes.</p>
-            </div>
-            <div>
-              <p className="font-mono text-xs bg-slate-100 px-2 py-1 rounded">N7_V_SD83_WEB_001</p>
-              <p className="text-xs text-slate-400 mt-1">
-                .xls export de SAP (MHTML) · Panquecitas · Cantidad Pedido/Facturada. Se sube tal cual se descarga,
-                sin convertir a Excel. Alimenta ventas y pedidos pendientes en la misma carga.
-              </p>
-            </div>
-            <p className="text-xs text-slate-400">El formato se detecta automáticamente al elegir el archivo.</p>
+            {mode === "radar" ? (
+              <>
+                <div>
+                  <p className="font-mono text-xs bg-slate-100 px-2 py-1 rounded">Radar HPM.xls</p>
+                  <p className="text-xs text-slate-400 mt-1">
+                    Export SAP (MHTML) · Harina PAN, acumulado ENTREGADO por cliente+material en lo que va del mes.
+                  </p>
+                </div>
+                <div>
+                  <p className="font-mono text-xs bg-slate-100 px-2 py-1 rounded">Radar panquecitas.xls</p>
+                  <p className="text-xs text-slate-400 mt-1">
+                    Export SAP (MHTML) · Panquecitas, mismo acumulado por cliente+material (400g/800g).
+                  </p>
+                </div>
+                <p className="text-xs text-slate-400">
+                  Solo cuenta clientes ya registrados en la Cartera de Clientes. Volver a subir el mismo mes
+                  reemplaza el acumulado — no lo duplica.
+                </p>
+              </>
+            ) : (
+              <div>
+                <p className="font-mono text-xs bg-slate-100 px-2 py-1 rounded">factura y pedido panquecitas.xls</p>
+                <p className="text-xs text-slate-400 mt-1">
+                  Export SAP (MHTML) · Panquecitas · Cantidad Pedido/Facturada por día. Se sube tal cual se
+                  descarga, sin convertir a Excel. Alimenta ventas y pedidos pendientes en la misma carga.
+                </p>
+              </div>
+            )}
           </CardContent>
         </Card>
       </div>

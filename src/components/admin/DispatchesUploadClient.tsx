@@ -68,7 +68,7 @@ export function DispatchesUploadClient() {
           <CardContent className="text-sm text-slate-600 space-y-1">
             <p>
               Alimenta el motor de <span className="font-medium">Sell-Out</span> en DIENN — a diferencia del
-              reporte mensual de "Carga SAP", estos despachos traen fecha real por cliente, necesaria para el
+              reporte mensual de "Carga Radar", estos despachos traen fecha real por cliente, necesaria para el
               corte D-1 entre rondas de visita.
             </p>
           </CardContent>

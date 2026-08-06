@@ -155,25 +155,39 @@ export interface PromotionActivity {
 /** Tamaño fijo del rollo de tickets que porta cada promotora por jornada. */
 export const TICKETS_PER_ROLL = 80;
 
-export interface ParsedSapRow {
-  sap_code: string;
-  client_name: string;
-  client_type: LocationType;
-  region: string;
-  city: string;
-  category: string;
-  quantity_kg: number;
-  date_of_sale: string;
-}
-
 export interface ParseError {
   row: number;
   field: string;
   message: string;
 }
 
-export interface SapParseResult {
-  valid: ParsedSapRow[];
+// ════════════════════════════════════════════════════════════════
+// Reporte "Radar" SAP (Harina PAN y Panquecitas) — export MHTML de SAP BW
+// (mismo mecanismo que el reporte de Pedido/Facturado más abajo), pero con
+// un solo ratio: "Venta Acumulada" (KG) — el acumulado real DESPACHADO en
+// lo que va del mes para ese cliente + material. "fecha" es el corte del
+// acumulado, no una venta puntual de ese día. El código de material
+// determina el producto (Harina PAN o Panquecitas) — ver
+// SAP_RADAR_MATERIAL_PRODUCT_MAP en catalog.ts. Ver src/lib/sap-mhtml-parser.ts.
+// ════════════════════════════════════════════════════════════════
+
+export interface ParsedSapRadarRow {
+  sap_code: string;
+  client_name: string;
+  tipo_cliente: string;
+  esquema_atencion: string;
+  grupo_vendedor: string;
+  region: string;
+  oficina_venta: string;
+  zona_venta: string;
+  material_code: string;
+  material_name: string;
+  fecha: string;
+  quantity_kg: number;
+}
+
+export interface SapRadarParseResult {
+  valid: ParsedSapRadarRow[];
   errors: ParseError[];
 }
 
@@ -237,18 +251,6 @@ export interface SapPendingOrder {
   order_date: string | null;
   notes: string | null;
   location?: Location;
-}
-
-export interface ParsedPendingOrderRow {
-  sap_code: string;
-  quantity: number;
-  order_date: string | null;
-  notes?: string;
-}
-
-export interface PendingOrdersParseResult {
-  valid: ParsedPendingOrderRow[];
-  errors: ParseError[];
 }
 
 export interface SapDispatch {

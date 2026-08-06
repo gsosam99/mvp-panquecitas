@@ -48,11 +48,28 @@ export const PANQUECITAS_FIELD_VARIANTS = [
   },
 ] as const;
 
-// Mapeo de "Categoria de productos (N)" del SAP → product_id
-// Cuando se conozca el tag de Panquecitas en SAP, agregar aquí.
-export const SAP_CATEGORY_MAP: Record<string, string> = {
-  "Harina de Maíz": PRODUCT_IDS.HARINA_PAN,
-  // "TAG_PANQUECITAS": PRODUCT_IDS.PANQUECITAS,  ← agregar cuando esté disponible
+// Mapeo de "Material" (código SKU, ej. "H187", "Q147") del reporte "Radar"
+// SAP (Harina PAN y Panquecitas, ver src/lib/sap-mhtml-parser.ts →
+// parseSapRadarMhtml) → product_id. Un solo parser cubre ambos archivos
+// (Radar HPM.xls / Radar panquecitas.xls) porque el producto se resuelve
+// por código de material, no por nombre de archivo. A diferencia de
+// SAP_MATERIAL_PRODUCT_MAP (reporte de Pedido/Facturado), estos códigos NO
+// traen el prefijo "CR/". Agregar aquí los códigos nuevos que aparezcan —
+// un material no listado se reporta como error en vez de asumir un
+// producto por defecto.
+export const SAP_RADAR_MATERIAL_PRODUCT_MAP: Record<string, string> = {
+  "H187": PRODUCT_IDS.HARINA_PAN, // PAN HPM BLANCO GLUTEN FREE 1KGX20UN VE
+  "H439": PRODUCT_IDS.HARINA_PAN, // PAN HARINA MAIZ GF 2KGx9UNID BOPP
+  "Q147": PRODUCT_IDS.PANQUECITAS, // PRIMOR MEZCLA DE HARINAS BOLSA 400Gx16UN
+  "Q148": PRODUCT_IDS.PANQUECITAS, // PRIMOR MEZCLA DE HARINAS BOLSA 800Gx12UN
+};
+
+// Misma tabla de materiales del Radar, pero a nivel de presentación —
+// alimenta el Mix de Producto de DIENN. Harina PAN no distingue
+// presentación (queda sin variant_id, a nivel de producto).
+export const SAP_RADAR_MATERIAL_VARIANT_MAP: Record<string, string> = {
+  "Q147": VARIANT_IDS.PANQ_04KG_UNIDAD,
+  "Q148": VARIANT_IDS.PANQ_08KG_UNIDAD,
 };
 
 // Mapeo de "Material" (código SKU, ej. "CR/Q147") del reporte SAP

@@ -13,19 +13,32 @@ import {
   TableRow,
 } from "@/components/ui/table";
 import { Alert, AlertDescription } from "@/components/ui/alert";
-import type { ParsedSapRow, ParsedSapFacturacionRow, ParseError } from "@/types";
+import type { ParsedSapRadarRow, ParsedSapFacturacionRow, ParseError } from "@/types";
+
+type SapDropzoneMode = "radar" | "facturacion";
 
 interface SapDropzoneProps {
+  mode: SapDropzoneMode;
   onCommitSuccess: (batchId: string, count: number, locationsCount: number) => void;
 }
 
 type UploadState = "idle" | "parsing" | "previewing" | "uploading" | "done";
 
 type ParsedData =
-  | { format: "monthly"; valid: ParsedSapRow[]; errors: ParseError[] }
+  | { format: "radar"; valid: ParsedSapRadarRow[]; errors: ParseError[] }
   | { format: "facturacion"; valid: ParsedSapFacturacionRow[]; errors: ParseError[] };
 
-export function SapDropzone({ onCommitSuccess }: SapDropzoneProps) {
+const MODE_LABEL: Record<SapDropzoneMode, string> = {
+  radar: "Radar (Harina PAN o Panquecitas)",
+  facturacion: "Pedidos y Facturado (Panquecitas)",
+};
+
+const MODE_HINT: Record<SapDropzoneMode, string> = {
+  radar: "\"Radar HPM.xls\" o \"Radar panquecitas.xls\" — export SAP (MHTML)",
+  facturacion: "Reporte de Pedido/Facturado — export SAP (MHTML)",
+};
+
+export function SapDropzone({ mode, onCommitSuccess }: SapDropzoneProps) {
   const [state, setState] = useState<UploadState>("idle");
   const [dragOver, setDragOver] = useState(false);
   const [parsed, setParsed] = useState<ParsedData | null>(null);
@@ -41,25 +54,27 @@ export function SapDropzone({ onCommitSuccess }: SapDropzoneProps) {
     setFileName(file.name);
     try {
       const buffer = await file.arrayBuffer();
-      const { isSapMhtml, parseSapFacturacionMhtml } = await import("@/lib/sap-mhtml-parser");
+      const { isSapMhtml, parseSapFacturacionMhtml, parseSapRadarMhtml } = await import("@/lib/sap-mhtml-parser");
 
-      if (isSapMhtml(buffer)) {
-        // Reporte N7_V_SD83_WEB_001 (Panquecitas): export "Web Page" de SAP,
-        // MHTML con extensión .xls — no es un Excel real.
+      if (!isSapMhtml(buffer)) {
+        toast.error('Este archivo no parece un export de SAP ("Web Page, Single File").');
+        setState("idle");
+        return;
+      }
+
+      if (mode === "radar") {
+        const result = parseSapRadarMhtml(buffer);
+        setParsed({ format: "radar", valid: result.valid, errors: result.errors });
+      } else {
         const result = parseSapFacturacionMhtml(buffer);
         setParsed({ format: "facturacion", valid: result.valid, errors: result.errors });
-      } else {
-        // Reporte mensual N7_V_SD88_WEB_001 (Harina Pan): .xlsx real.
-        const { parseSapExcel } = await import("@/lib/excel-parser");
-        const result = await parseSapExcel(buffer);
-        setParsed({ format: "monthly", valid: result.valid, errors: result.errors });
       }
       setState("previewing");
     } catch {
       toast.error("Error al leer el archivo.");
       setState("idle");
     }
-  }, []);
+  }, [mode]);
 
   function handleDrop(e: React.DragEvent) {
     e.preventDefault();
@@ -85,10 +100,13 @@ export function SapDropzone({ onCommitSuccess }: SapDropzoneProps) {
       });
       const data = (await res.json()) as {
         inserted?: number;
+        updated?: number;
+        stale_skipped?: number;
         ventas_inserted?: number;
         pendientes_inserted?: number;
         locations_upserted?: number;
         duplicates_skipped?: number;
+        clientes_fuera_cartera?: number;
         error?: string;
       };
       if (!res.ok) {
@@ -97,18 +115,25 @@ export function SapDropzone({ onCommitSuccess }: SapDropzoneProps) {
         return;
       }
       setState("done");
-      const duplicatesNote = data.duplicates_skipped ? ` · ${data.duplicates_skipped} duplicados omitidos (ya cargados)` : "";
+      const foraCarteraNote = data.clientes_fuera_cartera
+        ? ` · ${data.clientes_fuera_cartera} clientes fuera de la cartera (ignorados)`
+        : "";
       if (parsed.format === "facturacion") {
+        const duplicatesNote = data.duplicates_skipped ? ` · ${data.duplicates_skipped} duplicados omitidos (ya cargados)` : "";
         const count = (data.ventas_inserted ?? 0) + (data.pendientes_inserted ?? 0);
         onCommitSuccess(batchId, count, data.locations_upserted ?? 0);
         setDoneSummary(
-          `${data.ventas_inserted} registros de ventas · ${data.pendientes_inserted} pedidos pendientes · ${data.locations_upserted} localidades actualizadas${duplicatesNote}`
+          `${data.ventas_inserted} registros de ventas · ${data.pendientes_inserted} pedidos pendientes · ${data.locations_upserted} localidades actualizadas${duplicatesNote}${foraCarteraNote}`
         );
         toast.success("Carga completada");
       } else {
-        onCommitSuccess(batchId, data.inserted ?? 0, data.locations_upserted ?? 0);
-        setDoneSummary(`${data.inserted} registros de sell-in cargados · ${data.locations_upserted} localidades actualizadas${duplicatesNote}`);
-        toast.success(`${data.inserted} registros de sell-in cargados · ${data.locations_upserted} localidades actualizadas${duplicatesNote}`);
+        const updatedNote = data.updated ? ` · ${data.updated} acumulados actualizados` : "";
+        const staleNote = data.stale_skipped ? ` · ${data.stale_skipped} filas obsoletas ignoradas` : "";
+        onCommitSuccess(batchId, (data.inserted ?? 0) + (data.updated ?? 0), data.locations_upserted ?? 0);
+        setDoneSummary(
+          `${data.inserted} registros nuevos${updatedNote}${staleNote} · ${data.locations_upserted} localidades actualizadas${foraCarteraNote}`
+        );
+        toast.success(`${data.inserted} registros nuevos${updatedNote}${foraCarteraNote}`);
       }
     } catch {
       toast.error("Error de conexión. Intenta de nuevo.");
@@ -147,11 +172,9 @@ export function SapDropzone({ onCommitSuccess }: SapDropzoneProps) {
         ) : (
           <>
             <div className="text-4xl mb-3">📂</div>
-            <p className="font-medium text-slate-700">Arrastra el archivo SAP aquí</p>
+            <p className="font-medium text-slate-700">Arrastra el archivo de {MODE_LABEL[mode]} aquí</p>
             <p className="text-sm text-slate-400 mt-1">o haz clic para seleccionar (.xlsx, .xls)</p>
-            <p className="text-xs text-slate-400 mt-2">
-              N7_V_SD88_WEB_001 (Harina Pan, .xlsx) · N7_V_SD83_WEB_001 (Panquecitas, .xls export SAP)
-            </p>
+            <p className="text-xs text-slate-400 mt-2">{MODE_HINT[mode]}</p>
           </>
         )}
       </div>
@@ -171,7 +194,7 @@ export function SapDropzone({ onCommitSuccess }: SapDropzoneProps) {
               <Badge variant="default">{parsed.valid.length} registros</Badge>
               <Badge variant="secondary">{uniqueClients} localidades</Badge>
               <Badge variant="outline">
-                {parsed.format === "facturacion" ? "Reporte Pedido/Facturado (Panquecitas)" : "Reporte mensual (Harina Pan)"}
+                {parsed.format === "facturacion" ? "Pedido/Facturado (Panquecitas)" : "Radar (acumulado del mes)"}
               </Badge>
               {parsed.errors.length > 0 && (
                 <Badge variant="destructive">{parsed.errors.length} errores</Badge>
@@ -201,8 +224,8 @@ export function SapDropzone({ onCommitSuccess }: SapDropzoneProps) {
         {parsed.valid.length > 0 && parsed.format === "facturacion" && (
           <FacturacionPreviewTable rows={parsed.valid} />
         )}
-        {parsed.valid.length > 0 && parsed.format === "monthly" && (
-          <MonthlyPreviewTable rows={parsed.valid} />
+        {parsed.valid.length > 0 && parsed.format === "radar" && (
+          <RadarPreviewTable rows={parsed.valid} />
         )}
 
         <div className="flex justify-end gap-3">
@@ -235,7 +258,7 @@ export function SapDropzone({ onCommitSuccess }: SapDropzoneProps) {
   );
 }
 
-function MonthlyPreviewTable({ rows }: { rows: ParsedSapRow[] }) {
+function RadarPreviewTable({ rows }: { rows: ParsedSapRadarRow[] }) {
   return (
     <div className="border rounded-lg overflow-hidden">
       <div className="max-h-64 overflow-y-auto">
@@ -245,9 +268,9 @@ function MonthlyPreviewTable({ rows }: { rows: ParsedSapRow[] }) {
               <TableHead>Cód. SAP</TableHead>
               <TableHead>Cliente</TableHead>
               <TableHead>Tipo</TableHead>
-              <TableHead>Municipio</TableHead>
-              <TableHead>Mes</TableHead>
-              <TableHead className="text-right">KG</TableHead>
+              <TableHead>Material</TableHead>
+              <TableHead>Día (corte)</TableHead>
+              <TableHead className="text-right">Venta Acumulada KG</TableHead>
             </TableRow>
           </TableHeader>
           <TableBody>
@@ -255,9 +278,9 @@ function MonthlyPreviewTable({ rows }: { rows: ParsedSapRow[] }) {
               <TableRow key={i}>
                 <TableCell className="font-mono text-xs">{row.sap_code}</TableCell>
                 <TableCell className="text-xs max-w-[180px] truncate">{row.client_name}</TableCell>
-                <TableCell className="text-xs">{row.client_type}</TableCell>
-                <TableCell className="text-xs">{row.region}</TableCell>
-                <TableCell className="text-xs">{row.date_of_sale.slice(0, 7)}</TableCell>
+                <TableCell className="text-xs">{row.tipo_cliente}</TableCell>
+                <TableCell className="text-xs max-w-[160px] truncate">{row.material_name}</TableCell>
+                <TableCell className="text-xs">{row.fecha}</TableCell>
                 <TableCell className="text-right text-xs font-medium">
                   {row.quantity_kg.toLocaleString("es-VE", { maximumFractionDigits: 1 })}
                 </TableCell>

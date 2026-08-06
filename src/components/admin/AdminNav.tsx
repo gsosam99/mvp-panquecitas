@@ -13,8 +13,8 @@ const NAV_ITEMS: Record<DashboardRole, { href: string; label: string }[]> = {
   ADMIN: [{ href: '/dashboard', label: 'Dashboard' }],
   DIENN: [
     { href: '/dashboard', label: 'Dashboard' },
-    { href: '/sap-upload', label: 'Carga SAP' },
-    { href: '/pedidos-pendientes', label: 'Pedidos Pendientes' },
+    { href: '/sap-upload', label: 'Carga Radar' },
+    { href: '/pedidos-pendientes', label: 'Pedidos y Facturado' },
     { href: '/despachos', label: 'Despachos SAP' },
     { href: '/sell-out-cadenas', label: 'Sell-Out Cadenas' },
     { href: '/cartera', label: 'Cartera de Clientes' },
