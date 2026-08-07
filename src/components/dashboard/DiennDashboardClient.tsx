@@ -38,6 +38,7 @@ import type {
   PanComparisonGranularity,
   PanComparisonPoblacion,
   PanVsHarinaPanPoint,
+  PenetracionRadarVsHpm,
   PenetracionRecompraPoint,
   RunningVentasResult,
   TimeGranularity,
@@ -62,6 +63,8 @@ export interface SectorBundle {
   panVsHarinaPan: Record<PanComparisonPoblacion, Record<PanComparisonGranularity, PanVsHarinaPanPoint[]>>;
   runningVentas: RunningVentasResult;
   penetracionRecompra: Record<TimeGranularity, PenetracionRecompraPoint[]>;
+  /** Comparativa de penetración Radar Panquecitas vs. HPM sobre la lista objetivo. */
+  penetracionRadarVsHpm: PenetracionRadarVsHpm;
   detalleSegmentos: DetalleSegmentoRow[];
 }
 
@@ -210,21 +213,7 @@ export function DiennDashboardClient({
       </div>
 
       {/* ── Tarjetas de KPIs dinámicos ─────────────────────────────────── */}
-      <div className="grid grid-cols-1 md:grid-cols-6 gap-4 mb-6 print-avoid-break">
-        <KpiCard
-          title="Volumen facturado"
-          value={`${bundle.totalToneladas.toLocaleString("es-VE", { maximumFractionDigits: 2 })} Ton`}
-          subtitle="Cantidad Facturada — solo Pedidos y Facturado"
-          product="panquecitas"
-        />
-
-        <KpiCard
-          title="Volumen pedido"
-          value={`${bundle.totalToneladasPedidas.toLocaleString("es-VE", { maximumFractionDigits: 2 })} Ton`}
-          subtitle="Cantidad Pedido — solo Pedidos y Facturado"
-          product="panquecitas"
-        />
-
+      <div className="grid grid-cols-1 md:grid-cols-5 gap-4 mb-6 print-avoid-break">
         <KpiCard
           title="Vol. acumulado en radar — Panquecitas"
           value={`${bundle.volumenRadarAcumulado.panquecitasTon.toLocaleString("es-VE", { maximumFractionDigits: 2 })} Ton`}
@@ -268,11 +257,33 @@ export function DiennDashboardClient({
         <Card>
           <CardContent className="pt-5">
             <p className="text-xs font-semibold uppercase tracking-widest mb-2 text-muted-foreground">
+              Penetración: Radar vs. HPM
+            </p>
+            <div className="space-y-1 text-sm">
+              <div className="flex justify-between">
+                <span className="text-slate-500">Radar Panquecitas</span>
+                <span className="font-bold text-slate-900">{bundle.penetracionRadarVsHpm.radarPanquecitasPct}%</span>
+              </div>
+              <div className="flex justify-between">
+                <span className="text-slate-500">HPM (lista completa)</span>
+                <span className="font-bold text-slate-900">{bundle.penetracionRadarVsHpm.hpmPct}%</span>
+              </div>
+              <p className="text-xs text-slate-400 pt-1">
+                {bundle.penetracionRadarVsHpm.clientesPanquecitas} vs {bundle.penetracionRadarVsHpm.clientesHpm} de{" "}
+                {bundle.penetracionRadarVsHpm.universo} clientes objetivo
+              </p>
+            </div>
+          </CardContent>
+        </Card>
+
+        <Card>
+          <CardContent className="pt-5">
+            <p className="text-xs font-semibold uppercase tracking-widest mb-2 text-muted-foreground">
               Mix de Producto
             </p>
             {mixProducto.every((m) => m.toneladas === 0) ? (
               <p className="text-sm text-slate-400">
-                Sin cantidad facturada por presentación — carga el reporte SAP de Pedido/Facturado
+                Sin Radar por presentación — carga el reporte de Carga Radar
                 (Panquecitas 400g y 800g).
               </p>
             ) : (
@@ -281,7 +292,7 @@ export function DiennDashboardClient({
                   <div key={m.variant}>
                     <p className="text-2xl font-bold text-slate-900">{m.toneladas} Ton</p>
                     <p className="text-xs text-slate-500">{m.variant}</p>
-                    <p className="text-xs text-slate-400">{m.pctSobrePedido}% del pedido total</p>
+                    <p className="text-xs text-slate-400">{m.pctSobreTotal}% del total Radar</p>
                   </div>
                 ))}
               </div>

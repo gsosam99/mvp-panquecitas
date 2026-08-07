@@ -257,20 +257,24 @@ export async function getRunningVentas(sector?: Sector): Promise<RunningVentasRe
   };
 }
 
-// ── 3. Mix de Producto (cantidad facturada SAP por presentación) ───
-// Toneladas facturadas 400g vs 800g desde sap_sell_in_records.variant_id
-// (llenado al cargar el reporte N7_V_SD83_WEB_001 — ver migración 008 y
-// SAP_MATERIAL_VARIANT_MAP). Ya no usa el motor de Sell-Out. La suma de
-// las dos presentaciones coincide siempre con getTotalToneladas porque
-// ambas salen de getVentasPorPresentacion (ver arriba).
+// ── 3. Mix de Producto (Radar por presentación) ────────────────────
+// Toneladas reales en anaquel 400g vs 800g desde sap_sell_in_records
+// (Carga Radar), separadas por variant_id (llenado al cargar el reporte
+// N7_V_SD83_WEB_001 — ver migración 008 y SAP_MATERIAL_VARIANT_MAP).
+//
+// CAMBIO (decisión con Alejandro, 08-08-2026): el Mix ahora se guía
+// EXCLUSIVAMENTE por el dato de Radar, no por Pedidos y Facturado, porque
+// representa lo realmente disponible/vendido en el local. El % de cada
+// presentación es sobre el total Radar combinado (400g+800g), así que las
+// dos presentaciones suman 100%.
 
 export type PresentacionMix = "400g" | "800g";
 
 export interface MixProductoTonPoint {
   variant: PresentacionMix;
   toneladas: number;
-  /** % que representa el facturado de esta presentación sobre el total pedido combinado (400g+800g, facturado+pendiente). */
-  pctSobrePedido: number;
+  /** % que representa esta presentación sobre el total Radar combinado (400g+800g). */
+  pctSobreTotal: number;
 }
 
 const VARIANT_TO_PRESENTACION: Record<string, PresentacionMix> = {
@@ -280,14 +284,36 @@ const VARIANT_TO_PRESENTACION: Record<string, PresentacionMix> = {
   [VARIANT_IDS.PANQ_08KG_BULTO]: "800g",
 };
 
+/** Kg de Radar (Carga Radar) por presentación 400g/800g — la fuente real del anaquel. */
+async function getRadarKgByPresentacion(sector?: Sector): Promise<Record<PresentacionMix, number>> {
+  const supabase = createSupabaseServiceClient();
+  const ids = await getUniverseLocationIds(sector);
+
+  const { data } = await supabase
+    .from("sap_sell_in_records")
+    .select("quantity_kg, location_id, variant_id")
+    .eq("product_id", PRODUCT_IDS.PANQUECITAS)
+    .not("variant_id", "is", null);
+
+  const byVariant: Record<PresentacionMix, number> = { "400g": 0, "800g": 0 };
+  for (const r of (data ?? []) as { quantity_kg: number; location_id: string; variant_id: string }[]) {
+    if (!ids.has(r.location_id)) continue;
+    const presentacion = VARIANT_TO_PRESENTACION[r.variant_id];
+    if (!presentacion) continue;
+    byVariant[presentacion] += r.quantity_kg;
+  }
+  return byVariant;
+}
+
 export async function getMixProducto(sector?: Sector): Promise<MixProductoTonPoint[]> {
-  const { facturadaKgByVariant, pedidaKgTotal } = await getVentasPorPresentacion(sector);
+  const radarKgByVariant = await getRadarKgByPresentacion(sector);
+  const radarKgTotal = radarKgByVariant["400g"] + radarKgByVariant["800g"];
 
   return (["400g", "800g"] as PresentacionMix[]).map((variant) => ({
     variant,
-    toneladas: Math.round((facturadaKgByVariant[variant] / 1000) * 100) / 100,
-    pctSobrePedido:
-      pedidaKgTotal > 0 ? Math.round((facturadaKgByVariant[variant] / pedidaKgTotal) * 1000) / 10 : 0,
+    toneladas: Math.round((radarKgByVariant[variant] / 1000) * 100) / 100,
+    pctSobreTotal:
+      radarKgTotal > 0 ? Math.round((radarKgByVariant[variant] / radarKgTotal) * 1000) / 10 : 0,
   }));
 }
 
@@ -602,6 +628,51 @@ export async function getPenetracionRecompra(sector?: Sector): Promise<Record<Ti
     day: computePenetracionRecompraPoints(rows, universoSize, "day"),
     week: computePenetracionRecompraPoints(rows, universoSize, "week"),
     month: computePenetracionRecompraPoints(rows, universoSize, "month"),
+  };
+}
+
+// ── 4b. Comparativa de Penetración: Radar Panquecitas vs. HPM ──────
+// Contrasta, sobre la MISMA lista objetivo de clientes (el universo del
+// piloto — 358 en TOTAL, o el universo del sector con filtro), cuántos
+// tienen Radar de Panquecitas > 0 contra cuántos tienen Radar de Harina
+// PAN (HPM) > 0. Ambas penetraciones usan el MISMO denominador (la lista
+// completa), de modo que el denominador de HPM incluye a los clientes que
+// compran HPM pero NO panquecitas — así se ve el techo real de penetración
+// que HPM ya alcanza y que Panquecitas todavía puede capturar. Todo desde
+// Carga Radar (sap_sell_in_records), la única fuente del anaquel real.
+// Ver pedido de Alejandro (08-08-2026).
+
+export interface PenetracionRadarVsHpm {
+  /** % de la lista objetivo con Radar de Panquecitas > 0. */
+  radarPanquecitasPct: number;
+  /** % de la lista objetivo con Radar de HPM (Harina PAN) > 0 — denominador = lista completa. */
+  hpmPct: number;
+  clientesPanquecitas: number;
+  clientesHpm: number;
+  /** Tamaño del denominador (lista objetivo): 358 en TOTAL o el universo del sector. */
+  universo: number;
+}
+
+export async function getPenetracionRadarVsHpm(sector?: Sector): Promise<PenetracionRadarVsHpm> {
+  const universoTotal = await getUniverseLocations();
+  const universo = sector ? universoTotal.filter((l) => sectorGroup(l.oficina_venta) === sector) : universoTotal;
+  const ids = new Set(universo.map((l) => l.id));
+  const denom = sector ? universo.length : UNIVERSAL_CLIENTES_PILOTO;
+
+  const [panqTotals, hmpTotals] = await Promise.all([
+    getSellInTotalsByLocation(PRODUCT_IDS.PANQUECITAS),
+    getSellInTotalsByLocation(PRODUCT_IDS.HARINA_PAN),
+  ]);
+
+  const clientesPanquecitas = [...ids].filter((id) => (panqTotals.get(id) ?? 0) > 0).length;
+  const clientesHpm = [...ids].filter((id) => (hmpTotals.get(id) ?? 0) > 0).length;
+
+  return {
+    radarPanquecitasPct: denom > 0 ? Math.round((clientesPanquecitas / denom) * 1000) / 10 : 0,
+    hpmPct: denom > 0 ? Math.round((clientesHpm / denom) * 1000) / 10 : 0,
+    clientesPanquecitas,
+    clientesHpm,
+    universo: denom,
   };
 }
 

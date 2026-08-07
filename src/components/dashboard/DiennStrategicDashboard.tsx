@@ -6,6 +6,7 @@ import {
   getFacturadoVsRadar,
   getMixProducto,
   getPanVsHarinaPan,
+  getPenetracionRadarVsHpm,
   getPenetracionRecompra,
   getRunningVentas,
   getTotalToneladas,
@@ -32,6 +33,7 @@ async function getBundle(sector?: Sector): Promise<SectorBundle> {
     panVsHarinaPanUniverso,
     runningVentas,
     penetracionRecompra,
+    penetracionRadarVsHpm,
     detalleSegmentos,
   ] = await Promise.all([
     getTotalToneladas(sector),
@@ -44,6 +46,7 @@ async function getBundle(sector?: Sector): Promise<SectorBundle> {
     getPanVsHarinaPan(sector, "universo"),
     getRunningVentas(sector),
     getPenetracionRecompra(sector),
+    getPenetracionRadarVsHpm(sector),
     getDetalleClientesPorSegmento(sector),
   ]);
 
@@ -57,6 +60,7 @@ async function getBundle(sector?: Sector): Promise<SectorBundle> {
     panVsHarinaPan: { clientes: panVsHarinaPanClientes, universo: panVsHarinaPanUniverso },
     runningVentas,
     penetracionRecompra,
+    penetracionRadarVsHpm,
     detalleSegmentos,
   };
 }
