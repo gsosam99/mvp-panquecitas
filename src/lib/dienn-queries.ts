@@ -38,6 +38,25 @@ async function getUniverseLocationIds(sector?: Sector): Promise<Set<string>> {
   return new Set(filtered.map((l) => l.id));
 }
 
+/**
+ * Igual que getUniverseLocationIds pero SIN excluir a las distribuidoras
+ * intermediarias (ver isExcludedDistribuidor en sectors.ts). Las
+ * distribuidoras no son clientes reales — no cuentan para mercaderistas,
+ * promotoras ni el universo de penetración — pero sí facturan volumen real
+ * que ayuda a llegar a los PDV vía Radar, así que las métricas de VOLUMEN
+ * de Pedidos y Facturado (facturado, pedido, Mix de Producto, Facturado vs
+ * Radar, Demanda Insatisfecha) sí deben sumar lo que ellas facturan. Ver
+ * decisión con Alejandro (08-08-2026).
+ */
+async function getPedidosFacturadosLocationIds(sector?: Sector): Promise<Set<string>> {
+  const supabase = createSupabaseServiceClient();
+  const { data } = await supabase.from("locations").select("id, oficina_venta");
+  const filtered = ((data ?? []) as { id: string; oficina_venta: string | null }[]).filter((l) =>
+    sector ? sectorGroup(l.oficina_venta) === sector : sectorGroup(l.oficina_venta) !== null
+  );
+  return new Set(filtered.map((l) => l.id));
+}
+
 // ── 1. Volumen facturado / 1b. Volumen pedido / 3. Mix de Producto ─────
 // Las tres cifras (facturado, pedido total, y el desglose por presentación
 // 400g/800g) se calculan de UNA sola pasada sobre sap_pedidos_facturados
@@ -63,7 +82,7 @@ interface VentasPorPresentacion {
 
 async function getVentasPorPresentacion(sector?: Sector): Promise<VentasPorPresentacion> {
   const supabase = createSupabaseServiceClient();
-  const ids = await getUniverseLocationIds(sector);
+  const ids = await getPedidosFacturadosLocationIds(sector);
 
   const { data } = await supabase
     .from("sap_pedidos_facturados")
@@ -102,7 +121,7 @@ export async function getTotalToneladas(sector?: Sector): Promise<number> {
 
 /** "Tarjeta de pedidos" — Cantidad Pedido cruda de Pedidos y Facturado, sin filtrar por variant_id. */
 export async function getTotalToneladasPedidas(sector?: Sector): Promise<number> {
-  const ids = await getUniverseLocationIds(sector);
+  const ids = await getPedidosFacturadosLocationIds(sector);
   const supabase = createSupabaseServiceClient();
   const { data } = await supabase
     .from("sap_pedidos_facturados")
@@ -299,7 +318,8 @@ export interface FacturadoVsRadarPeriod {
 function buildFacturadoVsRadarPeriods(
   facturada: { location_id: string; date: string; variant_id: string; kg: number }[],
   radar: { location_id: string; date: string; variant_id: string; kg: number }[],
-  ids: Set<string>,
+  facturadaIds: Set<string>,
+  radarIds: Set<string>,
   granularity: FacturadoVsRadarGranularity
 ): FacturadoVsRadarPeriod[] {
   type Acc = { facturada: number; radar: number };
@@ -316,14 +336,14 @@ function buildFacturadoVsRadarPeriods(
   }
 
   for (const r of facturada) {
-    if (!ids.has(r.location_id) || !r.date) continue;
+    if (!facturadaIds.has(r.location_id) || !r.date) continue;
     const presentacion = VARIANT_TO_PRESENTACION[r.variant_id];
     if (!presentacion) continue;
     ensure(bucketKeyFor(r.date, granularity), presentacion).facturada += r.kg;
   }
 
   for (const r of radar) {
-    if (!ids.has(r.location_id) || !r.date) continue;
+    if (!radarIds.has(r.location_id) || !r.date) continue;
     const presentacion = VARIANT_TO_PRESENTACION[r.variant_id];
     if (!presentacion) continue;
     ensure(bucketKeyFor(r.date, granularity), presentacion).radar += r.kg;
@@ -349,8 +369,11 @@ export async function getFacturadoVsRadar(
   sector?: Sector
 ): Promise<Record<FacturadoVsRadarGranularity, FacturadoVsRadarPeriod[]>> {
   const empty = { day: [] as FacturadoVsRadarPeriod[], week: [] as FacturadoVsRadarPeriod[] };
-  const ids = await getUniverseLocationIds(sector);
-  if (ids.size === 0) return empty;
+  const [facturadaIds, radarIds] = await Promise.all([
+    getPedidosFacturadosLocationIds(sector),
+    getUniverseLocationIds(sector),
+  ]);
+  if (facturadaIds.size === 0 && radarIds.size === 0) return empty;
 
   const supabase = createSupabaseServiceClient();
   const [{ data: facturadoData }, { data: radarData }] = await Promise.all([
@@ -393,8 +416,8 @@ export async function getFacturadoVsRadar(
   if (facturada.length === 0 && radar.length === 0) return empty;
 
   return {
-    day: buildFacturadoVsRadarPeriods(facturada, radar, ids, "day"),
-    week: buildFacturadoVsRadarPeriods(facturada, radar, ids, "week"),
+    day: buildFacturadoVsRadarPeriods(facturada, radar, facturadaIds, radarIds, "day"),
+    week: buildFacturadoVsRadarPeriods(facturada, radar, facturadaIds, radarIds, "week"),
   };
 }
 
@@ -813,8 +836,11 @@ function computeDemandaInsatisfechaPoints(
 
 export async function getDemandaInsatisfecha(sector?: Sector): Promise<Record<TimeGranularity, DemandaInsatisfechaPoint[]>> {
   const empty = { day: [], week: [], month: [] };
-  const ids = await getUniverseLocationIds(sector);
-  if (ids.size === 0) return empty;
+  const [pedidoFacturadoIds, radarIds] = await Promise.all([
+    getPedidosFacturadosLocationIds(sector),
+    getUniverseLocationIds(sector),
+  ]);
+  if (pedidoFacturadoIds.size === 0 && radarIds.size === 0) return empty;
 
   const supabase = createSupabaseServiceClient();
   const [{ data: pedidoFacturadoData }, { data: radarData }] = await Promise.all([
@@ -833,12 +859,12 @@ export async function getDemandaInsatisfecha(sector?: Sector): Promise<Record<Ti
     cantidad_pedido_kg: number;
     cantidad_facturada_kg: number;
     fecha: string;
-  }[]).filter((r) => ids.has(r.location_id));
+  }[]).filter((r) => pedidoFacturadoIds.has(r.location_id));
 
   const pedido = pedidoFacturadoRows.map((r) => ({ date: r.fecha, kg: r.cantidad_pedido_kg }));
   const facturado = pedidoFacturadoRows.map((r) => ({ date: r.fecha, kg: r.cantidad_facturada_kg }));
   const radar = ((radarData ?? []) as { location_id: string; quantity_kg: number; date_of_sale: string }[])
-    .filter((r) => ids.has(r.location_id))
+    .filter((r) => radarIds.has(r.location_id))
     .map((r) => ({ date: r.date_of_sale, kg: r.quantity_kg }));
 
   if (pedido.length === 0 && facturado.length === 0 && radar.length === 0) return empty;

@@ -8,6 +8,7 @@ import {
   SAP_MATERIAL_VARIANT_MAP,
 } from "@/data/catalog";
 import { mapLocationType } from "@/lib/excel-parser";
+import { isExcludedDistribuidor } from "@/lib/sectors";
 import type { ParsedSapRadarRow, ParsedSapFacturacionRow } from "@/types";
 
 type SapUploadBody =
@@ -266,15 +267,23 @@ async function handleRadarUpload(supabase: any, rows: ParsedSapRadarRow[], batch
 // duplicado real y se descarta, no se reemplaza.
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 async function handleFacturacionUpload(supabase: any, rows: ParsedSapFacturacionRow[], batchId: string) {
-  // ── 1. Resolver clientes contra la cartera ya cargada (no se crean nuevos) ──
+  // ── 1. Resolver clientes contra la cartera ya cargada. Excepción: las
+  // distribuidoras intermediarias conocidas (isExcludedDistribuidor) SÍ se
+  // crean/actualizan aquí — su volumen facturado cuenta para las métricas
+  // de Pedidos y Facturado (ayudan a llegar el producto al PDV vía Radar),
+  // pero quedan excluidas del universo real en getUniverseLocations(), así
+  // que nunca cuentan como clientes para mercaderistas/promotoras ni para
+  // penetración. Ver decisión con Alejandro (08-08-2026).
   const uniqueByCode = new Map<string, ParsedSapFacturacionRow>();
   for (const row of rows) uniqueByCode.set(row.sap_code, row);
 
   const knownLocationIds = await resolveKnownLocationIds(supabase, [...uniqueByCode.keys()]);
-  const clientesFueraCartera = [...uniqueByCode.keys()].filter((c) => !knownLocationIds.has(c)).length;
+  const clientesFueraCartera = [...uniqueByCode.keys()].filter(
+    (c) => !knownLocationIds.has(c) && !isExcludedDistribuidor(c)
+  ).length;
 
-  const locationsToRefresh = [...uniqueByCode.entries()]
-    .filter(([sap_code]) => knownLocationIds.has(sap_code))
+  const locationsToUpsert = [...uniqueByCode.entries()]
+    .filter(([sap_code]) => knownLocationIds.has(sap_code) || isExcludedDistribuidor(sap_code))
     .map(([sap_code, row]) => ({
       sap_code,
       name: row.client_name,
@@ -288,13 +297,18 @@ async function handleFacturacionUpload(supabase: any, rows: ParsedSapFacturacion
     }));
 
   let locationsUpdated = 0;
-  if (locationsToRefresh.length > 0) {
+  if (locationsToUpsert.length > 0) {
     const { data: upsertedLocs, error: locError } = await supabase
       .from("locations")
-      .upsert(locationsToRefresh, { onConflict: "sap_code", ignoreDuplicates: false })
-      .select("id");
+      .upsert(locationsToUpsert, { onConflict: "sap_code", ignoreDuplicates: false })
+      .select("id, sap_code");
     if (locError) throw locError;
     locationsUpdated = (upsertedLocs ?? []).length;
+    // Las distribuidoras recién creadas no estaban en knownLocationIds — se
+    // agregan ahora para que la fila 2 (pedidoFacturadoRows) las reconozca.
+    for (const l of upsertedLocs as { id: string; sap_code: string }[]) {
+      knownLocationIds.set(l.sap_code, l.id);
+    }
   }
 
   // ── 2. Resolver product_id + variant_id por material. variant_id es lo
