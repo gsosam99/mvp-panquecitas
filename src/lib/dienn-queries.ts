@@ -317,136 +317,6 @@ export async function getMixProducto(sector?: Sector): Promise<MixProductoTonPoi
   }));
 }
 
-// ── 3b. Facturado vs Radar Panquecitas (por presentación y tiempo) ─────
-// Reemplaza el antiguo "Pedido vs Ventas" (decisión con Alejandro,
-// 07-08-2026): lo que importa no es cuánto se pidió, sino cuánto de lo
-// FACTURADO ya se confirma real en el anaquel según el Radar. Para cada
-// día/semana y cada presentación (400g/800g):
-//   Facturada = Σ sap_pedidos_facturados.cantidad_facturada_kg (Pedidos y Facturado)
-//   Radar     = Σ sap_sell_in_records.quantity_kg (Carga Radar)
-// El cliente elige Día/Semana y un período concreto; el eje X del gráfico
-// son las dos presentaciones, con barras Facturado vs Radar.
-
-export type FacturadoVsRadarGranularity = "day" | "week";
-
-export interface FacturadoVsRadarBarPoint {
-  presentacion: PresentacionMix;
-  facturadaKg: number;
-  radarKg: number;
-}
-
-export interface FacturadoVsRadarPeriod {
-  bucket: string;
-  label: string;
-  bars: FacturadoVsRadarBarPoint[];
-}
-
-function buildFacturadoVsRadarPeriods(
-  facturada: { location_id: string; date: string; variant_id: string; kg: number }[],
-  radar: { location_id: string; date: string; variant_id: string; kg: number }[],
-  facturadaIds: Set<string>,
-  radarIds: Set<string>,
-  granularity: FacturadoVsRadarGranularity
-): FacturadoVsRadarPeriod[] {
-  type Acc = { facturada: number; radar: number };
-  const byBucket = new Map<string, Record<PresentacionMix, Acc>>();
-
-  function ensure(bucket: string, presentacion: PresentacionMix): Acc {
-    if (!byBucket.has(bucket)) {
-      byBucket.set(bucket, {
-        "400g": { facturada: 0, radar: 0 },
-        "800g": { facturada: 0, radar: 0 },
-      });
-    }
-    return byBucket.get(bucket)![presentacion];
-  }
-
-  for (const r of facturada) {
-    if (!facturadaIds.has(r.location_id) || !r.date) continue;
-    const presentacion = VARIANT_TO_PRESENTACION[r.variant_id];
-    if (!presentacion) continue;
-    ensure(bucketKeyFor(r.date, granularity), presentacion).facturada += r.kg;
-  }
-
-  for (const r of radar) {
-    if (!radarIds.has(r.location_id) || !r.date) continue;
-    const presentacion = VARIANT_TO_PRESENTACION[r.variant_id];
-    if (!presentacion) continue;
-    ensure(bucketKeyFor(r.date, granularity), presentacion).radar += r.kg;
-  }
-
-  return Array.from(byBucket.keys())
-    .sort()
-    .map((bucket) => {
-      const cell = byBucket.get(bucket)!;
-      return {
-        bucket,
-        label: bucketLabelFor(bucket, granularity),
-        bars: (["400g", "800g"] as PresentacionMix[]).map((presentacion) => ({
-          presentacion,
-          facturadaKg: Math.round(cell[presentacion].facturada * 10) / 10,
-          radarKg: Math.round(cell[presentacion].radar * 10) / 10,
-        })),
-      };
-    });
-}
-
-export async function getFacturadoVsRadar(
-  sector?: Sector
-): Promise<Record<FacturadoVsRadarGranularity, FacturadoVsRadarPeriod[]>> {
-  const empty = { day: [] as FacturadoVsRadarPeriod[], week: [] as FacturadoVsRadarPeriod[] };
-  const [facturadaIds, radarIds] = await Promise.all([
-    getPedidosFacturadosLocationIds(sector),
-    getUniverseLocationIds(sector),
-  ]);
-  if (facturadaIds.size === 0 && radarIds.size === 0) return empty;
-
-  const supabase = createSupabaseServiceClient();
-  const [{ data: facturadoData }, { data: radarData }] = await Promise.all([
-    supabase
-      .from("sap_pedidos_facturados")
-      .select("cantidad_facturada_kg, location_id, variant_id, fecha")
-      .eq("product_id", PRODUCT_IDS.PANQUECITAS)
-      .not("variant_id", "is", null),
-    supabase
-      .from("sap_sell_in_records")
-      .select("quantity_kg, location_id, variant_id, date_of_sale")
-      .eq("product_id", PRODUCT_IDS.PANQUECITAS)
-      .not("variant_id", "is", null),
-  ]);
-
-  const facturada = ((facturadoData ?? []) as {
-    cantidad_facturada_kg: number;
-    location_id: string;
-    variant_id: string;
-    fecha: string;
-  }[]).map((r) => ({
-    location_id: r.location_id,
-    date: r.fecha,
-    variant_id: r.variant_id,
-    kg: r.cantidad_facturada_kg,
-  }));
-
-  const radar = ((radarData ?? []) as {
-    quantity_kg: number;
-    location_id: string;
-    variant_id: string;
-    date_of_sale: string;
-  }[]).map((r) => ({
-    location_id: r.location_id,
-    date: r.date_of_sale,
-    variant_id: r.variant_id,
-    kg: r.quantity_kg,
-  }));
-
-  if (facturada.length === 0 && radar.length === 0) return empty;
-
-  return {
-    day: buildFacturadoVsRadarPeriods(facturada, radar, facturadaIds, radarIds, "day"),
-    week: buildFacturadoVsRadarPeriods(facturada, radar, facturadaIds, radarIds, "week"),
-  };
-}
-
 // ── 3c. Panquecitas vs Harina PAN (por tiempo) ─────────────────────
 // Compara lo despachado/confirmado por Carga Radar de Panquecitas vs
 // Harina PAN — día/semana/mes/trimestre. Las DOS presentaciones vienen de
@@ -545,92 +415,6 @@ export async function getPanVsHarinaPan(
   };
 }
 
-// ── 4. Evolución de Penetración y Tasa de Recompra ─────────────────
-
-export interface PenetracionRecompraPoint {
-  bucket: string; // clave cronológica interna ("2026-08-04" | "2026-W32" | "2026-08")
-  label: string; // lo que se muestra en el eje X
-  penetracionPct: number;
-  recompraPct: number;
-}
-
-function computePenetracionRecompraPoints(
-  rows: { location_id: string; date_of_sale: string }[],
-  universoSize: number,
-  granularity: TimeGranularity
-): PenetracionRecompraPoint[] {
-  if (rows.length === 0 || universoSize === 0) return [];
-  const buckets = Array.from(new Set(rows.map((r) => bucketKeyFor(r.date_of_sale, granularity)))).sort();
-
-  const points: PenetracionRecompraPoint[] = [];
-  for (const bucket of buckets) {
-    const rowsUpToBucket = rows.filter((r) => bucketKeyFor(r.date_of_sale, granularity) <= bucket);
-
-    const monthsByLocation = new Map<string, Set<string>>();
-    for (const r of rowsUpToBucket) {
-      if (!monthsByLocation.has(r.location_id)) monthsByLocation.set(r.location_id, new Set());
-      monthsByLocation.get(r.location_id)!.add(r.date_of_sale.slice(0, 7));
-    }
-
-    const compradores = monthsByLocation.size;
-    // Recompra = ≥2 meses distintos con Radar > 0. Ya NO se agrupa por
-    // fecha exacta: sap_sell_in_records (Radar) guarda un acumulado por
-    // cliente+material+MES que se REEMPLAZA en cada re-carga (ver
-    // handleRadarUpload) — dos presentaciones (400g/800g) del mismo
-    // cliente pueden quedar con "Día" distinto dentro del mismo mes solo
-    // por haberse actualizado en cargas diferentes, lo que daba falsos
-    // positivos de recompra al agrupar por fecha exacta. Por mes es lo
-    // único que Radar puede medir de forma confiable. Ver bug reportado
-    // por Alejandro (07-08-2026): recompra x segmento en 0% para todos.
-    const conRecompra = Array.from(monthsByLocation.values()).filter((m) => m.size >= 2).length;
-
-    points.push({
-      bucket,
-      label: bucketLabelFor(bucket, granularity),
-      penetracionPct: Math.round((compradores / universoSize) * 1000) / 10,
-      recompraPct: compradores > 0 ? Math.round((conRecompra / compradores) * 1000) / 10 : 0,
-    });
-  }
-
-  return points;
-}
-
-/**
- * Un punto acumulado por cada día/semana/mes con datos — las tres calculadas
- * de una sola pasada por Supabase. Fuente: sap_sell_in_records (Carga
- * Radar) — un cliente cuenta como "compró" solo si el Radar lo confirma,
- * no basta con que tenga un pedido/factura en Pedidos y Facturado (ver
- * decisión con Alejandro, 06-08-2026: el radar es la única fuente
- * confiable del universo real de clientes).
- */
-export async function getPenetracionRecompra(sector?: Sector): Promise<Record<TimeGranularity, PenetracionRecompraPoint[]>> {
-  const empty = { day: [], week: [], month: [] };
-  const universo = await getUniverseLocations();
-  const universoFiltrado = sector ? universo.filter((l) => sectorGroup(l.oficina_venta) === sector) : universo;
-  if (universoFiltrado.length === 0) return empty;
-  const ids = new Set(universoFiltrado.map((l) => l.id));
-  // % Penetración = clientes con Radar > 0 / universo global (358) en TOTAL;
-  // con filtro de sector, el denominador es el universo de ese sector.
-  const universoSize = sector ? universoFiltrado.length : UNIVERSAL_CLIENTES_PILOTO;
-
-  const supabase = createSupabaseServiceClient();
-  const { data } = await supabase
-    .from("sap_sell_in_records")
-    .select("location_id, date_of_sale")
-    .eq("product_id", PRODUCT_IDS.PANQUECITAS)
-    .gt("quantity_kg", 0)
-    .order("date_of_sale");
-
-  const rows = ((data ?? []) as { location_id: string; date_of_sale: string }[]).filter((r) => ids.has(r.location_id));
-  if (rows.length === 0) return empty;
-
-  return {
-    day: computePenetracionRecompraPoints(rows, universoSize, "day"),
-    week: computePenetracionRecompraPoints(rows, universoSize, "week"),
-    month: computePenetracionRecompraPoints(rows, universoSize, "month"),
-  };
-}
-
 // ── 4b. Comparativa de Penetración: Radar Panquecitas vs. HPM ──────
 // Contrasta, sobre la MISMA lista objetivo de clientes (el universo del
 // piloto — 358 en TOTAL, o el universo del sector con filtro), cuántos
@@ -673,6 +457,91 @@ export async function getPenetracionRadarVsHpm(sector?: Sector): Promise<Penetra
     clientesPanquecitas,
     clientesHpm,
     universo: denom,
+  };
+}
+
+// ── 4c. Venta acumulada, Recompra y Activación (combo temporal) ────
+// Alimenta el gráfico combinado (barras + 2 líneas, doble eje) que
+// reemplaza al antiguo "Evolución de Penetración y Tasa de Recompra".
+// Todo desde Carga Radar (sap_sell_in_records) de Panquecitas, acumulado
+// en el tiempo (running total), para Día / Semana / Mes:
+//   - ventaAcumuladaKg (barras, eje kg): Σ Radar hasta el bucket.
+//   - recompraPct (línea): repetidores (≥2 meses con Radar>0) / clientes
+//     activados. Ver misma nota de "meses, no fecha exacta" que en el
+//     Detalle por Segmento.
+//   - activacionPct (línea): clientes activados (Radar>0) / cartera fija
+//     (358 en TOTAL, o el universo del sector con filtro).
+
+export interface VentaRecompraActivacionPoint {
+  bucket: string;
+  label: string;
+  ventaAcumuladaKg: number;
+  recompraPct: number;
+  activacionPct: number;
+}
+
+function computeVentaRecompraActivacionPoints(
+  rows: { location_id: string; date_of_sale: string; quantity_kg: number }[],
+  universoSize: number,
+  granularity: TimeGranularity
+): VentaRecompraActivacionPoint[] {
+  if (rows.length === 0 || universoSize === 0) return [];
+  const buckets = Array.from(new Set(rows.map((r) => bucketKeyFor(r.date_of_sale, granularity)))).sort();
+
+  const points: VentaRecompraActivacionPoint[] = [];
+  for (const bucket of buckets) {
+    const rowsUpToBucket = rows.filter((r) => bucketKeyFor(r.date_of_sale, granularity) <= bucket);
+
+    const ventaAcumuladaKg = rowsUpToBucket.reduce((s, r) => s + r.quantity_kg, 0);
+
+    // Recompra = ≥2 meses distintos con Radar > 0 por cliente (acumulado).
+    const monthsByLocation = new Map<string, Set<string>>();
+    for (const r of rowsUpToBucket) {
+      if (!monthsByLocation.has(r.location_id)) monthsByLocation.set(r.location_id, new Set());
+      monthsByLocation.get(r.location_id)!.add(r.date_of_sale.slice(0, 7));
+    }
+    const activados = monthsByLocation.size;
+    const conRecompra = Array.from(monthsByLocation.values()).filter((m) => m.size >= 2).length;
+
+    points.push({
+      bucket,
+      label: bucketLabelFor(bucket, granularity),
+      ventaAcumuladaKg: Math.round(ventaAcumuladaKg * 10) / 10,
+      recompraPct: activados > 0 ? Math.round((conRecompra / activados) * 1000) / 10 : 0,
+      activacionPct: Math.round((activados / universoSize) * 1000) / 10,
+    });
+  }
+
+  return points;
+}
+
+export async function getVentaRecompraActivacion(
+  sector?: Sector
+): Promise<Record<TimeGranularity, VentaRecompraActivacionPoint[]>> {
+  const empty = { day: [], week: [], month: [] };
+  const universo = await getUniverseLocations();
+  const universoFiltrado = sector ? universo.filter((l) => sectorGroup(l.oficina_venta) === sector) : universo;
+  if (universoFiltrado.length === 0) return empty;
+  const ids = new Set(universoFiltrado.map((l) => l.id));
+  const universoSize = sector ? universoFiltrado.length : UNIVERSAL_CLIENTES_PILOTO;
+
+  const supabase = createSupabaseServiceClient();
+  const { data } = await supabase
+    .from("sap_sell_in_records")
+    .select("location_id, date_of_sale, quantity_kg")
+    .eq("product_id", PRODUCT_IDS.PANQUECITAS)
+    .gt("quantity_kg", 0)
+    .order("date_of_sale");
+
+  const rows = ((data ?? []) as { location_id: string; date_of_sale: string; quantity_kg: number }[]).filter((r) =>
+    ids.has(r.location_id)
+  );
+  if (rows.length === 0) return empty;
+
+  return {
+    day: computeVentaRecompraActivacionPoints(rows, universoSize, "day"),
+    week: computeVentaRecompraActivacionPoints(rows, universoSize, "week"),
+    month: computeVentaRecompraActivacionPoints(rows, universoSize, "month"),
   };
 }
 
@@ -780,8 +649,8 @@ export async function getDetalleClientesPorSegmento(sector?: Sector): Promise<De
   if (universo.length === 0) return [];
 
   // Penetración: clientes con Radar > 0 (Carga Radar — no Pedidos y
-  // Facturado, ver getPenetracionRecompra). Volumen HPM vs Base: Cantidad
-  // Pedido de Panquecitas, cruda de Pedidos y Facturado.
+  // Facturado). Volumen HPM vs Base: Cantidad Pedido de Panquecitas,
+  // cruda de Pedidos y Facturado.
   const panqRadarTotals = await getSellInTotalsByLocation(PRODUCT_IDS.PANQUECITAS);
   const panqPedidoTotals = await getCantidadPedidoTotalsByLocation(PRODUCT_IDS.PANQUECITAS);
   const hmpTotals = await getSellInTotalsByLocation(PRODUCT_IDS.HARINA_PAN);
@@ -795,8 +664,8 @@ export async function getDetalleClientesPorSegmento(sector?: Sector): Promise<De
     .gt("quantity_kg", 0);
 
   const salesRows = (data ?? []) as { location_id: string; date_of_sale: string }[];
-  // Recompra = ≥2 meses distintos con Radar > 0 (no fecha exacta — ver
-  // misma nota en computePenetracionRecompraPoints más arriba: Radar
+  // Recompra = ≥2 meses distintos con Radar > 0 (no fecha exacta —
+  // misma lógica que computeVentaRecompraActivacionPoints: Radar
   // reemplaza el acumulado por cliente+material+mes, así que dos
   // presentaciones del mismo cliente pueden traer "Día" distinto dentro
   // del mismo mes sin ser una recompra real).

@@ -1,14 +1,13 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useMemo, useState } from "react";
 import { KpiCard } from "@/components/dashboard/KpiCard";
 import { ExportExcelButton } from "@/components/dashboard/ExportExcelButton";
 import { ReportPrintButton } from "@/components/dashboard/ReportPrintButton";
 import { ReportPrintHeader } from "@/components/dashboard/ReportPrintHeader";
-import { PenetracionRecompraChart } from "@/components/dashboard/PenetracionRecompraChart";
 import { CoberturaComunicacionChart } from "@/components/dashboard/CoberturaComunicacionChart";
 import { DemandaInsatisfechaChart } from "@/components/dashboard/DemandaInsatisfechaChart";
-import { FacturadoVsRadarChart } from "@/components/dashboard/FacturadoVsRadarChart";
+import { VentaRecompraActivacionChart } from "@/components/dashboard/VentaRecompraActivacionChart";
 import { PanVsHarinaPanChart } from "@/components/dashboard/PanVsHarinaPanChart";
 import { RoundLegend } from "@/components/dashboard/RoundLegend";
 import { SellOutChart } from "@/components/dashboard/SellOutChart";
@@ -32,16 +31,14 @@ import type {
   CoberturaComunicacionPoint,
   DemandaInsatisfechaPoint,
   DetalleSegmentoRow,
-  FacturadoVsRadarGranularity,
-  FacturadoVsRadarPeriod,
   MixProductoTonPoint,
   PanComparisonGranularity,
   PanComparisonPoblacion,
   PanVsHarinaPanPoint,
   PenetracionRadarVsHpm,
-  PenetracionRecompraPoint,
   RunningVentasResult,
   TimeGranularity,
+  VentaRecompraActivacionPoint,
   VolumenRadarAcumulado,
 } from "@/lib/dienn-queries";
 import type { Sector } from "@/lib/sectors";
@@ -55,23 +52,17 @@ export interface SectorBundle {
   volumenRadarAcumulado: VolumenRadarAcumulado;
   /** Toneladas facturadas SAP por presentación (400g / 800g), desde Pedidos y Facturado. */
   mixProducto: MixProductoTonPoint[];
-  /** Facturado (Pedidos y Facturado) vs Radar (Carga Radar) por presentación, agrupado por día y por semana. */
-  facturadoVsRadar: Record<FacturadoVsRadarGranularity, FacturadoVsRadarPeriod[]>;
   /** Pedido / Facturado / Radar de Panquecitas acumulados en el tiempo, para ver la demanda insatisfecha. */
   demandaInsatisfecha: Record<TimeGranularity, DemandaInsatisfechaPoint[]>;
   /** Panquecitas vs Harina PAN, AMBOS desde Carga Radar (misma fuente para que sean comparables). */
   panVsHarinaPan: Record<PanComparisonPoblacion, Record<PanComparisonGranularity, PanVsHarinaPanPoint[]>>;
   runningVentas: RunningVentasResult;
-  penetracionRecompra: Record<TimeGranularity, PenetracionRecompraPoint[]>;
+  /** Venta acumulada (Radar) + tasa de recompra + % activación de clientes, por día/semana/mes. */
+  ventaRecompraActivacion: Record<TimeGranularity, VentaRecompraActivacionPoint[]>;
   /** Comparativa de penetración Radar Panquecitas vs. HPM sobre la lista objetivo. */
   penetracionRadarVsHpm: PenetracionRadarVsHpm;
   detalleSegmentos: DetalleSegmentoRow[];
 }
-
-const FACTURADO_RADAR_GRANULARITY_OPTIONS: { key: FacturadoVsRadarGranularity; label: string }[] = [
-  { key: "day", label: "Día" },
-  { key: "week", label: "Semana" },
-];
 
 const PAN_POBLACION_OPTIONS: { key: PanComparisonPoblacion; label: string }[] = [
   { key: "clientes", label: "PAN Clientes" },
@@ -122,8 +113,7 @@ export function DiennDashboardClient({
   const [asesorFilter, setAsesorFilter] = useState("");
   const [fuenteFilter, setFuenteFilter] = useState<FuenteFilter>("TODOS");
   const [granularity, setGranularity] = useState<TimeGranularity>("week");
-  const [facturadoRadarGranularity, setFacturadoRadarGranularity] = useState<FacturadoVsRadarGranularity>("week");
-  const [facturadoRadarBucket, setFacturadoRadarBucket] = useState("");
+  const [comboGranularity, setComboGranularity] = useState<TimeGranularity>("week");
   const [panPoblacion, setPanPoblacion] = useState<PanComparisonPoblacion>("clientes");
   const [panGranularity, setPanGranularity] = useState<PanComparisonGranularity>("month");
   const bundle = bundles[filter];
@@ -150,17 +140,7 @@ export function DiennDashboardClient({
 
   const panPoints = bundle.panVsHarinaPan[panPoblacion][panGranularity];
 
-  const facturadoRadarPeriods = bundle.facturadoVsRadar[facturadoRadarGranularity];
-  const facturadoRadarPeriod = useMemo(() => {
-    if (facturadoRadarPeriods.length === 0) return null;
-    return facturadoRadarPeriods.find((p) => p.bucket === facturadoRadarBucket) ?? facturadoRadarPeriods[facturadoRadarPeriods.length - 1];
-  }, [facturadoRadarPeriods, facturadoRadarBucket]);
-
-  // Al cambiar sector o granularidad, saltar al período más reciente con datos.
-  useEffect(() => {
-    const periods = bundles[filter].facturadoVsRadar[facturadoRadarGranularity];
-    setFacturadoRadarBucket(periods.length > 0 ? periods[periods.length - 1].bucket : "");
-  }, [bundles, filter, facturadoRadarGranularity]);
+  const comboPoints = bundle.ventaRecompraActivacion[comboGranularity];
 
   const filtroTexto = filter === "TOTAL" ? "Total sectores piloto" : sectorLabels[filter];
 
@@ -326,64 +306,6 @@ export function DiennDashboardClient({
         />
       </div>
 
-      {/* ── Facturado vs Radar Panquecitas ─────────────────────────────────── */}
-      <Card className="mb-6 print-avoid-break">
-        <CardHeader className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between space-y-0">
-          <div>
-            <CardTitle>Facturado vs Radar Panquecitas</CardTitle>
-            <p className="text-xs text-slate-400 mt-1">
-              Cuánto de lo facturado (Pedidos y Facturado) ya se confirma real en el anaquel según el Radar, por
-              presentación. Cambia el período para ver cómo evoluciona con cada carga.
-            </p>
-          </div>
-          <div className="flex flex-wrap items-center gap-2 print:hidden">
-            <div className="flex rounded-lg border border-slate-200 overflow-hidden text-xs font-medium">
-              {FACTURADO_RADAR_GRANULARITY_OPTIONS.map((opt) => (
-                <button
-                  key={opt.key}
-                  onClick={() => setFacturadoRadarGranularity(opt.key)}
-                  className={`px-3 py-1.5 transition-colors ${
-                    facturadoRadarGranularity === opt.key
-                      ? "bg-slate-900 text-white"
-                      : "bg-white text-slate-500 hover:bg-slate-50"
-                  }`}
-                >
-                  {opt.label}
-                </button>
-              ))}
-            </div>
-            {facturadoRadarPeriods.length > 0 && (
-              <select
-                value={facturadoRadarPeriod?.bucket ?? ""}
-                onChange={(e) => setFacturadoRadarBucket(e.target.value)}
-                className="text-sm border border-slate-200 rounded-lg px-3 py-1.5 bg-white text-slate-700"
-              >
-                {facturadoRadarPeriods.map((p) => (
-                  <option key={p.bucket} value={p.bucket}>
-                    {p.label}
-                  </option>
-                ))}
-              </select>
-            )}
-          </div>
-        </CardHeader>
-        <CardContent>
-          {facturadoRadarPeriod ? (
-            <FacturadoVsRadarChart data={facturadoRadarPeriod.bars} />
-          ) : (
-            <div className="h-[300px] flex items-center justify-center text-slate-400">
-              <div className="text-center">
-                <p className="text-4xl mb-2">📊</p>
-                <p>Sin facturas ni Radar de Panquecitas por presentación.</p>
-                <p className="text-xs mt-1">
-                  Carga el reporte de Pedidos y Facturado, y el Radar de Panquecitas (con materiales 400g y 800g).
-                </p>
-              </div>
-            </div>
-          )}
-        </CardContent>
-      </Card>
-
       {/* ── Panquecitas vs Harina PAN ──────────────────────────────────── */}
       <Card className="mb-6 print-avoid-break">
         <CardHeader className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between space-y-0">
@@ -445,7 +367,7 @@ export function DiennDashboardClient({
 
       <Separator className="mb-4 print:hidden" />
 
-      {/* ── Filtro de granularidad temporal (comparte los gráficos 1 y 2) ── */}
+      {/* ── Filtro de granularidad temporal (Demanda Insatisfecha y Cobertura) ── */}
       <div className="flex items-center gap-2 mb-6 print:hidden">
         <span className="text-xs font-semibold uppercase tracking-widest text-muted-foreground">Ver por</span>
         <div className="flex rounded-lg border border-slate-200 overflow-hidden text-xs font-medium">
@@ -466,7 +388,7 @@ export function DiennDashboardClient({
       {/* ── Demanda Insatisfecha (Pedido / Facturado / Radar acumulados) ─── */}
       <Card className="mb-6 print-avoid-break">
         <CardHeader>
-          <CardTitle>Demanda Insatisfecha</CardTitle>
+          <CardTitle>Demanda Insatisfecha (venta acumulada)</CardTitle>
           <p className="text-xs text-slate-400 mt-1">
             Pedido, Facturado y Radar de Panquecitas, acumulados en el tiempo. La brecha entre Pedido y las otras
             dos líneas es la demanda que todavía no se resuelve — si se mantiene o si se estabiliza.
@@ -486,19 +408,38 @@ export function DiennDashboardClient({
         </CardContent>
       </Card>
 
-      {/* ── Gráfico 1: Evolución de Penetración y Tasa de Recompra ───────── */}
+      {/* ── Gráfico 1: Venta acumulada, Recompra y Activación (combo) ────── */}
       <Card className="mb-6 print-avoid-break">
-        <CardHeader>
-          <CardTitle>Evolución de Penetración y Tasa de Recompra</CardTitle>
+        <CardHeader className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between space-y-0">
+          <div>
+            <CardTitle>Venta acumulada, Recompra y Activación de Clientes</CardTitle>
+            <p className="text-xs text-slate-400 mt-1">
+              Barras: venta acumulada (Radar). Líneas (eje derecho, %): tasa de recompra y % de activación de
+              clientes sobre la cartera fija de 358.
+            </p>
+          </div>
+          <div className="flex rounded-lg border border-slate-200 overflow-hidden text-xs font-medium print:hidden">
+            {GRANULARITY_OPTIONS.map((opt) => (
+              <button
+                key={opt.key}
+                onClick={() => setComboGranularity(opt.key)}
+                className={`px-3 py-1.5 transition-colors ${
+                  comboGranularity === opt.key ? "bg-slate-900 text-white" : "bg-white text-slate-500 hover:bg-slate-50"
+                }`}
+              >
+                {opt.label}
+              </button>
+            ))}
+          </div>
         </CardHeader>
         <CardContent>
-          {bundle.penetracionRecompra[granularity].length > 0 ? (
-            <PenetracionRecompraChart data={bundle.penetracionRecompra[granularity]} />
+          {comboPoints.length > 0 ? (
+            <VentaRecompraActivacionChart data={comboPoints} />
           ) : (
-            <div className="h-[280px] flex items-center justify-center text-slate-400">
+            <div className="h-[320px] flex items-center justify-center text-slate-400">
               <div className="text-center">
                 <p className="text-4xl mb-2">📈</p>
-                <p>Sin datos de Sell-in de Panquecitas. Carga el reporte SAP.</p>
+                <p>Sin datos de Radar de Panquecitas. Carga el reporte SAP.</p>
               </div>
             </div>
           )}
