@@ -1,11 +1,11 @@
 import {
   getConversionDegustaciones,
   getCoberturaComunicacionPorSector,
+  getDemandaInsatisfecha,
   getDetalleClientesPorSegmento,
   getFacturadoVsRadar,
   getMixProducto,
   getPanVsHarinaPan,
-  getPedidosPendientes,
   getPenetracionRecompra,
   getRunningVentas,
   getTotalToneladas,
@@ -27,24 +27,24 @@ async function getBundle(sector?: Sector): Promise<SectorBundle> {
     volumenRadarAcumulado,
     mixProducto,
     facturadoVsRadar,
+    demandaInsatisfecha,
     panVsHarinaPanClientes,
     panVsHarinaPanUniverso,
     runningVentas,
     penetracionRecompra,
     detalleSegmentos,
-    pedidosPendientes,
   ] = await Promise.all([
     getTotalToneladas(sector),
     getTotalToneladasPedidas(sector),
     getVolumenRadarAcumulado(sector),
     getMixProducto(sector),
     getFacturadoVsRadar(sector),
+    getDemandaInsatisfecha(sector),
     getPanVsHarinaPan(sector, "clientes"),
     getPanVsHarinaPan(sector, "universo"),
     getRunningVentas(sector),
     getPenetracionRecompra(sector),
     getDetalleClientesPorSegmento(sector),
-    getPedidosPendientes(sector),
   ]);
 
   return {
@@ -53,11 +53,11 @@ async function getBundle(sector?: Sector): Promise<SectorBundle> {
     volumenRadarAcumulado,
     mixProducto,
     facturadoVsRadar,
+    demandaInsatisfecha,
     panVsHarinaPan: { clientes: panVsHarinaPanClientes, universo: panVsHarinaPanUniverso },
     runningVentas,
     penetracionRecompra,
     detalleSegmentos,
-    pedidosPendientes,
   };
 }
 

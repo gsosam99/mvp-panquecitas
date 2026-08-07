@@ -8,7 +8,6 @@ import {
   getUniverseLocations,
   type Sector,
 } from "@/lib/universe";
-import { LOCATION_COLUMNS } from "@/lib/location-columns";
 import {
   bucketKeyFor,
   bucketLabelFor,
@@ -17,7 +16,7 @@ import {
   type PanComparisonGranularity,
   type TimeGranularity,
 } from "@/lib/date-buckets";
-import type { Location, LocationType, SapPendingOrder } from "@/types";
+import type { Location, LocationType } from "@/types";
 
 export type { PanComparisonGranularity, TimeGranularity };
 
@@ -400,15 +399,13 @@ export async function getFacturadoVsRadar(
 }
 
 // ── 3c. Panquecitas vs Harina PAN (por tiempo) ─────────────────────
-// Compara Cantidad Pedido de Panquecitas (Pedidos y Facturado) vs lo
-// despachado de Harina PAN (Carga Radar) — día/semana/mes/trimestre. Dos
-// fuentes distintas a propósito, cada producto con la suya (ver decisión
-// con Alejandro, 07-08-2026): Panquecitas todavía no tiene un reporte de
-// Radar separado del de Pedidos y Facturado, así que su volumen sigue
-// siendo Cantidad Pedido; Harina PAN solo existe en Carga Radar. Dos
+// Compara lo despachado/confirmado por Carga Radar de Panquecitas vs
+// Harina PAN — día/semana/mes/trimestre. Las DOS presentaciones vienen de
+// la MISMA fuente (sap_sell_in_records / Radar) a propósito — no se puede
+// comparar un producto con Pedidos y Facturado y el otro con Radar porque
+// dejan de ser comparables (ver decisión con Alejandro, 08-08-2026). Dos
 // poblaciones:
-//   - "clientes": solo PDV que sí tienen actividad de Pedidos y Facturado
-//     de Panquecitas (pedido y/o factura — mismo criterio que AdminPdvRow.comprador).
+//   - "clientes": solo PDV que sí tienen Radar > 0 de Panquecitas.
 //   - "universo": los 358 clientes del piloto (incluye 0 Panquecitas).
 
 /** Población global fija del piloto — denominador de % Penetración en TOTAL. */
@@ -434,15 +431,12 @@ async function getPanVsHarinaPanUniverse(
 
   const supabase = createSupabaseServiceClient();
   const { data } = await supabase
-    .from("sap_pedidos_facturados")
-    .select("location_id, cantidad_pedido_kg, cantidad_facturada_kg")
-    .eq("product_id", PRODUCT_IDS.PANQUECITAS);
+    .from("sap_sell_in_records")
+    .select("location_id")
+    .eq("product_id", PRODUCT_IDS.PANQUECITAS)
+    .gt("quantity_kg", 0);
 
-  const compradorIds = new Set<string>();
-  for (const r of (data ?? []) as { location_id: string; cantidad_pedido_kg: number; cantidad_facturada_kg: number }[]) {
-    if (r.cantidad_pedido_kg > 0 || r.cantidad_facturada_kg > 0) compradorIds.add(r.location_id);
-  }
-
+  const compradorIds = new Set((data ?? []).map((r: { location_id: string }) => r.location_id));
   return new Set([...ids].filter((id) => compradorIds.has(id)));
 }
 
@@ -483,25 +477,14 @@ export async function getPanVsHarinaPan(
   if (ids.size === 0) return empty;
 
   const supabase = createSupabaseServiceClient();
-  const [{ data: pedidoData }, { data: radarData }] = await Promise.all([
-    supabase
-      .from("sap_pedidos_facturados")
-      .select("location_id, cantidad_pedido_kg, fecha")
-      .eq("product_id", PRODUCT_IDS.PANQUECITAS),
-    supabase
-      .from("sap_sell_in_records")
-      .select("location_id, quantity_kg, date_of_sale")
-      .eq("product_id", PRODUCT_IDS.HARINA_PAN),
-  ]);
+  const { data } = await supabase
+    .from("sap_sell_in_records")
+    .select("location_id, product_id, quantity_kg, date_of_sale")
+    .in("product_id", [PRODUCT_IDS.PANQUECITAS, PRODUCT_IDS.HARINA_PAN]);
 
-  const rows = [
-    ...((pedidoData ?? []) as { location_id: string; cantidad_pedido_kg: number; fecha: string }[])
-      .filter((r) => ids.has(r.location_id))
-      .map((r) => ({ product_id: PRODUCT_IDS.PANQUECITAS, date: r.fecha, kg: r.cantidad_pedido_kg })),
-    ...((radarData ?? []) as { location_id: string; quantity_kg: number; date_of_sale: string }[])
-      .filter((r) => ids.has(r.location_id))
-      .map((r) => ({ product_id: PRODUCT_IDS.HARINA_PAN, date: r.date_of_sale, kg: r.quantity_kg })),
-  ];
+  const rows = ((data ?? []) as { location_id: string; product_id: string; quantity_kg: number; date_of_sale: string }[])
+    .filter((r) => ids.has(r.location_id))
+    .map((r) => ({ product_id: r.product_id, date: r.date_of_sale, kg: r.quantity_kg }));
 
   if (rows.length === 0) return empty;
 
@@ -787,48 +770,84 @@ export async function getConversionDegustaciones(): Promise<ConversionDegustacio
   };
 }
 
-// ── 8. Pedidos pendientes por entregar ────────────────────────────
-// Derivado de sap_pedidos_facturados (Pedido − Facturado por fila), no de
-// la tabla sap_pending_orders (en desuso desde la migración 010 — ver
-// decisión con Alejandro, 07-08-2026).
+// ── 8. Demanda Insatisfecha ─────────────────────────────────────────
+// Tres series acumuladas en el tiempo para Panquecitas: cuánto se ha
+// pedido (Cantidad Pedido), cuánto se ha facturado (Cantidad Facturada) —
+// ambas de Pedidos y Facturado — y cuánto confirma el Radar como
+// realmente despachado al anaquel. El acumulado es corrido (no por
+// período) para poder ver si el pedido siempre se mantiene por encima de
+// lo facturado/Radar o si en algún punto se estabilizan — esa brecha es
+// la demanda que todavía no se resuelve. Ver pedido de Alejandro (08-08-2026).
 
-export async function getPedidosPendientes(sector?: Sector): Promise<SapPendingOrder[]> {
+export interface DemandaInsatisfechaPoint {
+  bucket: string;
+  label: string;
+  pedidoKg: number;
+  facturadoKg: number;
+  radarKg: number;
+}
+
+function computeDemandaInsatisfechaPoints(
+  pedido: { date: string; kg: number }[],
+  facturado: { date: string; kg: number }[],
+  radar: { date: string; kg: number }[],
+  granularity: TimeGranularity
+): DemandaInsatisfechaPoint[] {
+  const buckets = Array.from(
+    new Set([...pedido, ...facturado, ...radar].map((r) => bucketKeyFor(r.date, granularity)))
+  ).sort();
+
+  const sumUpTo = (rows: { date: string; kg: number }[], bucket: string) =>
+    rows
+      .filter((r) => bucketKeyFor(r.date, granularity) <= bucket)
+      .reduce((s, r) => s + r.kg, 0);
+
+  return buckets.map((bucket) => ({
+    bucket,
+    label: bucketLabelFor(bucket, granularity),
+    pedidoKg: Math.round(sumUpTo(pedido, bucket) * 10) / 10,
+    facturadoKg: Math.round(sumUpTo(facturado, bucket) * 10) / 10,
+    radarKg: Math.round(sumUpTo(radar, bucket) * 10) / 10,
+  }));
+}
+
+export async function getDemandaInsatisfecha(sector?: Sector): Promise<Record<TimeGranularity, DemandaInsatisfechaPoint[]>> {
+  const empty = { day: [], week: [], month: [] };
+  const ids = await getUniverseLocationIds(sector);
+  if (ids.size === 0) return empty;
+
   const supabase = createSupabaseServiceClient();
-  const { data } = await supabase
-    .from("sap_pedidos_facturados")
-    .select(
-      `id, created_at, upload_batch_id, location_id, product_id, variant_id, cantidad_pedido_kg, cantidad_facturada_kg, fecha, location:locations(${LOCATION_COLUMNS})`
-    )
-    .order("fecha", { ascending: true });
+  const [{ data: pedidoFacturadoData }, { data: radarData }] = await Promise.all([
+    supabase
+      .from("sap_pedidos_facturados")
+      .select("location_id, cantidad_pedido_kg, cantidad_facturada_kg, fecha")
+      .eq("product_id", PRODUCT_IDS.PANQUECITAS),
+    supabase
+      .from("sap_sell_in_records")
+      .select("location_id, quantity_kg, date_of_sale")
+      .eq("product_id", PRODUCT_IDS.PANQUECITAS),
+  ]);
 
-  const rows = ((data ?? []) as unknown as {
-    id: string;
-    created_at: string;
-    upload_batch_id: string;
+  const pedidoFacturadoRows = ((pedidoFacturadoData ?? []) as {
     location_id: string;
-    product_id: string;
-    variant_id: string | null;
     cantidad_pedido_kg: number;
     cantidad_facturada_kg: number;
     fecha: string;
-    location?: Location;
-  }[])
-    .map((r) => ({
-      id: r.id,
-      created_at: r.created_at,
-      upload_batch_id: r.upload_batch_id,
-      location_id: r.location_id,
-      product_id: r.product_id,
-      variant_id: r.variant_id,
-      quantity: Math.round((r.cantidad_pedido_kg - r.cantidad_facturada_kg) * 100) / 100,
-      order_date: r.fecha,
-      notes: null,
-      location: r.location,
-    }))
-    .filter((r) => r.quantity > 0); // solo lo que aún falta por facturar
+  }[]).filter((r) => ids.has(r.location_id));
 
-  if (!sector) return rows;
-  return rows.filter((r) => sectorGroup(r.location?.oficina_venta ?? null) === sector);
+  const pedido = pedidoFacturadoRows.map((r) => ({ date: r.fecha, kg: r.cantidad_pedido_kg }));
+  const facturado = pedidoFacturadoRows.map((r) => ({ date: r.fecha, kg: r.cantidad_facturada_kg }));
+  const radar = ((radarData ?? []) as { location_id: string; quantity_kg: number; date_of_sale: string }[])
+    .filter((r) => ids.has(r.location_id))
+    .map((r) => ({ date: r.date_of_sale, kg: r.quantity_kg }));
+
+  if (pedido.length === 0 && facturado.length === 0 && radar.length === 0) return empty;
+
+  return {
+    day: computeDemandaInsatisfechaPoints(pedido, facturado, radar, "day"),
+    week: computeDemandaInsatisfechaPoints(pedido, facturado, radar, "week"),
+    month: computeDemandaInsatisfechaPoints(pedido, facturado, radar, "month"),
+  };
 }
 
 export { PILOT_SECTORS, SECTOR_LABELS };

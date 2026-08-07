@@ -7,6 +7,7 @@ import { ReportPrintButton } from "@/components/dashboard/ReportPrintButton";
 import { ReportPrintHeader } from "@/components/dashboard/ReportPrintHeader";
 import { PenetracionRecompraChart } from "@/components/dashboard/PenetracionRecompraChart";
 import { CoberturaComunicacionChart } from "@/components/dashboard/CoberturaComunicacionChart";
+import { DemandaInsatisfechaChart } from "@/components/dashboard/DemandaInsatisfechaChart";
 import { FacturadoVsRadarChart } from "@/components/dashboard/FacturadoVsRadarChart";
 import { PanVsHarinaPanChart } from "@/components/dashboard/PanVsHarinaPanChart";
 import { RoundLegend } from "@/components/dashboard/RoundLegend";
@@ -29,6 +30,7 @@ import {
 } from "@/lib/sellout-utils";
 import type {
   CoberturaComunicacionPoint,
+  DemandaInsatisfechaPoint,
   DetalleSegmentoRow,
   FacturadoVsRadarGranularity,
   FacturadoVsRadarPeriod,
@@ -42,7 +44,6 @@ import type {
   VolumenRadarAcumulado,
 } from "@/lib/dienn-queries";
 import type { Sector } from "@/lib/sectors";
-import type { SapPendingOrder } from "@/types";
 
 export interface SectorBundle {
   /** Volumen FACTURADO — exclusivo de Pedidos y Facturado (Cantidad Facturada). */
@@ -55,12 +56,13 @@ export interface SectorBundle {
   mixProducto: MixProductoTonPoint[];
   /** Facturado (Pedidos y Facturado) vs Radar (Carga Radar) por presentación, agrupado por día y por semana. */
   facturadoVsRadar: Record<FacturadoVsRadarGranularity, FacturadoVsRadarPeriod[]>;
-  /** Panquecitas (pedido, Pedidos y Facturado) vs Harina PAN (Carga Radar) por población y granularidad. */
+  /** Pedido / Facturado / Radar de Panquecitas acumulados en el tiempo, para ver la demanda insatisfecha. */
+  demandaInsatisfecha: Record<TimeGranularity, DemandaInsatisfechaPoint[]>;
+  /** Panquecitas vs Harina PAN, AMBOS desde Carga Radar (misma fuente para que sean comparables). */
   panVsHarinaPan: Record<PanComparisonPoblacion, Record<PanComparisonGranularity, PanVsHarinaPanPoint[]>>;
   runningVentas: RunningVentasResult;
   penetracionRecompra: Record<TimeGranularity, PenetracionRecompraPoint[]>;
   detalleSegmentos: DetalleSegmentoRow[];
-  pedidosPendientes: SapPendingOrder[];
 }
 
 const FACTURADO_RADAR_GRANULARITY_OPTIONS: { key: FacturadoVsRadarGranularity; label: string }[] = [
@@ -377,10 +379,10 @@ export function DiennDashboardClient({
           <div>
             <CardTitle>Panquecitas vs Harina PAN</CardTitle>
             <p className="text-xs text-slate-400 mt-1">
-              Panquecitas = Cantidad Pedido (Pedidos y Facturado); Harina PAN = despachado confirmado (Carga
-              Radar) — dos fuentes distintas, desde la primera hasta la última fecha cargada.{" "}
+              Despachado confirmado por Carga Radar de ambos productos — misma fuente para los dos, desde la
+              primera hasta la última fecha cargada.{" "}
               {panPoblacion === "clientes"
-                ? "Solo clientes que pidieron/compraron Panquecitas."
+                ? "Solo clientes con Radar > 0 de Panquecitas."
                 : "Los 358 clientes del universo del piloto, hayan comprado Panquecitas o no."}
             </p>
           </div>
@@ -423,7 +425,7 @@ export function DiennDashboardClient({
               <div className="text-center">
                 <p className="text-4xl mb-2">📊</p>
                 <p>Sin datos de Panquecitas o Harina PAN todavía.</p>
-                <p className="text-xs mt-1">Carga Pedidos y Facturado (Panquecitas) y Carga Radar (Harina PAN).</p>
+                <p className="text-xs mt-1">Carga Radar de ambos productos (Panquecitas y Harina PAN).</p>
               </div>
             </div>
           )}
@@ -449,6 +451,29 @@ export function DiennDashboardClient({
           ))}
         </div>
       </div>
+
+      {/* ── Demanda Insatisfecha (Pedido / Facturado / Radar acumulados) ─── */}
+      <Card className="mb-6 print-avoid-break">
+        <CardHeader>
+          <CardTitle>Demanda Insatisfecha</CardTitle>
+          <p className="text-xs text-slate-400 mt-1">
+            Pedido, Facturado y Radar de Panquecitas, acumulados en el tiempo. La brecha entre Pedido y las otras
+            dos líneas es la demanda que todavía no se resuelve — si se mantiene o si se estabiliza.
+          </p>
+        </CardHeader>
+        <CardContent>
+          {bundle.demandaInsatisfecha[granularity].length > 0 ? (
+            <DemandaInsatisfechaChart data={bundle.demandaInsatisfecha[granularity]} />
+          ) : (
+            <div className="h-[300px] flex items-center justify-center text-slate-400">
+              <div className="text-center">
+                <p className="text-4xl mb-2">📈</p>
+                <p>Sin datos de Pedidos y Facturado o Radar de Panquecitas todavía.</p>
+              </div>
+            </div>
+          )}
+        </CardContent>
+      </Card>
 
       {/* ── Gráfico 1: Evolución de Penetración y Tasa de Recompra ───────── */}
       <Card className="mb-6 print-avoid-break">
@@ -623,63 +648,6 @@ export function DiennDashboardClient({
         </CardContent>
       </Card>
 
-      {/* ── Pedidos pendientes por entregar ────────────────────────────── */}
-      <Card className="print:hidden">
-        <CardHeader className="flex flex-row items-start justify-between gap-3 space-y-0">
-          <div>
-            <CardTitle>Pedidos Pendientes por Entregar</CardTitle>
-            <p className="text-xs text-slate-400 mt-1">
-              Se carga desde SAP a medida que se suben los reportes (Admin → Pedidos Pendientes).
-            </p>
-          </div>
-          <ExportExcelButton
-            filename={`Pedidos pendientes por entregar — ${filtroTexto}`}
-            rows={bundle.pedidosPendientes}
-            columns={[
-              { header: "Código cliente", value: (p) => p.location?.sap_code ?? "", width: 16 },
-              { header: "Cliente", value: (p) => p.location?.name ?? "", width: 44 },
-              { header: "Oficina de venta", value: (p) => p.location?.oficina_venta ?? "", width: 20 },
-              { header: "Grupo vendedor", value: (p) => p.location?.grupo_vendedor ?? "", width: 16 },
-              { header: "Centro poblado", value: (p) => p.location?.centro_poblado ?? "", width: 20 },
-              { header: "Cantidad", value: (p) => p.quantity, width: 14 },
-              { header: "Fecha del pedido", value: (p) => p.order_date ?? "", width: 18 },
-            ]}
-          />
-        </CardHeader>
-        <CardContent className="p-0">
-          {bundle.pedidosPendientes.length === 0 ? (
-            <p className="text-sm text-slate-400 py-6 text-center">Sin pedidos pendientes cargados.</p>
-          ) : (
-            <div className="max-h-[320px] overflow-y-auto">
-              <Table>
-                <TableHeader>
-                  <TableRow>
-                    <TableHead>PDV</TableHead>
-                    <TableHead>Ubicación</TableHead>
-                    <TableHead className="text-right">Cantidad</TableHead>
-                    <TableHead>Fecha</TableHead>
-                  </TableRow>
-                </TableHeader>
-                <TableBody>
-                  {bundle.pedidosPendientes.map((p) => (
-                    <TableRow key={p.id}>
-                      <TableCell>
-                        <span className="font-medium text-slate-900">{p.location?.sap_code}</span>{" "}
-                        <span className="text-slate-500">— {p.location?.name}</span>
-                      </TableCell>
-                      <TableCell className="text-slate-500">
-                        {p.location?.oficina_venta ?? p.location?.centro_poblado ?? "—"}
-                      </TableCell>
-                      <TableCell className="text-right font-medium">{p.quantity}</TableCell>
-                      <TableCell className="text-slate-500">{p.order_date ?? "—"}</TableCell>
-                    </TableRow>
-                  ))}
-                </TableBody>
-              </Table>
-            </div>
-          )}
-        </CardContent>
-      </Card>
     </div>
   );
 }

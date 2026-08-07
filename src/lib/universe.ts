@@ -19,10 +19,11 @@ export {
   PILOT_SECTORS,
   SECTOR_LABELS,
   sectorGroup,
+  isExcludedDistribuidor,
   type Sector,
 } from "@/lib/sectors";
 
-import { sectorGroup as _sectorGroup } from "@/lib/sectors";
+import { sectorGroup as _sectorGroup, isExcludedDistribuidor as _isExcludedDistribuidor } from "@/lib/sectors";
 
 /** Universo total seleccionado de PDVs (k): locations en los sectores piloto. */
 export async function getUniverseLocations(): Promise<Location[]> {
@@ -31,8 +32,12 @@ export async function getUniverseLocations(): Promise<Location[]> {
   const { data } = await supabase.from("locations").select(LOCATION_COLUMNS);
 
   // Filtrado en JS (no en la query) porque oficina_venta puede venir en
-  // distinta capitalización según la carga — ver sectorGroup().
-  return ((data ?? []) as Location[]).filter((l) => _sectorGroup(l.oficina_venta) !== null);
+  // distinta capitalización según la carga — ver sectorGroup(). Además se
+  // excluyen las distribuidoras intermediarias conocidas (ver
+  // isExcludedDistribuidor) aunque su oficina_venta caiga en un sector piloto.
+  return ((data ?? []) as Location[]).filter(
+    (l) => _sectorGroup(l.oficina_venta) !== null && !_isExcludedDistribuidor(l.sap_code)
+  );
 }
 
 interface SellInFilter {

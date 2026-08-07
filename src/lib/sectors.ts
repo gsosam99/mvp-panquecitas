@@ -41,3 +41,25 @@ export const SECTOR_LABELS: Record<Sector, string> = {
   cumana: CUMANA_SECTOR,
   barquisimeto_este: BARQUISIMETO_ESTE_SECTOR,
 };
+
+// Distribuidoras intermediarias que aparecieron en el reporte de Pedidos y
+// Facturado (antes de que "Carga Radar"/"Pedidos y Facturado" dejaran de
+// crear clientes nuevos) y quedaron guardadas en `locations` con una
+// oficina_venta válida — pasan el filtro de sector pero NO son puntos de
+// venta finales, solo ayudan a distribuir el producto a abastos/bodegas.
+// Se excluyen aquí a nivel de código porque la limpieza en la base de datos
+// no es suficiente por sí sola (si vuelven a aparecer en un reporte y se
+// refrescan sus datos de cartera, la fila persiste). Nunca deben contar en
+// el universo real del piloto ni recibir visitas de mercaderista/promotora.
+// Ver conversación con Alejandro (07-08-2026) y Mariana Di Buongrazio (08-08-2026).
+const EXCLUDED_DISTRIBUIDOR_SAP_CODES = new Set<string>([
+  "22401504", // DISTRIBUIDORA LEOMAR, S.A
+  "22401950", // DISTRIBUIDORA LA EXCELENCIA, C.A
+  "22403639", // DISTRIBUIDORA D'AVALLGAR, C.A.
+  "22405578", // DISTRIBUIDORA KATAO, C.A
+  "22406035", // DISTRIBUIDORA ANTONELLI F&G, C.A
+]);
+
+export function isExcludedDistribuidor(sapCode: string | null | undefined): boolean {
+  return !!sapCode && EXCLUDED_DISTRIBUIDOR_SAP_CODES.has(sapCode.trim());
+}

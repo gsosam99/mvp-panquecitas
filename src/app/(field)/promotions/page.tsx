@@ -1,7 +1,7 @@
 import type { Metadata } from "next";
 import { createSupabaseServerClient } from "@/lib/supabase/server";
 import { requireFieldWorker } from "@/lib/session";
-import { sectorGroup } from "@/lib/universe";
+import { sectorGroup, isExcludedDistribuidor } from "@/lib/universe";
 import { LOCATION_COLUMNS } from "@/lib/location-columns";
 import { PromotionTracker } from "@/components/field/PromotionTracker";
 import type { Location } from "@/types";
@@ -19,10 +19,12 @@ export default async function PromotionsPage() {
     .order("name");
 
   // Una promotora solo puede ver los PDV de su propia Oficina de Venta
-  // (ver decisión #3 en docs/decisiones-implementacion.md).
+  // (ver decisión #3 en docs/decisiones-implementacion.md). Las
+  // distribuidoras intermediarias nunca se visitan aunque su oficina_venta
+  // caiga en el sector del trabajador.
   const workerSector = sectorGroup(worker.oficinaVenta);
   const locations = ((data ?? []) as Location[]).filter(
-    (l) => sectorGroup(l.oficina_venta) === workerSector
+    (l) => sectorGroup(l.oficina_venta) === workerSector && !isExcludedDistribuidor(l.sap_code)
   );
 
   return <PromotionTracker locations={locations} />;
