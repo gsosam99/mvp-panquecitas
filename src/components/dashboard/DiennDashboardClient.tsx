@@ -193,10 +193,11 @@ export function DiennDashboardClient({
       </div>
 
       {/* ── Tarjetas de KPIs dinámicos ─────────────────────────────────── */}
-      <div className="grid grid-cols-1 md:grid-cols-5 gap-4 mb-6 print-avoid-break">
+      <div className="grid grid-cols-1 md:grid-cols-4 gap-4 mb-6 print-avoid-break">
         <KpiCard
           title="Vol. acumulado en radar — Panquecitas"
           value={`${bundle.volumenRadarAcumulado.panquecitasTon.toLocaleString("es-VE", { maximumFractionDigits: 2 })} Ton`}
+          annotation={`Penetración ${bundle.penetracionRadarVsHpm.radarPanquecitasPct}%`}
           subtitle="Confirmado en anaquel — solo Carga Radar"
           product="panquecitas"
         />
@@ -204,6 +205,7 @@ export function DiennDashboardClient({
         <KpiCard
           title="Vol. acumulado en radar — Harina PAN"
           value={`${bundle.volumenRadarAcumulado.harinaPanTon.toLocaleString("es-VE", { maximumFractionDigits: 2 })} Ton`}
+          annotation={`Penetración ${bundle.penetracionRadarVsHpm.hpmPct}%`}
           subtitle="Confirmado en anaquel — solo Carga Radar"
           product="pan"
         />
@@ -230,28 +232,6 @@ export function DiennDashboardClient({
                   {bundle.runningVentas.proyeccionToneladas.toLocaleString("es-VE", { maximumFractionDigits: 2 })}
                 </span>
               </div>
-            </div>
-          </CardContent>
-        </Card>
-
-        <Card>
-          <CardContent className="pt-5">
-            <p className="text-xs font-semibold uppercase tracking-widest mb-2 text-muted-foreground">
-              Penetración: Radar vs. HPM
-            </p>
-            <div className="space-y-1 text-sm">
-              <div className="flex justify-between">
-                <span className="text-slate-500">Radar Panquecitas</span>
-                <span className="font-bold text-slate-900">{bundle.penetracionRadarVsHpm.radarPanquecitasPct}%</span>
-              </div>
-              <div className="flex justify-between">
-                <span className="text-slate-500">HPM (lista completa)</span>
-                <span className="font-bold text-slate-900">{bundle.penetracionRadarVsHpm.hpmPct}%</span>
-              </div>
-              <p className="text-xs text-slate-400 pt-1">
-                {bundle.penetracionRadarVsHpm.clientesPanquecitas} vs {bundle.penetracionRadarVsHpm.clientesHpm} de{" "}
-                {bundle.penetracionRadarVsHpm.universo} clientes objetivo
-              </p>
             </div>
           </CardContent>
         </Card>

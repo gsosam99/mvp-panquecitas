@@ -6,6 +6,8 @@ interface KpiCardProps {
   title: string;
   value: string;
   subtitle?: string;
+  /** Acotación destacada bajo el valor (p. ej. la penetración de esta categoría). */
+  annotation?: string;
   highlight?: boolean;
   critical?: boolean;
   trend?: "up" | "down" | "neutral";
@@ -39,7 +41,7 @@ function ProductPill({ product }: { product: ProductBadge }) {
   );
 }
 
-export function KpiCard({ title, value, subtitle, highlight, critical, trend, product }: KpiCardProps) {
+export function KpiCard({ title, value, subtitle, annotation, highlight, critical, trend, product }: KpiCardProps) {
   const inverted = highlight || critical;
   return (
     <Card
@@ -66,6 +68,11 @@ export function KpiCard({ title, value, subtitle, highlight, critical, trend, pr
             </span>
           )}
         </div>
+        {annotation && (
+          <p className={`text-sm mt-1 font-semibold ${inverted ? "text-white" : "text-slate-700"}`}>
+            {annotation}
+          </p>
+        )}
         {subtitle && (
           <p className={`text-xs mt-1 ${inverted ? "text-white/60" : "text-muted-foreground"}`}>
             {subtitle}
