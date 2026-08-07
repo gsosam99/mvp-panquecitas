@@ -534,16 +534,23 @@ function computePenetracionRecompraPoints(
   for (const bucket of buckets) {
     const rowsUpToBucket = rows.filter((r) => bucketKeyFor(r.date_of_sale, granularity) <= bucket);
 
-    const datesByLocation = new Map<string, Set<string>>();
+    const monthsByLocation = new Map<string, Set<string>>();
     for (const r of rowsUpToBucket) {
-      if (!datesByLocation.has(r.location_id)) datesByLocation.set(r.location_id, new Set());
-      datesByLocation.get(r.location_id)!.add(r.date_of_sale);
+      if (!monthsByLocation.has(r.location_id)) monthsByLocation.set(r.location_id, new Set());
+      monthsByLocation.get(r.location_id)!.add(r.date_of_sale.slice(0, 7));
     }
 
-    const compradores = datesByLocation.size;
-    // Recompra = ≥2 fechas de compra distintas, sin exigir que caigan en
-    // meses distintos — dos compras en la misma semana también cuentan.
-    const conRecompra = Array.from(datesByLocation.values()).filter((d) => d.size >= 2).length;
+    const compradores = monthsByLocation.size;
+    // Recompra = ≥2 meses distintos con Radar > 0. Ya NO se agrupa por
+    // fecha exacta: sap_sell_in_records (Radar) guarda un acumulado por
+    // cliente+material+MES que se REEMPLAZA en cada re-carga (ver
+    // handleRadarUpload) — dos presentaciones (400g/800g) del mismo
+    // cliente pueden quedar con "Día" distinto dentro del mismo mes solo
+    // por haberse actualizado en cargas diferentes, lo que daba falsos
+    // positivos de recompra al agrupar por fecha exacta. Por mes es lo
+    // único que Radar puede medir de forma confiable. Ver bug reportado
+    // por Alejandro (07-08-2026): recompra x segmento en 0% para todos.
+    const conRecompra = Array.from(monthsByLocation.values()).filter((m) => m.size >= 2).length;
 
     points.push({
       bucket,
@@ -711,11 +718,15 @@ export async function getDetalleClientesPorSegmento(sector?: Sector): Promise<De
     .gt("quantity_kg", 0);
 
   const salesRows = (data ?? []) as { location_id: string; date_of_sale: string }[];
-  // Recompra = ≥2 fechas de compra distintas, sin exigir meses distintos.
-  const datesByLocation = new Map<string, Set<string>>();
+  // Recompra = ≥2 meses distintos con Radar > 0 (no fecha exacta — ver
+  // misma nota en computePenetracionRecompraPoints más arriba: Radar
+  // reemplaza el acumulado por cliente+material+mes, así que dos
+  // presentaciones del mismo cliente pueden traer "Día" distinto dentro
+  // del mismo mes sin ser una recompra real).
+  const monthsByLocation = new Map<string, Set<string>>();
   for (const r of salesRows) {
-    if (!datesByLocation.has(r.location_id)) datesByLocation.set(r.location_id, new Set());
-    datesByLocation.get(r.location_id)!.add(r.date_of_sale);
+    if (!monthsByLocation.has(r.location_id)) monthsByLocation.set(r.location_id, new Set());
+    monthsByLocation.get(r.location_id)!.add(r.date_of_sale.slice(0, 7));
   }
 
   const universoTotalHmpKg = universo.reduce((s, l) => s + (hmpTotals.get(l.id) ?? 0), 0);
@@ -730,7 +741,7 @@ export async function getDetalleClientesPorSegmento(sector?: Sector): Promise<De
   const rows: DetalleSegmentoRow[] = [];
   for (const [segmento, locs] of bySegmento.entries()) {
     const facturados = locs.filter((l) => (panqRadarTotals.get(l.id) ?? 0) > 0);
-    const conRecompra = facturados.filter((l) => (datesByLocation.get(l.id)?.size ?? 0) >= 2);
+    const conRecompra = facturados.filter((l) => (monthsByLocation.get(l.id)?.size ?? 0) >= 2);
 
     const segHmpKg = locs.reduce((s, l) => s + (hmpTotals.get(l.id) ?? 0), 0);
     const segPanqKg = locs.reduce((s, l) => s + (panqPedidoTotals.get(l.id) ?? 0), 0);
