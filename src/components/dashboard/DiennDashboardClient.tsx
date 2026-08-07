@@ -7,7 +7,7 @@ import { ReportPrintButton } from "@/components/dashboard/ReportPrintButton";
 import { ReportPrintHeader } from "@/components/dashboard/ReportPrintHeader";
 import { PenetracionRecompraChart } from "@/components/dashboard/PenetracionRecompraChart";
 import { CoberturaComunicacionChart } from "@/components/dashboard/CoberturaComunicacionChart";
-import { PedidoVsVentasChart } from "@/components/dashboard/PedidoVsVentasChart";
+import { FacturadoVsRadarChart } from "@/components/dashboard/FacturadoVsRadarChart";
 import { PanVsHarinaPanChart } from "@/components/dashboard/PanVsHarinaPanChart";
 import { RoundLegend } from "@/components/dashboard/RoundLegend";
 import { SellOutChart } from "@/components/dashboard/SellOutChart";
@@ -30,12 +30,12 @@ import {
 import type {
   CoberturaComunicacionPoint,
   DetalleSegmentoRow,
+  FacturadoVsRadarGranularity,
+  FacturadoVsRadarPeriod,
   MixProductoTonPoint,
   PanComparisonGranularity,
   PanComparisonPoblacion,
   PanVsHarinaPanPoint,
-  PedidoVsVentasGranularity,
-  PedidoVsVentasPeriod,
   PenetracionRecompraPoint,
   RunningVentasResult,
   TimeGranularity,
@@ -45,16 +45,17 @@ import type { Sector } from "@/lib/sectors";
 import type { SapPendingOrder } from "@/types";
 
 export interface SectorBundle {
+  /** Volumen FACTURADO — exclusivo de Pedidos y Facturado (Cantidad Facturada). */
   totalToneladas: number;
-  /** Volumen pedido aún no facturado (Pedido − Facturado), mismo universo que totalToneladas. */
+  /** Volumen PEDIDO — exclusivo de Pedidos y Facturado (Cantidad Pedido), mismo universo que totalToneladas. */
   totalToneladasPedidas: number;
-  /** Toneladas reales despachadas/facturadas según "Carga Radar", por producto. */
+  /** Toneladas reales despachadas/confirmadas según "Carga Radar", por producto. No se mezcla con las dos anteriores. */
   volumenRadarAcumulado: VolumenRadarAcumulado;
-  /** Toneladas facturadas SAP por presentación (400g / 800g). */
+  /** Toneladas facturadas SAP por presentación (400g / 800g), desde Pedidos y Facturado. */
   mixProducto: MixProductoTonPoint[];
-  /** Pedido vs facturado por presentación, agrupado por día y por semana. */
-  pedidoVsVentas: Record<PedidoVsVentasGranularity, PedidoVsVentasPeriod[]>;
-  /** Panquecitas vs Harina PAN (pedido+facturado) por población y granularidad. */
+  /** Facturado (Pedidos y Facturado) vs Radar (Carga Radar) por presentación, agrupado por día y por semana. */
+  facturadoVsRadar: Record<FacturadoVsRadarGranularity, FacturadoVsRadarPeriod[]>;
+  /** Panquecitas (pedido, Pedidos y Facturado) vs Harina PAN (Carga Radar) por población y granularidad. */
   panVsHarinaPan: Record<PanComparisonPoblacion, Record<PanComparisonGranularity, PanVsHarinaPanPoint[]>>;
   runningVentas: RunningVentasResult;
   penetracionRecompra: Record<TimeGranularity, PenetracionRecompraPoint[]>;
@@ -62,7 +63,7 @@ export interface SectorBundle {
   pedidosPendientes: SapPendingOrder[];
 }
 
-const PEDIDO_GRANULARITY_OPTIONS: { key: PedidoVsVentasGranularity; label: string }[] = [
+const FACTURADO_RADAR_GRANULARITY_OPTIONS: { key: FacturadoVsRadarGranularity; label: string }[] = [
   { key: "day", label: "Día" },
   { key: "week", label: "Semana" },
 ];
@@ -116,8 +117,8 @@ export function DiennDashboardClient({
   const [asesorFilter, setAsesorFilter] = useState("");
   const [fuenteFilter, setFuenteFilter] = useState<FuenteFilter>("TODOS");
   const [granularity, setGranularity] = useState<TimeGranularity>("week");
-  const [pedidoGranularity, setPedidoGranularity] = useState<PedidoVsVentasGranularity>("week");
-  const [pedidoBucket, setPedidoBucket] = useState("");
+  const [facturadoRadarGranularity, setFacturadoRadarGranularity] = useState<FacturadoVsRadarGranularity>("week");
+  const [facturadoRadarBucket, setFacturadoRadarBucket] = useState("");
   const [panPoblacion, setPanPoblacion] = useState<PanComparisonPoblacion>("clientes");
   const [panGranularity, setPanGranularity] = useState<PanComparisonGranularity>("month");
   const bundle = bundles[filter];
@@ -144,17 +145,17 @@ export function DiennDashboardClient({
 
   const panPoints = bundle.panVsHarinaPan[panPoblacion][panGranularity];
 
-  const pedidoPeriods = bundle.pedidoVsVentas[pedidoGranularity];
-  const pedidoPeriod = useMemo(() => {
-    if (pedidoPeriods.length === 0) return null;
-    return pedidoPeriods.find((p) => p.bucket === pedidoBucket) ?? pedidoPeriods[pedidoPeriods.length - 1];
-  }, [pedidoPeriods, pedidoBucket]);
+  const facturadoRadarPeriods = bundle.facturadoVsRadar[facturadoRadarGranularity];
+  const facturadoRadarPeriod = useMemo(() => {
+    if (facturadoRadarPeriods.length === 0) return null;
+    return facturadoRadarPeriods.find((p) => p.bucket === facturadoRadarBucket) ?? facturadoRadarPeriods[facturadoRadarPeriods.length - 1];
+  }, [facturadoRadarPeriods, facturadoRadarBucket]);
 
   // Al cambiar sector o granularidad, saltar al período más reciente con datos.
   useEffect(() => {
-    const periods = bundles[filter].pedidoVsVentas[pedidoGranularity];
-    setPedidoBucket(periods.length > 0 ? periods[periods.length - 1].bucket : "");
-  }, [bundles, filter, pedidoGranularity]);
+    const periods = bundles[filter].facturadoVsRadar[facturadoRadarGranularity];
+    setFacturadoRadarBucket(periods.length > 0 ? periods[periods.length - 1].bucket : "");
+  }, [bundles, filter, facturadoRadarGranularity]);
 
   const filtroTexto = filter === "TOTAL" ? "Total sectores piloto" : sectorLabels[filter];
 
@@ -209,30 +210,30 @@ export function DiennDashboardClient({
       {/* ── Tarjetas de KPIs dinámicos ─────────────────────────────────── */}
       <div className="grid grid-cols-1 md:grid-cols-6 gap-4 mb-6 print-avoid-break">
         <KpiCard
-          title="Total Ton"
+          title="Volumen facturado"
           value={`${bundle.totalToneladas.toLocaleString("es-VE", { maximumFractionDigits: 2 })} Ton`}
-          subtitle="Volumen acumulado facturado de Panquecitas"
+          subtitle="Cantidad Facturada — solo Pedidos y Facturado"
           product="panquecitas"
         />
 
         <KpiCard
-          title="Total ton vendidas"
+          title="Volumen pedido"
           value={`${bundle.totalToneladasPedidas.toLocaleString("es-VE", { maximumFractionDigits: 2 })} Ton`}
-          subtitle="Cantidad Pedido acumulada (SAP)"
+          subtitle="Cantidad Pedido — solo Pedidos y Facturado"
           product="panquecitas"
         />
 
         <KpiCard
           title="Vol. acumulado en radar — Panquecitas"
           value={`${bundle.volumenRadarAcumulado.panquecitasTon.toLocaleString("es-VE", { maximumFractionDigits: 2 })} Ton`}
-          subtitle="Panquecitas despachada (Carga Radar)"
+          subtitle="Confirmado en anaquel — solo Carga Radar"
           product="panquecitas"
         />
 
         <KpiCard
           title="Vol. acumulado en radar — Harina PAN"
           value={`${bundle.volumenRadarAcumulado.harinaPanTon.toLocaleString("es-VE", { maximumFractionDigits: 2 })} Ton`}
-          subtitle="Harina PAN despachada (Carga Radar)"
+          subtitle="Confirmado en anaquel — solo Carga Radar"
           product="pan"
         />
 
@@ -312,24 +313,24 @@ export function DiennDashboardClient({
         />
       </div>
 
-      {/* ── Pedido vs Ventas Panquecitas ─────────────────────────────────── */}
+      {/* ── Facturado vs Radar Panquecitas ─────────────────────────────────── */}
       <Card className="mb-6 print-avoid-break">
         <CardHeader className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between space-y-0">
           <div>
-            <CardTitle>Pedido vs Ventas Panquecitas</CardTitle>
+            <CardTitle>Facturado vs Radar Panquecitas</CardTitle>
             <p className="text-xs text-slate-400 mt-1">
-              Cantidad pedida y cantidad facturada (kg) por presentación. Cambia el período para ver cómo
-              evoluciona con cada carga diaria del reporte SAP.
+              Cuánto de lo facturado (Pedidos y Facturado) ya se confirma real en el anaquel según el Radar, por
+              presentación. Cambia el período para ver cómo evoluciona con cada carga.
             </p>
           </div>
           <div className="flex flex-wrap items-center gap-2 print:hidden">
             <div className="flex rounded-lg border border-slate-200 overflow-hidden text-xs font-medium">
-              {PEDIDO_GRANULARITY_OPTIONS.map((opt) => (
+              {FACTURADO_RADAR_GRANULARITY_OPTIONS.map((opt) => (
                 <button
                   key={opt.key}
-                  onClick={() => setPedidoGranularity(opt.key)}
+                  onClick={() => setFacturadoRadarGranularity(opt.key)}
                   className={`px-3 py-1.5 transition-colors ${
-                    pedidoGranularity === opt.key
+                    facturadoRadarGranularity === opt.key
                       ? "bg-slate-900 text-white"
                       : "bg-white text-slate-500 hover:bg-slate-50"
                   }`}
@@ -338,13 +339,13 @@ export function DiennDashboardClient({
                 </button>
               ))}
             </div>
-            {pedidoPeriods.length > 0 && (
+            {facturadoRadarPeriods.length > 0 && (
               <select
-                value={pedidoPeriod?.bucket ?? ""}
-                onChange={(e) => setPedidoBucket(e.target.value)}
+                value={facturadoRadarPeriod?.bucket ?? ""}
+                onChange={(e) => setFacturadoRadarBucket(e.target.value)}
                 className="text-sm border border-slate-200 rounded-lg px-3 py-1.5 bg-white text-slate-700"
               >
-                {pedidoPeriods.map((p) => (
+                {facturadoRadarPeriods.map((p) => (
                   <option key={p.bucket} value={p.bucket}>
                     {p.label}
                   </option>
@@ -354,15 +355,15 @@ export function DiennDashboardClient({
           </div>
         </CardHeader>
         <CardContent>
-          {pedidoPeriod ? (
-            <PedidoVsVentasChart data={pedidoPeriod.bars} />
+          {facturadoRadarPeriod ? (
+            <FacturadoVsRadarChart data={facturadoRadarPeriod.bars} />
           ) : (
             <div className="h-[300px] flex items-center justify-center text-slate-400">
               <div className="text-center">
                 <p className="text-4xl mb-2">📊</p>
-                <p>Sin pedidos ni facturas de Panquecitas por presentación.</p>
+                <p>Sin facturas ni Radar de Panquecitas por presentación.</p>
                 <p className="text-xs mt-1">
-                  Carga el reporte SAP Pedido/Facturado (con materiales 400g y 800g).
+                  Carga el reporte de Pedidos y Facturado, y el Radar de Panquecitas (con materiales 400g y 800g).
                 </p>
               </div>
             </div>
@@ -376,11 +377,11 @@ export function DiennDashboardClient({
           <div>
             <CardTitle>Panquecitas vs Harina PAN</CardTitle>
             <p className="text-xs text-slate-400 mt-1">
-              Cantidad Pedido (kg) desde la primera hasta la última fecha cargada.{" "}
+              Panquecitas = Cantidad Pedido (Pedidos y Facturado); Harina PAN = despachado confirmado (Carga
+              Radar) — dos fuentes distintas, desde la primera hasta la última fecha cargada.{" "}
               {panPoblacion === "clientes"
                 ? "Solo clientes que pidieron/compraron Panquecitas."
-                : "Los 358 clientes del universo del piloto, hayan comprado Panquecitas o no."}{" "}
-              Harina PAN solo trae el reporte mensual agregado, sin desglose de pedidos pendientes.
+                : "Los 358 clientes del universo del piloto, hayan comprado Panquecitas o no."}
             </p>
           </div>
           <div className="flex flex-wrap items-center gap-2 print:hidden">
@@ -422,7 +423,7 @@ export function DiennDashboardClient({
               <div className="text-center">
                 <p className="text-4xl mb-2">📊</p>
                 <p>Sin datos de Panquecitas o Harina PAN todavía.</p>
-                <p className="text-xs mt-1">Carga el reporte SAP de facturación de ambos productos.</p>
+                <p className="text-xs mt-1">Carga Pedidos y Facturado (Panquecitas) y Carga Radar (Harina PAN).</p>
               </div>
             </div>
           )}

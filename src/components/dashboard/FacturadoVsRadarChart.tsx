@@ -1,7 +1,7 @@
 "use client";
 
 import dynamic from "next/dynamic";
-import type { PedidoVsVentasBarPoint } from "@/lib/dienn-queries";
+import type { FacturadoVsRadarBarPoint } from "@/lib/dienn-queries";
 
 function formatKg(value: number): string {
   return `${value.toLocaleString("es-VE", { maximumFractionDigits: 1 })} kg`;
@@ -12,7 +12,7 @@ const Inner = dynamic(
     const { ResponsiveContainer, BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, Legend, LabelList } =
       await import("recharts");
 
-    function PedidoVsVentasInner({ data }: { data: PedidoVsVentasBarPoint[] }) {
+    function FacturadoVsRadarInner({ data }: { data: FacturadoVsRadarBarPoint[] }) {
       return (
         <ResponsiveContainer width="100%" height={320}>
           <BarChart data={data} margin={{ top: 28, right: 16, left: 0, bottom: 5 }}>
@@ -28,26 +28,26 @@ const Inner = dynamic(
               contentStyle={{ fontSize: 12, borderRadius: 8, border: "1px solid #e2e8f0" }}
               formatter={(value, name) => [
                 formatKg(Number(value ?? 0)),
-                name === "pedidaKg" ? "Cantidad pedida" : "Cantidad facturada",
+                name === "facturadaKg" ? "Facturado (Pedidos y Facturado)" : "Radar (confirmado en anaquel)",
               ]}
             />
             <Legend
               formatter={(value: string) =>
-                value === "pedidaKg" ? "Cantidad pedida" : "Cantidad facturada"
+                value === "facturadaKg" ? "Facturado" : "Radar"
               }
               wrapperStyle={{ fontSize: 12 }}
             />
-            <Bar dataKey="pedidaKg" fill="#f5c400" radius={[3, 3, 0, 0]} maxBarSize={56}>
+            <Bar dataKey="facturadaKg" fill="#f5c400" radius={[3, 3, 0, 0]} maxBarSize={56}>
               <LabelList
-                dataKey="pedidaKg"
+                dataKey="facturadaKg"
                 position="top"
                 formatter={(v) => (Number(v) > 0 ? formatKg(Number(v)) : "")}
                 style={{ fontSize: 11, fontWeight: 600, fill: "#64748b" }}
               />
             </Bar>
-            <Bar dataKey="facturadaKg" fill="#1a65bd" radius={[3, 3, 0, 0]} maxBarSize={56}>
+            <Bar dataKey="radarKg" fill="#1a65bd" radius={[3, 3, 0, 0]} maxBarSize={56}>
               <LabelList
-                dataKey="facturadaKg"
+                dataKey="radarKg"
                 position="top"
                 formatter={(v) => (Number(v) > 0 ? formatKg(Number(v)) : "")}
                 style={{ fontSize: 11, fontWeight: 600, fill: "#1a65bd" }}
@@ -58,7 +58,7 @@ const Inner = dynamic(
       );
     }
 
-    return PedidoVsVentasInner;
+    return FacturadoVsRadarInner;
   },
   {
     ssr: false,
@@ -66,6 +66,6 @@ const Inner = dynamic(
   }
 );
 
-export function PedidoVsVentasChart({ data }: { data: PedidoVsVentasBarPoint[] }) {
+export function FacturadoVsRadarChart({ data }: { data: FacturadoVsRadarBarPoint[] }) {
   return <Inner data={data} />;
 }

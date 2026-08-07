@@ -47,12 +47,14 @@ export async function getAdminExecutionSnapshot(): Promise<AdminPdvRow[]> {
 
   const locationIds = universo.map((l) => l.id);
 
-  // 1. ¿Tiene volumen SAP de Panquecitas? Cuenta tanto quien ya tiene
-  // factura (sap_sell_in_records) como quien solo armó pedido aún no
-  // facturado (sap_pending_orders). "Sin ventas en SAP" = cartera sin
-  // ninguna de las dos. La fecha de primera actividad es la más temprana
-  // entre pedido y factura (para el gráfico de activación).
-  const [{ data: sellInData }, { data: pendingData }] = await Promise.all([
+  // 1. ¿Tiene volumen SAP de Panquecitas? Cuenta tanto lo confirmado por
+  // Carga Radar (sap_sell_in_records) como lo pedido/facturado en Pedidos y
+  // Facturado (sap_pedidos_facturados) — a diferencia de DIENN, Admin no
+  // necesita separar ambas fuentes, solo saber si el cliente tiene
+  // actividad SAP. "Sin ventas en SAP" = cartera sin ninguna de las dos. La
+  // fecha de primera actividad es la más temprana entre las dos (para el
+  // gráfico de activación).
+  const [{ data: sellInData }, { data: pedidoFacturadoData }] = await Promise.all([
     supabase
       .from("sap_sell_in_records")
       .select("location_id, date_of_sale")
@@ -61,12 +63,11 @@ export async function getAdminExecutionSnapshot(): Promise<AdminPdvRow[]> {
       .in("location_id", locationIds)
       .order("date_of_sale", { ascending: true }),
     supabase
-      .from("sap_pending_orders")
-      .select("location_id, order_date")
+      .from("sap_pedidos_facturados")
+      .select("location_id, fecha, cantidad_pedido_kg, cantidad_facturada_kg")
       .eq("product_id", PRODUCT_IDS.PANQUECITAS)
-      .gt("quantity", 0)
       .in("location_id", locationIds)
-      .order("order_date", { ascending: true }),
+      .order("fecha", { ascending: true }),
   ]);
 
   const compradorIds = new Set<string>();
@@ -82,8 +83,13 @@ export async function getAdminExecutionSnapshot(): Promise<AdminPdvRow[]> {
   for (const r of (sellInData ?? []) as { location_id: string; date_of_sale: string }[]) {
     markActividad(r.location_id, r.date_of_sale);
   }
-  for (const r of (pendingData ?? []) as { location_id: string; order_date: string | null }[]) {
-    markActividad(r.location_id, r.order_date);
+  for (const r of (pedidoFacturadoData ?? []) as {
+    location_id: string;
+    fecha: string;
+    cantidad_pedido_kg: number;
+    cantidad_facturada_kg: number;
+  }[]) {
+    if (r.cantidad_pedido_kg > 0 || r.cantidad_facturada_kg > 0) markActividad(r.location_id, r.fecha);
   }
 
   // 2. Última visita de mercaderista por PDV.

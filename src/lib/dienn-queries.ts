@@ -39,23 +39,25 @@ async function getUniverseLocationIds(sector?: Sector): Promise<Set<string>> {
   return new Set(filtered.map((l) => l.id));
 }
 
-// ── 1. Total Ton / 1b. Total Ton pedidas / 3. Mix de Producto ──────
-// Las tres cifras (Total Ton facturado, Total Ton pendiente por facturar,
-// y el desglose por presentación 400g/800g) se calculan de UNA sola pasada
-// sobre las mismas filas, para que la suma de las presentaciones del Mix
-// de Producto coincida siempre, exactamente, con el total global — antes
-// getTotalToneladas sumaba TODAS las filas de sap_sell_in_records
-// (product_id = Panquecitas) mientras que el Mix solo contaba las que
-// traían variant_id, así que una fila sin presentación reconocida se
-// contaba en el total pero desaparecía del desglose por SKU. Fuente única
-// de verdad: sap_sell_in_records (facturado) + sap_pending_orders
-// (pendiente), ambas filtradas por variant_id no nulo — ver migraciones
-// 008/009 y SAP_MATERIAL_VARIANT_MAP en catalog.ts.
+// ── 1. Volumen facturado / 1b. Volumen pedido / 3. Mix de Producto ─────
+// Las tres cifras (facturado, pedido total, y el desglose por presentación
+// 400g/800g) se calculan de UNA sola pasada sobre sap_pedidos_facturados
+// (reporte "Pedidos y Facturado"), para que la suma de las presentaciones
+// del Mix de Producto coincida siempre, exactamente, con el total global.
+//
+// IMPORTANTE — separación de fuentes (ver migración 010 y decisión con
+// Alejandro, 07-08-2026): "Pedidos y Facturado" y "Carga Radar" son dos
+// procesos de venta distintos y sus cifras NO se mezclan ni se suman:
+//   - sap_pedidos_facturados → Cantidad Pedido / Cantidad Facturada según
+//     SAP (este bloque). Alimenta las tarjetas "Total ton pedidas" y
+//     "Total Ton" (facturado) y el Mix de Producto.
+//   - sap_sell_in_records → EXCLUSIVO de Carga Radar (getVolumenRadarAcumulado
+//     más abajo), lo real despachado/confirmado en el anaquel.
 
 interface VentasPorPresentacion {
   facturadaKgByVariant: Record<PresentacionMix, number>;
   facturadaKgTotal: number;
-  /** Pedido total (facturado + pendiente) por presentación — "Cantidad Pedido" del reporte SAP. */
+  /** Cantidad Pedido por presentación, cruda del reporte SAP (no es facturado + pendiente calculado). */
   pedidaKgByVariant: Record<PresentacionMix, number>;
   pedidaKgTotal: number;
 }
@@ -64,36 +66,25 @@ async function getVentasPorPresentacion(sector?: Sector): Promise<VentasPorPrese
   const supabase = createSupabaseServiceClient();
   const ids = await getUniverseLocationIds(sector);
 
-  const [{ data: sellInData }, { data: pendingData }] = await Promise.all([
-    supabase
-      .from("sap_sell_in_records")
-      .select("quantity_kg, location_id, variant_id")
-      .eq("product_id", PRODUCT_IDS.PANQUECITAS)
-      .not("variant_id", "is", null),
-    supabase
-      .from("sap_pending_orders")
-      .select("quantity, location_id, variant_id")
-      .eq("product_id", PRODUCT_IDS.PANQUECITAS)
-      .not("variant_id", "is", null),
-  ]);
+  const { data } = await supabase
+    .from("sap_pedidos_facturados")
+    .select("cantidad_pedido_kg, cantidad_facturada_kg, location_id, variant_id")
+    .eq("product_id", PRODUCT_IDS.PANQUECITAS)
+    .not("variant_id", "is", null);
 
   const facturadaKgByVariant: Record<PresentacionMix, number> = { "400g": 0, "800g": 0 };
-  for (const r of (sellInData ?? []) as { quantity_kg: number; location_id: string; variant_id: string }[]) {
+  const pedidaKgByVariant: Record<PresentacionMix, number> = { "400g": 0, "800g": 0 };
+  for (const r of (data ?? []) as {
+    cantidad_pedido_kg: number;
+    cantidad_facturada_kg: number;
+    location_id: string;
+    variant_id: string;
+  }[]) {
     if (!ids.has(r.location_id)) continue;
     const presentacion = VARIANT_TO_PRESENTACION[r.variant_id];
     if (!presentacion) continue;
-    facturadaKgByVariant[presentacion] += r.quantity_kg;
-  }
-
-  const pedidaKgByVariant: Record<PresentacionMix, number> = {
-    "400g": facturadaKgByVariant["400g"],
-    "800g": facturadaKgByVariant["800g"],
-  };
-  for (const r of (pendingData ?? []) as { quantity: number; location_id: string; variant_id: string }[]) {
-    if (!ids.has(r.location_id)) continue;
-    const presentacion = VARIANT_TO_PRESENTACION[r.variant_id];
-    if (!presentacion) continue;
-    pedidaKgByVariant[presentacion] += r.quantity;
+    facturadaKgByVariant[presentacion] += r.cantidad_facturada_kg;
+    pedidaKgByVariant[presentacion] += r.cantidad_pedido_kg;
   }
 
   return {
@@ -104,33 +95,24 @@ async function getVentasPorPresentacion(sector?: Sector): Promise<VentasPorPrese
   };
 }
 
+/** "Volumen facturado" — tarjeta alimentada exclusivamente por Pedidos y Facturado (Cantidad Facturada). */
 export async function getTotalToneladas(sector?: Sector): Promise<number> {
   const { facturadaKgTotal } = await getVentasPorPresentacion(sector);
   return Math.round((facturadaKgTotal / 1000) * 100) / 100;
 }
 
-// "Total ton vendidas" = Cantidad Pedido SAP (facturado + pendiente),
-// sin filtrar por variant_id, para coincidir con Panquecitas vs Harina PAN.
+/** "Tarjeta de pedidos" — Cantidad Pedido cruda de Pedidos y Facturado, sin filtrar por variant_id. */
 export async function getTotalToneladasPedidas(sector?: Sector): Promise<number> {
   const ids = await getUniverseLocationIds(sector);
   const supabase = createSupabaseServiceClient();
-  const [{ data: sellInData }, { data: pendingData }] = await Promise.all([
-    supabase
-      .from("sap_sell_in_records")
-      .select("quantity_kg, location_id")
-      .eq("product_id", PRODUCT_IDS.PANQUECITAS),
-    supabase
-      .from("sap_pending_orders")
-      .select("quantity, location_id")
-      .eq("product_id", PRODUCT_IDS.PANQUECITAS),
-  ]);
+  const { data } = await supabase
+    .from("sap_pedidos_facturados")
+    .select("cantidad_pedido_kg, location_id")
+    .eq("product_id", PRODUCT_IDS.PANQUECITAS);
 
   let pedidaKgTotal = 0;
-  for (const r of (sellInData ?? []) as { quantity_kg: number; location_id: string }[]) {
-    if (ids.has(r.location_id)) pedidaKgTotal += r.quantity_kg;
-  }
-  for (const r of (pendingData ?? []) as { quantity: number; location_id: string }[]) {
-    if (ids.has(r.location_id)) pedidaKgTotal += r.quantity;
+  for (const r of (data ?? []) as { cantidad_pedido_kg: number; location_id: string }[]) {
+    if (ids.has(r.location_id)) pedidaKgTotal += r.cantidad_pedido_kg;
   }
   return Math.round((pedidaKgTotal / 1000) * 100) / 100;
 }
@@ -291,42 +273,44 @@ export async function getMixProducto(sector?: Sector): Promise<MixProductoTonPoi
   }));
 }
 
-// ── 3b. Pedido vs Ventas Panquecitas (por presentación y tiempo) ───
-// Para cada día/semana y cada presentación (400g/800g):
-//   Facturada = Σ sap_sell_in_records.quantity_kg
-//   Pedida    = Facturada + Σ sap_pending_orders.quantity
-//             (= Cantidad Pedido del reporte N7_V_SD83_WEB_001)
+// ── 3b. Facturado vs Radar Panquecitas (por presentación y tiempo) ─────
+// Reemplaza el antiguo "Pedido vs Ventas" (decisión con Alejandro,
+// 07-08-2026): lo que importa no es cuánto se pidió, sino cuánto de lo
+// FACTURADO ya se confirma real en el anaquel según el Radar. Para cada
+// día/semana y cada presentación (400g/800g):
+//   Facturada = Σ sap_pedidos_facturados.cantidad_facturada_kg (Pedidos y Facturado)
+//   Radar     = Σ sap_sell_in_records.quantity_kg (Carga Radar)
 // El cliente elige Día/Semana y un período concreto; el eje X del gráfico
-// son las dos presentaciones, con barras Pedida vs Facturada.
+// son las dos presentaciones, con barras Facturado vs Radar.
 
-export type PedidoVsVentasGranularity = "day" | "week";
+export type FacturadoVsRadarGranularity = "day" | "week";
 
-export interface PedidoVsVentasBarPoint {
+export interface FacturadoVsRadarBarPoint {
   presentacion: PresentacionMix;
-  pedidaKg: number;
   facturadaKg: number;
+  radarKg: number;
 }
 
-export interface PedidoVsVentasPeriod {
+export interface FacturadoVsRadarPeriod {
   bucket: string;
   label: string;
-  bars: PedidoVsVentasBarPoint[];
+  bars: FacturadoVsRadarBarPoint[];
 }
 
-function buildPedidoVsVentasPeriods(
+function buildFacturadoVsRadarPeriods(
   facturada: { location_id: string; date: string; variant_id: string; kg: number }[],
-  pendiente: { location_id: string; date: string; variant_id: string; kg: number }[],
+  radar: { location_id: string; date: string; variant_id: string; kg: number }[],
   ids: Set<string>,
-  granularity: PedidoVsVentasGranularity
-): PedidoVsVentasPeriod[] {
-  type Acc = { pedida: number; facturada: number };
+  granularity: FacturadoVsRadarGranularity
+): FacturadoVsRadarPeriod[] {
+  type Acc = { facturada: number; radar: number };
   const byBucket = new Map<string, Record<PresentacionMix, Acc>>();
 
   function ensure(bucket: string, presentacion: PresentacionMix): Acc {
     if (!byBucket.has(bucket)) {
       byBucket.set(bucket, {
-        "400g": { pedida: 0, facturada: 0 },
-        "800g": { pedida: 0, facturada: 0 },
+        "400g": { facturada: 0, radar: 0 },
+        "800g": { facturada: 0, radar: 0 },
       });
     }
     return byBucket.get(bucket)![presentacion];
@@ -336,17 +320,14 @@ function buildPedidoVsVentasPeriods(
     if (!ids.has(r.location_id) || !r.date) continue;
     const presentacion = VARIANT_TO_PRESENTACION[r.variant_id];
     if (!presentacion) continue;
-    const acc = ensure(bucketKeyFor(r.date, granularity), presentacion);
-    acc.facturada += r.kg;
-    acc.pedida += r.kg;
+    ensure(bucketKeyFor(r.date, granularity), presentacion).facturada += r.kg;
   }
 
-  for (const r of pendiente) {
+  for (const r of radar) {
     if (!ids.has(r.location_id) || !r.date) continue;
     const presentacion = VARIANT_TO_PRESENTACION[r.variant_id];
     if (!presentacion) continue;
-    const acc = ensure(bucketKeyFor(r.date, granularity), presentacion);
-    acc.pedida += r.kg;
+    ensure(bucketKeyFor(r.date, granularity), presentacion).radar += r.kg;
   }
 
   return Array.from(byBucket.keys())
@@ -358,35 +339,47 @@ function buildPedidoVsVentasPeriods(
         label: bucketLabelFor(bucket, granularity),
         bars: (["400g", "800g"] as PresentacionMix[]).map((presentacion) => ({
           presentacion,
-          pedidaKg: Math.round(cell[presentacion].pedida * 10) / 10,
           facturadaKg: Math.round(cell[presentacion].facturada * 10) / 10,
+          radarKg: Math.round(cell[presentacion].radar * 10) / 10,
         })),
       };
     });
 }
 
-export async function getPedidoVsVentas(
+export async function getFacturadoVsRadar(
   sector?: Sector
-): Promise<Record<PedidoVsVentasGranularity, PedidoVsVentasPeriod[]>> {
-  const empty = { day: [] as PedidoVsVentasPeriod[], week: [] as PedidoVsVentasPeriod[] };
+): Promise<Record<FacturadoVsRadarGranularity, FacturadoVsRadarPeriod[]>> {
+  const empty = { day: [] as FacturadoVsRadarPeriod[], week: [] as FacturadoVsRadarPeriod[] };
   const ids = await getUniverseLocationIds(sector);
   if (ids.size === 0) return empty;
 
   const supabase = createSupabaseServiceClient();
-  const [{ data: sellInData }, { data: pendingData }] = await Promise.all([
+  const [{ data: facturadoData }, { data: radarData }] = await Promise.all([
+    supabase
+      .from("sap_pedidos_facturados")
+      .select("cantidad_facturada_kg, location_id, variant_id, fecha")
+      .eq("product_id", PRODUCT_IDS.PANQUECITAS)
+      .not("variant_id", "is", null),
     supabase
       .from("sap_sell_in_records")
       .select("quantity_kg, location_id, variant_id, date_of_sale")
       .eq("product_id", PRODUCT_IDS.PANQUECITAS)
       .not("variant_id", "is", null),
-    supabase
-      .from("sap_pending_orders")
-      .select("quantity, location_id, variant_id, order_date")
-      .eq("product_id", PRODUCT_IDS.PANQUECITAS)
-      .not("variant_id", "is", null),
   ]);
 
-  const facturada = ((sellInData ?? []) as {
+  const facturada = ((facturadoData ?? []) as {
+    cantidad_facturada_kg: number;
+    location_id: string;
+    variant_id: string;
+    fecha: string;
+  }[]).map((r) => ({
+    location_id: r.location_id,
+    date: r.fecha,
+    variant_id: r.variant_id,
+    kg: r.cantidad_facturada_kg,
+  }));
+
+  const radar = ((radarData ?? []) as {
     quantity_kg: number;
     location_id: string;
     variant_id: string;
@@ -398,37 +391,25 @@ export async function getPedidoVsVentas(
     kg: r.quantity_kg,
   }));
 
-  const pendiente = ((pendingData ?? []) as {
-    quantity: number;
-    location_id: string;
-    variant_id: string;
-    order_date: string | null;
-  }[])
-    .filter((r) => r.order_date)
-    .map((r) => ({
-      location_id: r.location_id,
-      date: r.order_date!,
-      variant_id: r.variant_id,
-      kg: r.quantity,
-    }));
-
-  if (facturada.length === 0 && pendiente.length === 0) return empty;
+  if (facturada.length === 0 && radar.length === 0) return empty;
 
   return {
-    day: buildPedidoVsVentasPeriods(facturada, pendiente, ids, "day"),
-    week: buildPedidoVsVentasPeriods(facturada, pendiente, ids, "week"),
+    day: buildFacturadoVsRadarPeriods(facturada, radar, ids, "day"),
+    week: buildFacturadoVsRadarPeriods(facturada, radar, ids, "week"),
   };
 }
 
 // ── 3c. Panquecitas vs Harina PAN (por tiempo) ─────────────────────
-// Compara Cantidad Pedido de Panquecitas vs Harina PAN (día/semana/mes/
-// trimestre). Volumen = facturado + pendiente (= pedido total SAP;
-// no es una suma doble de conceptos distintos). Dos poblaciones:
-//   - "clientes": solo PDV que sí tienen actividad SAP de Panquecitas
-//     (pedido y/o factura — mismo criterio que AdminPdvRow.comprador).
+// Compara Cantidad Pedido de Panquecitas (Pedidos y Facturado) vs lo
+// despachado de Harina PAN (Carga Radar) — día/semana/mes/trimestre. Dos
+// fuentes distintas a propósito, cada producto con la suya (ver decisión
+// con Alejandro, 07-08-2026): Panquecitas todavía no tiene un reporte de
+// Radar separado del de Pedidos y Facturado, así que su volumen sigue
+// siendo Cantidad Pedido; Harina PAN solo existe en Carga Radar. Dos
+// poblaciones:
+//   - "clientes": solo PDV que sí tienen actividad de Pedidos y Facturado
+//     de Panquecitas (pedido y/o factura — mismo criterio que AdminPdvRow.comprador).
 //   - "universo": los 358 clientes del piloto (incluye 0 Panquecitas).
-// Harina PAN llega solo por el reporte mensual agregado
-// (handleMonthlyUpload), sin sap_pending_orders — su serie es facturado.
 
 /** Población global fija del piloto — denominador de % Penetración en TOTAL. */
 const UNIVERSAL_CLIENTES_PILOTO = 358;
@@ -452,21 +433,21 @@ async function getPanVsHarinaPanUniverse(
   if (poblacion === "universo" || ids.size === 0) return ids;
 
   const supabase = createSupabaseServiceClient();
-  const [{ data: sellInData }, { data: pendingData }] = await Promise.all([
-    supabase.from("sap_sell_in_records").select("location_id").eq("product_id", PRODUCT_IDS.PANQUECITAS).gt("quantity_kg", 0),
-    supabase.from("sap_pending_orders").select("location_id").eq("product_id", PRODUCT_IDS.PANQUECITAS).gt("quantity", 0),
-  ]);
+  const { data } = await supabase
+    .from("sap_pedidos_facturados")
+    .select("location_id, cantidad_pedido_kg, cantidad_facturada_kg")
+    .eq("product_id", PRODUCT_IDS.PANQUECITAS);
 
   const compradorIds = new Set<string>();
-  for (const r of (sellInData ?? []) as { location_id: string }[]) compradorIds.add(r.location_id);
-  for (const r of (pendingData ?? []) as { location_id: string }[]) compradorIds.add(r.location_id);
+  for (const r of (data ?? []) as { location_id: string; cantidad_pedido_kg: number; cantidad_facturada_kg: number }[]) {
+    if (r.cantidad_pedido_kg > 0 || r.cantidad_facturada_kg > 0) compradorIds.add(r.location_id);
+  }
 
   return new Set([...ids].filter((id) => compradorIds.has(id)));
 }
 
 function computePanVsHarinaPanPoints(
-  facturada: { product_id: string; date: string; kg: number }[],
-  pendiente: { product_id: string | null; date: string | null; kg: number }[],
+  rows: { product_id: string; date: string; kg: number }[],
   granularity: PanComparisonGranularity
 ): PanVsHarinaPanPoint[] {
   const byBucket = new Map<string, { panquecitas: number; harinaPan: number }>();
@@ -474,13 +455,7 @@ function computePanVsHarinaPanPoints(
     if (!byBucket.has(bucket)) byBucket.set(bucket, { panquecitas: 0, harinaPan: 0 });
     return byBucket.get(bucket)!;
   }
-  for (const r of facturada) {
-    const acc = ensure(panBucketKeyFor(r.date, granularity));
-    if (r.product_id === PRODUCT_IDS.PANQUECITAS) acc.panquecitas += r.kg;
-    else if (r.product_id === PRODUCT_IDS.HARINA_PAN) acc.harinaPan += r.kg;
-  }
-  for (const r of pendiente) {
-    if (!r.date || !r.product_id) continue;
+  for (const r of rows) {
     const acc = ensure(panBucketKeyFor(r.date, granularity));
     if (r.product_id === PRODUCT_IDS.PANQUECITAS) acc.panquecitas += r.kg;
     else if (r.product_id === PRODUCT_IDS.HARINA_PAN) acc.harinaPan += r.kg;
@@ -508,37 +483,33 @@ export async function getPanVsHarinaPan(
   if (ids.size === 0) return empty;
 
   const supabase = createSupabaseServiceClient();
-  const [{ data: sellInData }, { data: pendingData }] = await Promise.all([
+  const [{ data: pedidoData }, { data: radarData }] = await Promise.all([
+    supabase
+      .from("sap_pedidos_facturados")
+      .select("location_id, cantidad_pedido_kg, fecha")
+      .eq("product_id", PRODUCT_IDS.PANQUECITAS),
     supabase
       .from("sap_sell_in_records")
-      .select("location_id, product_id, quantity_kg, date_of_sale")
-      .in("product_id", [PRODUCT_IDS.PANQUECITAS, PRODUCT_IDS.HARINA_PAN]),
-    supabase
-      .from("sap_pending_orders")
-      .select("location_id, product_id, quantity, order_date")
-      .in("product_id", [PRODUCT_IDS.PANQUECITAS, PRODUCT_IDS.HARINA_PAN]),
+      .select("location_id, quantity_kg, date_of_sale")
+      .eq("product_id", PRODUCT_IDS.HARINA_PAN),
   ]);
 
-  // Cantidad Pedido = facturado (sell_in) + pendiente; no doble conteo.
-  const facturada = (
-    (sellInData ?? []) as { location_id: string; product_id: string; quantity_kg: number; date_of_sale: string }[]
-  )
-    .filter((r) => ids.has(r.location_id))
-    .map((r) => ({ product_id: r.product_id, date: r.date_of_sale, kg: r.quantity_kg }));
+  const rows = [
+    ...((pedidoData ?? []) as { location_id: string; cantidad_pedido_kg: number; fecha: string }[])
+      .filter((r) => ids.has(r.location_id))
+      .map((r) => ({ product_id: PRODUCT_IDS.PANQUECITAS, date: r.fecha, kg: r.cantidad_pedido_kg })),
+    ...((radarData ?? []) as { location_id: string; quantity_kg: number; date_of_sale: string }[])
+      .filter((r) => ids.has(r.location_id))
+      .map((r) => ({ product_id: PRODUCT_IDS.HARINA_PAN, date: r.date_of_sale, kg: r.quantity_kg })),
+  ];
 
-  const pendiente = (
-    (pendingData ?? []) as { location_id: string; product_id: string | null; quantity: number; order_date: string | null }[]
-  )
-    .filter((r) => ids.has(r.location_id))
-    .map((r) => ({ product_id: r.product_id, date: r.order_date, kg: r.quantity }));
-
-  if (facturada.length === 0 && pendiente.length === 0) return empty;
+  if (rows.length === 0) return empty;
 
   return {
-    day: computePanVsHarinaPanPoints(facturada, pendiente, "day"),
-    week: computePanVsHarinaPanPoints(facturada, pendiente, "week"),
-    month: computePanVsHarinaPanPoints(facturada, pendiente, "month"),
-    quarter: computePanVsHarinaPanPoints(facturada, pendiente, "quarter"),
+    day: computePanVsHarinaPanPoints(rows, "day"),
+    week: computePanVsHarinaPanPoints(rows, "week"),
+    month: computePanVsHarinaPanPoints(rows, "month"),
+    quarter: computePanVsHarinaPanPoints(rows, "quarter"),
   };
 }
 
@@ -585,14 +556,21 @@ function computePenetracionRecompraPoints(
   return points;
 }
 
-/** Un punto acumulado por cada día/semana/mes con datos — las tres calculadas de una sola pasada por Supabase. */
+/**
+ * Un punto acumulado por cada día/semana/mes con datos — las tres calculadas
+ * de una sola pasada por Supabase. Fuente: sap_sell_in_records (Carga
+ * Radar) — un cliente cuenta como "compró" solo si el Radar lo confirma,
+ * no basta con que tenga un pedido/factura en Pedidos y Facturado (ver
+ * decisión con Alejandro, 06-08-2026: el radar es la única fuente
+ * confiable del universo real de clientes).
+ */
 export async function getPenetracionRecompra(sector?: Sector): Promise<Record<TimeGranularity, PenetracionRecompraPoint[]>> {
   const empty = { day: [], week: [], month: [] };
   const universo = await getUniverseLocations();
   const universoFiltrado = sector ? universo.filter((l) => sectorGroup(l.oficina_venta) === sector) : universo;
   if (universoFiltrado.length === 0) return empty;
   const ids = new Set(universoFiltrado.map((l) => l.id));
-  // % Penetración = clientes facturados / universo global (358) en TOTAL;
+  // % Penetración = clientes con Radar > 0 / universo global (358) en TOTAL;
   // con filtro de sector, el denominador es el universo de ese sector.
   const universoSize = sector ? universoFiltrado.length : UNIVERSAL_CLIENTES_PILOTO;
 
@@ -689,20 +667,17 @@ export async function getCoberturaComunicacionPorSector(): Promise<Record<TimeGr
 // Segmento = tipo_cliente (decisión #5). %HPM TOTAL / %HPM vs Base:
 // ver decisión #12.
 
-/** Cantidad Pedido (kg) por PDV = facturado + pendiente, sin doble conteo. */
+/** Cantidad Pedido (kg) por PDV, cruda de Pedidos y Facturado (no de Carga Radar). */
 async function getCantidadPedidoTotalsByLocation(productId: string): Promise<Map<string, number>> {
   const supabase = createSupabaseServiceClient();
-  const [{ data: sellInData }, { data: pendingData }] = await Promise.all([
-    supabase.from("sap_sell_in_records").select("location_id, quantity_kg").eq("product_id", productId),
-    supabase.from("sap_pending_orders").select("location_id, quantity").eq("product_id", productId),
-  ]);
+  const { data } = await supabase
+    .from("sap_pedidos_facturados")
+    .select("location_id, cantidad_pedido_kg")
+    .eq("product_id", productId);
 
   const totals = new Map<string, number>();
-  for (const row of (sellInData ?? []) as { location_id: string; quantity_kg: number }[]) {
-    totals.set(row.location_id, (totals.get(row.location_id) ?? 0) + row.quantity_kg);
-  }
-  for (const row of (pendingData ?? []) as { location_id: string; quantity: number }[]) {
-    totals.set(row.location_id, (totals.get(row.location_id) ?? 0) + row.quantity);
+  for (const row of (data ?? []) as { location_id: string; cantidad_pedido_kg: number }[]) {
+    totals.set(row.location_id, (totals.get(row.location_id) ?? 0) + row.cantidad_pedido_kg);
   }
   return totals;
 }
@@ -720,9 +695,10 @@ export async function getDetalleClientesPorSegmento(sector?: Sector): Promise<De
   const universo = sector ? universoTotal.filter((l) => sectorGroup(l.oficina_venta) === sector) : universoTotal;
   if (universo.length === 0) return [];
 
-  // Penetración: clientes facturados (sell_in > 0). Volumen HPM vs Base:
-  // Cantidad Pedido de Panquecitas (facturado + pendiente).
-  const panqFacturadoTotals = await getSellInTotalsByLocation(PRODUCT_IDS.PANQUECITAS);
+  // Penetración: clientes con Radar > 0 (Carga Radar — no Pedidos y
+  // Facturado, ver getPenetracionRecompra). Volumen HPM vs Base: Cantidad
+  // Pedido de Panquecitas, cruda de Pedidos y Facturado.
+  const panqRadarTotals = await getSellInTotalsByLocation(PRODUCT_IDS.PANQUECITAS);
   const panqPedidoTotals = await getCantidadPedidoTotalsByLocation(PRODUCT_IDS.PANQUECITAS);
   const hmpTotals = await getSellInTotalsByLocation(PRODUCT_IDS.HARINA_PAN);
   const denomPenetracion = sector ? universo.length : UNIVERSAL_CLIENTES_PILOTO;
@@ -753,7 +729,7 @@ export async function getDetalleClientesPorSegmento(sector?: Sector): Promise<De
 
   const rows: DetalleSegmentoRow[] = [];
   for (const [segmento, locs] of bySegmento.entries()) {
-    const facturados = locs.filter((l) => (panqFacturadoTotals.get(l.id) ?? 0) > 0);
+    const facturados = locs.filter((l) => (panqRadarTotals.get(l.id) ?? 0) > 0);
     const conRecompra = facturados.filter((l) => (datesByLocation.get(l.id)?.size ?? 0) >= 2);
 
     const segHmpKg = locs.reduce((s, l) => s + (hmpTotals.get(l.id) ?? 0), 0);
@@ -761,10 +737,10 @@ export async function getDetalleClientesPorSegmento(sector?: Sector): Promise<De
 
     rows.push({
       segmento,
-      // % Penetración = facturados del segmento / universo (358 en TOTAL)
+      // % Penetración = clientes con Radar > 0 del segmento / universo (358 en TOTAL)
       penetracionPct:
         denomPenetracion > 0 ? Math.round((facturados.length / denomPenetracion) * 1000) / 10 : 0,
-      // Tasa de Recompra = repetidores / clientes con ≥1 compra (facturada)
+      // Tasa de Recompra = repetidores / clientes con ≥1 compra confirmada por Radar
       recompraPct: facturados.length > 0 ? Math.round((conRecompra.length / facturados.length) * 1000) / 10 : 0,
       hpmVsBasePct: segHmpKg > 0 ? Math.round((segPanqKg / segHmpKg) * 1000) / 10 : 0,
       hpmTotalPct: universoTotalHmpKg > 0 ? Math.round((segHmpKg / universoTotalHmpKg) * 1000) / 10 : 0,
@@ -801,18 +777,45 @@ export async function getConversionDegustaciones(): Promise<ConversionDegustacio
 }
 
 // ── 8. Pedidos pendientes por entregar ────────────────────────────
-// Ver decisión #13: formato del reporte SAP aún no confirmado.
+// Derivado de sap_pedidos_facturados (Pedido − Facturado por fila), no de
+// la tabla sap_pending_orders (en desuso desde la migración 010 — ver
+// decisión con Alejandro, 07-08-2026).
 
 export async function getPedidosPendientes(sector?: Sector): Promise<SapPendingOrder[]> {
   const supabase = createSupabaseServiceClient();
   const { data } = await supabase
-    .from("sap_pending_orders")
+    .from("sap_pedidos_facturados")
     .select(
-      `id, created_at, upload_batch_id, location_id, product_id, variant_id, quantity, order_date, notes, location:locations(${LOCATION_COLUMNS})`
+      `id, created_at, upload_batch_id, location_id, product_id, variant_id, cantidad_pedido_kg, cantidad_facturada_kg, fecha, location:locations(${LOCATION_COLUMNS})`
     )
-    .order("order_date", { ascending: true });
+    .order("fecha", { ascending: true });
 
-  const rows = (data ?? []) as unknown as SapPendingOrder[];
+  const rows = ((data ?? []) as unknown as {
+    id: string;
+    created_at: string;
+    upload_batch_id: string;
+    location_id: string;
+    product_id: string;
+    variant_id: string | null;
+    cantidad_pedido_kg: number;
+    cantidad_facturada_kg: number;
+    fecha: string;
+    location?: Location;
+  }[])
+    .map((r) => ({
+      id: r.id,
+      created_at: r.created_at,
+      upload_batch_id: r.upload_batch_id,
+      location_id: r.location_id,
+      product_id: r.product_id,
+      variant_id: r.variant_id,
+      quantity: Math.round((r.cantidad_pedido_kg - r.cantidad_facturada_kg) * 100) / 100,
+      order_date: r.fecha,
+      notes: null,
+      location: r.location,
+    }))
+    .filter((r) => r.quantity > 0); // solo lo que aún falta por facturar
+
   if (!sector) return rows;
   return rows.filter((r) => sectorGroup(r.location?.oficina_venta ?? null) === sector);
 }

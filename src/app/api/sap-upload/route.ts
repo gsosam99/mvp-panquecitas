@@ -253,15 +253,17 @@ async function handleRadarUpload(supabase: any, rows: ParsedSapRadarRow[], batch
 }
 
 // ── Reporte "Pedidos y Facturado" (Panquecitas): Pedido/Entregado/Facturado ─
-// Una sola fila trae tanto lo ya facturado (→ sap_sell_in_records, volumen
-// facturado) como lo pedido (→ sap_pending_orders, guardando solo lo que
-// falta por facturar: Pedido − Facturado). Es un reporte diario (una fila
-// por cliente+material+fecha), así que a diferencia del Radar (acumulado
-// mensual) aquí una fila repetida sí es un duplicado real y se descarta.
-// Estos volúmenes alimentan solo las métricas de volumen facturado/pedido —
-// NO determinan el universo de clientes reales (eso lo hace Carga Radar
-// cruzado con la Cartera de Clientes), porque este reporte trae
-// distribuidoras intermediarias que no son puntos de venta finales.
+// Escribe EXCLUSIVAMENTE en sap_pedidos_facturados — nunca en
+// sap_sell_in_records (esa tabla es solo de "Carga Radar"). Ambas cifras
+// crudas del reporte (Cantidad Pedido y Cantidad Facturada) se guardan
+// juntas por cliente+material+fecha, porque DIENN necesita mostrarlas como
+// dos tarjetas independientes que NO se pueden sumar entre sí ni con el
+// Radar — son procesos de venta distintos. Ver decisión con Alejandro
+// (07-08-2026) y migración 010.
+//
+// Es un reporte diario (una fila por cliente+material+fecha), así que a
+// diferencia del Radar (acumulado mensual) aquí una fila repetida sí es un
+// duplicado real y se descarta, no se reemplaza.
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 async function handleFacturacionUpload(supabase: any, rows: ParsedSapFacturacionRow[], batchId: string) {
   // ── 1. Resolver clientes contra la cartera ya cargada (no se crean nuevos) ──
@@ -295,26 +297,17 @@ async function handleFacturacionUpload(supabase: any, rows: ParsedSapFacturacion
     locationsUpdated = (upsertedLocs ?? []).length;
   }
 
-  // ── 2. Resolver product_id + variant_id por material y separar
-  // facturado/pendiente. variant_id es lo que alimenta el Mix de Producto
-  // de DIENN (cantidad facturada por presentación 400g/800g).
+  // ── 2. Resolver product_id + variant_id por material. variant_id es lo
+  // que alimenta el Mix de Producto de DIENN (400g/800g).
   const unknownMaterials = new Set<string>();
-  const sellInRows: {
-    uploaded_by: null;
+  const pedidoFacturadoRows: {
     upload_batch_id: string;
     location_id: string;
     product_id: string;
     variant_id: string | null;
-    quantity_kg: number;
-    date_of_sale: string;
-  }[] = [];
-  const pendingRows: {
-    upload_batch_id: string;
-    location_id: string;
-    product_id: string;
-    variant_id: string | null;
-    quantity: number;
-    order_date: string;
+    cantidad_pedido_kg: number;
+    cantidad_facturada_kg: number;
+    fecha: string;
   }[] = [];
 
   for (const row of rows) {
@@ -328,33 +321,17 @@ async function handleFacturacionUpload(supabase: any, rows: ParsedSapFacturacion
     }
     const variant_id = SAP_MATERIAL_VARIANT_MAP[row.material_code] ?? null;
 
-    if (row.cantidad_facturada_kg > 0) {
-      sellInRows.push({
-        uploaded_by: null,
-        upload_batch_id: batchId,
-        location_id,
-        product_id,
-        variant_id,
-        quantity_kg: row.cantidad_facturada_kg,
-        date_of_sale: row.fecha,
-      });
-    }
+    if (row.cantidad_pedido_kg <= 0 && row.cantidad_facturada_kg <= 0) continue; // fila sin datos útiles
 
-    // Solo lo que falta por facturar — si ya se facturó todo el pedido, no
-    // vuelve a aparecer como pendiente (ver pregunta al usuario, confirmada).
-    // Pedida total = Facturada + Pendiente (misma fecha y presentación),
-    // que es lo que usa la gráfica Pedido vs Ventas de DIENN.
-    const pendiente = row.cantidad_pedido_kg - row.cantidad_facturada_kg;
-    if (pendiente > 0) {
-      pendingRows.push({
-        upload_batch_id: batchId,
-        location_id,
-        product_id,
-        variant_id,
-        quantity: pendiente,
-        order_date: row.fecha,
-      });
-    }
+    pedidoFacturadoRows.push({
+      upload_batch_id: batchId,
+      location_id,
+      product_id,
+      variant_id,
+      cantidad_pedido_kg: row.cantidad_pedido_kg,
+      cantidad_facturada_kg: row.cantidad_facturada_kg,
+      fecha: row.fecha,
+    });
   }
 
   if (unknownMaterials.size > 0) {
@@ -364,58 +341,34 @@ async function handleFacturacionUpload(supabase: any, rows: ParsedSapFacturacion
   }
 
   // ── 3. Descartar filas ya cargadas (mismo cliente + fecha + material) ──
-  const allLocationIds = [
-    ...new Set([...sellInRows.map((r) => r.location_id), ...pendingRows.map((r) => r.location_id)]),
-  ];
-  const [existingSellInKeys, existingPendingKeys] = await Promise.all([
-    fetchExistingRecords(
-      supabase,
-      "sap_sell_in_records",
-      "date_of_sale",
-      allLocationIds,
-      [...new Set(sellInRows.map((r) => r.date_of_sale))]
-    ),
-    fetchExistingRecords(
-      supabase,
-      "sap_pending_orders",
-      "order_date",
-      allLocationIds,
-      [...new Set(pendingRows.map((r) => r.order_date))]
-    ),
-  ]);
+  const locationIds = [...new Set(pedidoFacturadoRows.map((r) => r.location_id))];
+  const existingKeys = await fetchExistingRecords(
+    supabase,
+    "sap_pedidos_facturados",
+    "fecha",
+    locationIds,
+    [...new Set(pedidoFacturadoRows.map((r) => r.fecha))]
+  );
 
-  const seenSellIn = new Set<string>();
-  const newSellInRows = sellInRows.filter((r) => {
-    const key = dedupeKey(r.location_id, r.product_id, r.variant_id, r.date_of_sale);
-    if (existingSellInKeys.has(key) || seenSellIn.has(key)) return false;
-    seenSellIn.add(key);
-    return true;
-  });
-
-  const seenPending = new Set<string>();
-  const newPendingRows = pendingRows.filter((r) => {
-    const key = dedupeKey(r.location_id, r.product_id, r.variant_id, r.order_date);
-    if (existingPendingKeys.has(key) || seenPending.has(key)) return false;
-    seenPending.add(key);
+  const seen = new Set<string>();
+  const newRows = pedidoFacturadoRows.filter((r) => {
+    const key = dedupeKey(r.location_id, r.product_id, r.variant_id, r.fecha);
+    if (existingKeys.has(key) || seen.has(key)) return false;
+    seen.add(key);
     return true;
   });
 
   // ── 4. Insert ────────────────────────────────────────────────────────────
-  if (newSellInRows.length > 0) {
-    const { error } = await supabase.from("sap_sell_in_records").insert(newSellInRows);
-    if (error) throw error;
-  }
-  if (newPendingRows.length > 0) {
-    const { error } = await supabase.from("sap_pending_orders").insert(newPendingRows);
+  if (newRows.length > 0) {
+    const { error } = await supabase.from("sap_pedidos_facturados").insert(newRows);
     if (error) throw error;
   }
 
   return Response.json({
     format: "facturacion",
     locations_upserted: locationsUpdated,
-    ventas_inserted: newSellInRows.length,
-    pendientes_inserted: newPendingRows.length,
-    duplicates_skipped: (sellInRows.length - newSellInRows.length) + (pendingRows.length - newPendingRows.length),
+    inserted: newRows.length,
+    duplicates_skipped: pedidoFacturadoRows.length - newRows.length,
     clientes_fuera_cartera: clientesFueraCartera,
   });
 }
@@ -430,15 +383,18 @@ export async function DELETE(req: Request) {
     const { batchId } = await req.json() as { batchId: string };
     if (!batchId) return Response.json({ error: "batchId requerido" }, { status: 400 });
 
+    // Un batch pertenece a Carga Radar (sap_sell_in_records) o a Pedidos y
+    // Facturado (sap_pedidos_facturados), nunca a ambas — borrar en las dos
+    // es inofensivo porque el id no calza en la tabla que no le corresponde.
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    const [sellInResult, pendingResult] = await Promise.all([
+    const [sellInResult, pedidosFacturadosResult] = await Promise.all([
       (supabase as any).from("sap_sell_in_records").delete().eq("upload_batch_id", batchId),
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      (supabase as any).from("sap_pending_orders").delete().eq("upload_batch_id", batchId),
+      (supabase as any).from("sap_pedidos_facturados").delete().eq("upload_batch_id", batchId),
     ]);
 
     if (sellInResult.error) throw sellInResult.error;
-    if (pendingResult.error) throw pendingResult.error;
+    if (pedidosFacturadosResult.error) throw pedidosFacturadosResult.error;
     return Response.json({ ok: true });
   } catch (error) {
     console.error("[DELETE /api/sap-upload]", error);
