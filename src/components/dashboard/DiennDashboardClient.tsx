@@ -8,6 +8,8 @@ import { ReportPrintHeader } from "@/components/dashboard/ReportPrintHeader";
 import { CoberturaComunicacionChart } from "@/components/dashboard/CoberturaComunicacionChart";
 import { DemandaInsatisfechaChart } from "@/components/dashboard/DemandaInsatisfechaChart";
 import { VentaRecompraActivacionChart } from "@/components/dashboard/VentaRecompraActivacionChart";
+import { VentaActivacionChart } from "@/components/dashboard/VentaActivacionChart";
+import { VolumenHpmChart } from "@/components/dashboard/VolumenHpmChart";
 import { PanVsHarinaPanChart } from "@/components/dashboard/PanVsHarinaPanChart";
 import { RoundLegend } from "@/components/dashboard/RoundLegend";
 import { SellOutChart } from "@/components/dashboard/SellOutChart";
@@ -40,6 +42,7 @@ import type {
   TimeGranularity,
   VentaRecompraActivacionPoint,
   VolumenRadarAcumulado,
+  VolumenVendidoPoint,
 } from "@/lib/dienn-queries";
 import type { Sector } from "@/lib/sectors";
 
@@ -59,6 +62,8 @@ export interface SectorBundle {
   runningVentas: RunningVentasResult;
   /** Venta acumulada (Radar) + tasa de recompra + % activación de clientes, por día/semana/mes. */
   ventaRecompraActivacion: Record<TimeGranularity, VentaRecompraActivacionPoint[]>;
+  /** Volumen vendido por período (Panquecitas / HPM) + % activación, por día/semana/mes. */
+  volumenVendido: Record<TimeGranularity, VolumenVendidoPoint[]>;
   /** Comparativa de penetración Radar Panquecitas vs. HPM sobre la lista objetivo. */
   penetracionRadarVsHpm: PenetracionRadarVsHpm;
   detalleSegmentos: DetalleSegmentoRow[];
@@ -114,6 +119,8 @@ export function DiennDashboardClient({
   const [fuenteFilter, setFuenteFilter] = useState<FuenteFilter>("TODOS");
   const [granularity, setGranularity] = useState<TimeGranularity>("week");
   const [comboGranularity, setComboGranularity] = useState<TimeGranularity>("week");
+  const [hpmGranularity, setHpmGranularity] = useState<TimeGranularity>("week");
+  const [ventaActGranularity, setVentaActGranularity] = useState<TimeGranularity>("week");
   const [panPoblacion, setPanPoblacion] = useState<PanComparisonPoblacion>("clientes");
   const [panGranularity, setPanGranularity] = useState<PanComparisonGranularity>("month");
   const bundle = bundles[filter];
@@ -141,6 +148,8 @@ export function DiennDashboardClient({
   const panPoints = bundle.panVsHarinaPan[panPoblacion][panGranularity];
 
   const comboPoints = bundle.ventaRecompraActivacion[comboGranularity];
+  const hpmPoints = bundle.volumenVendido[hpmGranularity];
+  const ventaActPoints = bundle.volumenVendido[ventaActGranularity];
 
   const filtroTexto = filter === "TOTAL" ? "Total sectores piloto" : sectorLabels[filter];
 
@@ -420,6 +429,81 @@ export function DiennDashboardClient({
               <div className="text-center">
                 <p className="text-4xl mb-2">📈</p>
                 <p>Sin datos de Radar de Panquecitas. Carga el reporte SAP.</p>
+              </div>
+            </div>
+          )}
+        </CardContent>
+      </Card>
+
+      {/* ── Volumen vendido HPM (barras, por período) ─────────────────────── */}
+      <Card className="mb-6 print-avoid-break">
+        <CardHeader className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between space-y-0">
+          <div>
+            <CardTitle>Volumen vendido HPM</CardTitle>
+            <p className="text-xs text-slate-400 mt-1">
+              Volumen de Harina PAN vendido por período, a partir del Radar de HPM.
+            </p>
+          </div>
+          <div className="flex rounded-lg border border-slate-200 overflow-hidden text-xs font-medium print:hidden">
+            {GRANULARITY_OPTIONS.map((opt) => (
+              <button
+                key={opt.key}
+                onClick={() => setHpmGranularity(opt.key)}
+                className={`px-3 py-1.5 transition-colors ${
+                  hpmGranularity === opt.key ? "bg-slate-900 text-white" : "bg-white text-slate-500 hover:bg-slate-50"
+                }`}
+              >
+                {opt.label}
+              </button>
+            ))}
+          </div>
+        </CardHeader>
+        <CardContent>
+          {hpmPoints.some((p) => p.hpmKg > 0) ? (
+            <VolumenHpmChart data={hpmPoints} />
+          ) : (
+            <div className="h-[300px] flex items-center justify-center text-slate-400">
+              <div className="text-center">
+                <p className="text-4xl mb-2">📊</p>
+                <p>Sin datos de Radar de Harina PAN todavía.</p>
+              </div>
+            </div>
+          )}
+        </CardContent>
+      </Card>
+
+      {/* ── Volumen de venta Panquecitas vs Activación (combo, por período) ─── */}
+      <Card className="mb-6 print-avoid-break">
+        <CardHeader className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between space-y-0">
+          <div>
+            <CardTitle>Volumen de venta Panquecitas vs Activación</CardTitle>
+            <p className="text-xs text-slate-400 mt-1">
+              Barras: volumen de venta de Panquecitas por período (Radar). Línea (eje derecho, %): evolución del % de
+              activación de clientes.
+            </p>
+          </div>
+          <div className="flex rounded-lg border border-slate-200 overflow-hidden text-xs font-medium print:hidden">
+            {GRANULARITY_OPTIONS.map((opt) => (
+              <button
+                key={opt.key}
+                onClick={() => setVentaActGranularity(opt.key)}
+                className={`px-3 py-1.5 transition-colors ${
+                  ventaActGranularity === opt.key ? "bg-slate-900 text-white" : "bg-white text-slate-500 hover:bg-slate-50"
+                }`}
+              >
+                {opt.label}
+              </button>
+            ))}
+          </div>
+        </CardHeader>
+        <CardContent>
+          {ventaActPoints.length > 0 ? (
+            <VentaActivacionChart data={ventaActPoints} />
+          ) : (
+            <div className="h-[320px] flex items-center justify-center text-slate-400">
+              <div className="text-center">
+                <p className="text-4xl mb-2">📈</p>
+                <p>Sin datos de Radar de Panquecitas todavía.</p>
               </div>
             </div>
           )}

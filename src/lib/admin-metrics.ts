@@ -49,6 +49,14 @@ export interface AdminVisitSnapshot {
 /** Un cliente con menos unidades que esto (anaquel + depósito) está en riesgo. */
 export const STOCK_OUT_UMBRAL_UNIDADES = 2;
 
+/**
+ * Cartera inicial fija del piloto (358 clientes) — denominador de la tarjeta
+ * "% Clientes que compraron": venta publicada en el Radar de Panquecitas
+ * contra la cartera inicial, no contra la cartera filtrada del momento (ver
+ * decisión con Mariana, 08-08-2026). Mismo criterio de penetración que DIENN.
+ */
+export const CARTERA_INICIAL = 358;
+
 /** Mínimo de caras frontales exigido a los clientes de formato grande. */
 export const CARAS_FRONTALES_MINIMO = 4;
 
@@ -189,7 +197,7 @@ export function clientesFaltaPorVisitar(rows: AdminPdvRow[]): AdminPdvRow[] {
 // ── Tarjetas de KPI ───────────────────────────────────────────────
 
 export interface AdminKpis {
-  /** % de la cartera con pedido y/o factura de Panquecitas en SAP. */
+  /** % de la cartera inicial (358) con venta publicada en el Radar de Panquecitas. */
   compraron: { pct: number; count: number; total: number };
   /** % de clientes evaluables con el precio de su zona correcto. */
   precioCorrecto: { pct: number; count: number; total: number };
@@ -222,7 +230,8 @@ export function computeAdminKpis(rows: AdminPdvRow[]): AdminKpis {
   const faltantes = total - visitados.length;
 
   return {
-    compraron: { pct: pct(compradores, total), count: compradores, total },
+    // Denominador fijo: la cartera inicial de 358, no la cartera filtrada.
+    compraron: { pct: pct(compradores, CARTERA_INICIAL), count: compradores, total: CARTERA_INICIAL },
     precioCorrecto: { pct: pct(correctos, evaluables.length), count: correctos, total: evaluables.length },
     materialPop: { pct: pct(conPop, visitados.length), count: conPop, total: visitados.length },
     riesgoStockOut: { count: enRiesgo, total: visitados.length },

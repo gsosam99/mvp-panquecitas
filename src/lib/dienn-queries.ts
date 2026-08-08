@@ -545,6 +545,104 @@ export async function getVentaRecompraActivacion(
   };
 }
 
+// ── 4d. Volumen vendido por período (Panquecitas / HPM) + activación ──
+// Alimenta dos gráficos del perfil DIENN, ambos desde Carga Radar
+// (sap_sell_in_records), con filtro temporal Día / Semana / Mes:
+//   1. "Volumen vendido HPM": barras con hpmKg por período.
+//   2. "Volumen de venta Panquecitas vs Activación": barras panquecitasKg
+//      por período + línea activacionPct.
+// A diferencia de la venta ACUMULADA (getVentaRecompraActivacion), aquí el
+// volumen es por período (no corrido). La activación sí es acumulada
+// (clientes con Radar de Panquecitas > 0 hasta el bucket / cartera fija de
+// 358, o el universo del sector con filtro) — misma definición que el resto
+// del dashboard.
+
+export interface VolumenVendidoPoint {
+  bucket: string;
+  label: string;
+  /** Volumen Radar de Panquecitas del período (kg). */
+  panquecitasKg: number;
+  /** Volumen Radar de Harina PAN (HPM) del período (kg). */
+  hpmKg: number;
+  /** % activación acumulada de clientes de Panquecitas (Radar > 0) sobre la cartera fija. */
+  activacionPct: number;
+}
+
+function computeVolumenVendidoPoints(
+  panqRows: { location_id: string; date_of_sale: string; quantity_kg: number }[],
+  hpmRows: { date_of_sale: string; quantity_kg: number }[],
+  universoSize: number,
+  granularity: TimeGranularity
+): VolumenVendidoPoint[] {
+  const buckets = Array.from(
+    new Set([...panqRows.map((r) => r.date_of_sale), ...hpmRows.map((r) => r.date_of_sale)].map((d) => bucketKeyFor(d, granularity)))
+  ).sort();
+  if (buckets.length === 0) return [];
+
+  return buckets.map((bucket) => {
+    const panquecitasKg = panqRows
+      .filter((r) => bucketKeyFor(r.date_of_sale, granularity) === bucket)
+      .reduce((s, r) => s + r.quantity_kg, 0);
+    const hpmKg = hpmRows
+      .filter((r) => bucketKeyFor(r.date_of_sale, granularity) === bucket)
+      .reduce((s, r) => s + r.quantity_kg, 0);
+
+    // Activación acumulada: clientes distintos de Panquecitas con Radar > 0 hasta este bucket.
+    const activados = new Set(
+      panqRows.filter((r) => bucketKeyFor(r.date_of_sale, granularity) <= bucket).map((r) => r.location_id)
+    ).size;
+
+    return {
+      bucket,
+      label: bucketLabelFor(bucket, granularity),
+      panquecitasKg: Math.round(panquecitasKg * 10) / 10,
+      hpmKg: Math.round(hpmKg * 10) / 10,
+      activacionPct: universoSize > 0 ? Math.round((activados / universoSize) * 1000) / 10 : 0,
+    };
+  });
+}
+
+export async function getVolumenVendido(
+  sector?: Sector
+): Promise<Record<TimeGranularity, VolumenVendidoPoint[]>> {
+  const empty = { day: [], week: [], month: [] };
+  const universo = await getUniverseLocations();
+  const universoFiltrado = sector ? universo.filter((l) => sectorGroup(l.oficina_venta) === sector) : universo;
+  if (universoFiltrado.length === 0) return empty;
+  const ids = new Set(universoFiltrado.map((l) => l.id));
+  const universoSize = sector ? universoFiltrado.length : UNIVERSAL_CLIENTES_PILOTO;
+
+  const supabase = createSupabaseServiceClient();
+  const { data } = await supabase
+    .from("sap_sell_in_records")
+    .select("location_id, product_id, quantity_kg, date_of_sale")
+    .in("product_id", [PRODUCT_IDS.PANQUECITAS, PRODUCT_IDS.HARINA_PAN])
+    .gt("quantity_kg", 0)
+    .order("date_of_sale");
+
+  const rows = ((data ?? []) as {
+    location_id: string;
+    product_id: string;
+    quantity_kg: number;
+    date_of_sale: string;
+  }[]).filter((r) => ids.has(r.location_id));
+
+  const panqRows = rows
+    .filter((r) => r.product_id === PRODUCT_IDS.PANQUECITAS)
+    .map((r) => ({ location_id: r.location_id, date_of_sale: r.date_of_sale, quantity_kg: r.quantity_kg }));
+  const hpmRows = rows
+    .filter((r) => r.product_id === PRODUCT_IDS.HARINA_PAN)
+    .map((r) => ({ date_of_sale: r.date_of_sale, quantity_kg: r.quantity_kg }));
+
+  if (panqRows.length === 0 && hpmRows.length === 0) return empty;
+
+  return {
+    day: computeVolumenVendidoPoints(panqRows, hpmRows, universoSize, "day"),
+    week: computeVolumenVendidoPoints(panqRows, hpmRows, universoSize, "week"),
+    month: computeVolumenVendidoPoints(panqRows, hpmRows, universoSize, "month"),
+  };
+}
+
 // ── 5. Cobertura y Comunicación por sector (semanal) ───────────────
 // Ver decisión #11: no hay datos reales de campañas de comunicación ni
 // metas por ciudad, así que se usa un proxy con datos existentes.

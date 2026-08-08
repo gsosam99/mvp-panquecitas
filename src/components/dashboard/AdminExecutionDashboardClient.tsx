@@ -34,7 +34,6 @@ import {
   grupoVendedorOptions,
   oficinaLabel,
   tipoClienteOptions,
-  unidadesTotales,
   type AdminPdvRow,
   type AdminVisitSnapshot,
   type OficinaFilter,
@@ -209,7 +208,7 @@ export function AdminExecutionDashboardClient({
         <KpiCard
           title="% Clientes que compraron"
           value={`${kpis.compraron.pct}%`}
-          subtitle={`${kpis.compraron.count} de ${kpis.compraron.total} con pedido o factura en SAP`}
+          subtitle={`${kpis.compraron.count} de ${kpis.compraron.total} con venta en el Radar de Panquecitas`}
         />
         <KpiCard
           title="% Precio correcto por zona"
@@ -223,10 +222,9 @@ export function AdminExecutionDashboardClient({
           subtitle={`${kpis.materialPop.count} de ${kpis.materialPop.total} PDVs visitados`}
         />
         <KpiCard
-          title="Clientes en riesgo de stock out"
-          value={String(kpis.riesgoStockOut.count)}
-          subtitle={`Menos de ${STOCK_OUT_UMBRAL_UNIDADES} unidades entre anaquel y depósito`}
-          critical={kpis.riesgoStockOut.count > 0}
+          title="Clientes Sin ventas en SAP"
+          value={String(sinVenta.length)}
+          subtitle="Cartera inicial sin venta en el Radar de Panquecitas"
         />
         <KpiCard
           title="% Cobertura de mercaderista"
@@ -442,35 +440,9 @@ export function AdminExecutionDashboardClient({
           </CardContent>
         </Card>
 
-        <Card className="mb-6">
-          <CardHeader>
-            <CardTitle>5. Clientes en riesgo de stock out</CardTitle>
-            <p className="text-xs text-slate-400 mt-1">
-              Menos de {STOCK_OUT_UMBRAL_UNIDADES} unidades sumando anaquel y depósito en la última visita.
-            </p>
-          </CardHeader>
-          <CardContent>
-            <IndicatorTable
-              rows={riesgoStockOut.map((r) => {
-                const detalle = `${r.unidadesAnaquel ?? 0} u. en anaquel + ${r.unidadesDeposito} u. en depósito${
-                  r.depositAccess === false ? " (sin acceso al depósito)" : ""
-                }`;
-                return toRow(
-                  r,
-                  <Badge variant={unidadesTotales(r) === 0 ? "destructive" : "outline"}>{detalle}</Badge>,
-                  detalle
-                );
-              })}
-              extraLabel="Inventario"
-              exportName="Clientes en riesgo de stock out"
-              emptyMessage="Ningún PDV visitado está por debajo del umbral de inventario."
-            />
-          </CardContent>
-        </Card>
-
         <Card className="mb-8">
           <CardHeader>
-            <CardTitle>6. Exhibición del producto</CardTitle>
+            <CardTitle>5. Exhibición del producto</CardTitle>
             <p className="text-xs text-slate-400 mt-1">
               Hipermercados, supermercados, distribuidores y mayoristas se evalúan por caras frontales (mínimo{" "}
               {CARAS_FRONTALES_MINIMO}); el resto de los formatos, por presencia del producto.
