@@ -135,6 +135,17 @@ export async function getTotalToneladasPedidas(sector?: Sector): Promise<number>
   return Math.round((pedidaKgTotal / 1000) * 100) / 100;
 }
 
+// El Radar de Harina PAN (HPM) del perfil DIENN solo cuenta a partir de esta
+// fecha (decisión con Alejandro): las cargas de HPM anteriores no se toman en
+// cuenta, ni en el volumen acumulado ni en los gráficos. NO aplica a
+// Panquecitas, que se cuenta completo. `date_of_sale` viene como ISO
+// (YYYY-MM-DD…), así que la comparación de strings es correcta.
+const HPM_RADAR_DESDE = "2026-08-03";
+
+function esHpmVigente(productId: string, dateOfSale: string): boolean {
+  return productId !== PRODUCT_IDS.HARINA_PAN || dateOfSale >= HPM_RADAR_DESDE;
+}
+
 // "Volumen de venta acumulada en radar" = lo despachado/facturado real que
 // trae "Carga Radar" (sap_sell_in_records) — el número real de toneladas
 // vendidas y despachadas a clientes de la cartera del piloto. Separado por
@@ -149,15 +160,22 @@ export async function getVolumenRadarAcumulado(sector?: Sector): Promise<Volumen
   const supabase = createSupabaseServiceClient();
   const { data } = await supabase
     .from("sap_sell_in_records")
-    .select("quantity_kg, location_id, product_id")
+    .select("quantity_kg, location_id, product_id, date_of_sale")
     .in("product_id", [PRODUCT_IDS.PANQUECITAS, PRODUCT_IDS.HARINA_PAN]);
 
   let panquecitasKg = 0;
   let harinaPanKg = 0;
-  for (const r of (data ?? []) as { quantity_kg: number; location_id: string; product_id: string }[]) {
+  for (const r of (data ?? []) as {
+    quantity_kg: number;
+    location_id: string;
+    product_id: string;
+    date_of_sale: string;
+  }[]) {
     if (!ids.has(r.location_id)) continue;
     if (r.product_id === PRODUCT_IDS.PANQUECITAS) panquecitasKg += r.quantity_kg;
-    else if (r.product_id === PRODUCT_IDS.HARINA_PAN) harinaPanKg += r.quantity_kg;
+    // HPM: solo cargas a partir de HPM_RADAR_DESDE (ver nota arriba).
+    else if (r.product_id === PRODUCT_IDS.HARINA_PAN && esHpmVigente(r.product_id, r.date_of_sale))
+      harinaPanKg += r.quantity_kg;
   }
   return {
     panquecitasTon: Math.round((panquecitasKg / 1000) * 100) / 100,
@@ -403,6 +421,8 @@ export async function getPanVsHarinaPan(
 
   const rows = ((data ?? []) as { location_id: string; product_id: string; quantity_kg: number; date_of_sale: string }[])
     .filter((r) => ids.has(r.location_id))
+    // HPM solo cuenta desde HPM_RADAR_DESDE; Panquecitas, completo.
+    .filter((r) => esHpmVigente(r.product_id, r.date_of_sale))
     .map((r) => ({ product_id: r.product_id, date: r.date_of_sale, kg: r.quantity_kg }));
 
   if (rows.length === 0) return empty;
@@ -631,7 +651,8 @@ export async function getVolumenVendido(
     .filter((r) => r.product_id === PRODUCT_IDS.PANQUECITAS)
     .map((r) => ({ location_id: r.location_id, date_of_sale: r.date_of_sale, quantity_kg: r.quantity_kg }));
   const hpmRows = rows
-    .filter((r) => r.product_id === PRODUCT_IDS.HARINA_PAN)
+    // HPM solo cuenta desde HPM_RADAR_DESDE (ver nota en HPM_RADAR_DESDE).
+    .filter((r) => r.product_id === PRODUCT_IDS.HARINA_PAN && esHpmVigente(r.product_id, r.date_of_sale))
     .map((r) => ({ date_of_sale: r.date_of_sale, quantity_kg: r.quantity_kg }));
 
   if (panqRows.length === 0 && hpmRows.length === 0) return empty;
