@@ -5,7 +5,7 @@ import { KpiCard } from "@/components/dashboard/KpiCard";
 import { IndicatorTable, type IndicatorTableRow } from "@/components/dashboard/IndicatorTable";
 import { ClientesActivadosChart } from "@/components/dashboard/ClientesActivadosChart";
 import { EjecucionSemanalChart } from "@/components/dashboard/EjecucionSemanalChart";
-import { RiesgoStockOutSemanalChart } from "@/components/dashboard/RiesgoStockOutSemanalChart";
+import { ExportExcelButton } from "@/components/dashboard/ExportExcelButton";
 import { RoundLegend } from "@/components/dashboard/RoundLegend";
 import { ReportPrintButton } from "@/components/dashboard/ReportPrintButton";
 import { ReportPrintHeader } from "@/components/dashboard/ReportPrintHeader";
@@ -16,7 +16,6 @@ import { SECTOR_LABELS, type Sector } from "@/lib/sectors";
 import type { Location } from "@/types";
 import {
   CARAS_FRONTALES_MINIMO,
-  STOCK_OUT_UMBRAL_UNIDADES,
   clientesConVentaSap,
   clientesExhibicionDeficiente,
   clientesFaltaPorVisitar,
@@ -27,7 +26,6 @@ import {
   computeActivacionSemanal,
   computeAdminKpis,
   computeEjecucionSemanal,
-  computeRiesgoStockOutSemanal,
   desviado400,
   desviado800,
   filterAdminRows,
@@ -106,10 +104,6 @@ export function AdminExecutionDashboardClient({
   const ejecucionSemanal = useMemo(
     () => computeEjecucionSemanal(visits, locationsById, targetsByLocation, allowedLocationIds),
     [visits, locationsById, targetsByLocation, allowedLocationIds]
-  );
-  const riesgoStockOutSemanal = useMemo(
-    () => computeRiesgoStockOutSemanal(visits, allowedLocationIds),
-    [visits, allowedLocationIds]
   );
 
   const sinVenta = useMemo(() => clientesSinVentaSap(filtered), [filtered]);
@@ -235,12 +229,23 @@ export function AdminExecutionDashboardClient({
 
       {/* ── Gráfico: activación de clientes en el tiempo ──────────────── */}
       <Card className="mb-6 print-avoid-break">
-        <CardHeader>
-          <CardTitle>Activación de clientes en el tiempo</CardTitle>
-          <p className="text-xs text-slate-400 mt-1">
-            % acumulado de la cartera (según los filtros vigentes) con al menos una venta facturada en SAP, semana a
-            semana.
-          </p>
+        <CardHeader className="flex flex-row items-start justify-between gap-3 space-y-0">
+          <div>
+            <CardTitle>Activación de clientes en el tiempo</CardTitle>
+            <p className="text-xs text-slate-400 mt-1">
+              % acumulado de la cartera (según los filtros vigentes) con al menos una venta facturada en SAP, semana a
+              semana.
+            </p>
+          </div>
+          <ExportExcelButton
+            filename="datos_activacion_clientes"
+            rows={activacion}
+            columns={[
+              { header: "Semana", value: (r) => r.label },
+              { header: "% Activación", value: (r) => r.pct },
+              { header: "# Clientes activados", value: (r) => r.count },
+            ]}
+          />
         </CardHeader>
         <CardContent>
           {activacion.length > 0 ? (
@@ -258,12 +263,23 @@ export function AdminExecutionDashboardClient({
 
       {/* ── Gráfico: % Material POP y % Precio correcto por semana ────── */}
       <Card className="mb-6 print-avoid-break">
-        <CardHeader>
-          <CardTitle>Ejecución por semana de auditoría (POP y Precio)</CardTitle>
-          <p className="text-xs text-slate-400 mt-1 mb-2">
-            % de clientes visitados esa semana con material POP y con precio correcto según su zona.
-          </p>
-          <RoundLegend />
+        <CardHeader className="flex flex-row items-start justify-between gap-3 space-y-0">
+          <div>
+            <CardTitle>Ejecución por semana de auditoría (POP y Precio)</CardTitle>
+            <p className="text-xs text-slate-400 mt-1 mb-2">
+              % de clientes visitados esa semana con material POP y con precio correcto según su zona.
+            </p>
+            <RoundLegend />
+          </div>
+          <ExportExcelButton
+            filename="datos_ejecucion_semanal"
+            rows={ejecucionSemanal}
+            columns={[
+              { header: "Semana", value: (r) => r.label },
+              { header: "% Material POP", value: (r) => r.popPct },
+              { header: "% Precio correcto", value: (r) => r.precioPct },
+            ]}
+          />
         </CardHeader>
         <CardContent>
           {ejecucionSemanal.length > 0 ? (
@@ -272,30 +288,6 @@ export function AdminExecutionDashboardClient({
             <div className="h-[280px] flex items-center justify-center text-slate-400">
               <div className="text-center">
                 <p className="text-4xl mb-2">📊</p>
-                <p>Sin visitas registradas todavía en ninguna semana de auditoría (S2/S4/S6/S8).</p>
-              </div>
-            </div>
-          )}
-        </CardContent>
-      </Card>
-
-      {/* ── Gráfico: riesgo de stock-out en el tiempo ──────────────────── */}
-      <Card className="mb-6 print-avoid-break">
-        <CardHeader>
-          <CardTitle>Riesgo de stock-out en el tiempo</CardTitle>
-          <p className="text-xs text-slate-400 mt-1 mb-2">
-            Clientes con menos de {STOCK_OUT_UMBRAL_UNIDADES} unidades entre anaquel y depósito, al cierre de cada
-            semana de auditoría (acumulado: usa la última visita conocida de cada PDV hasta esa fecha).
-          </p>
-          <RoundLegend />
-        </CardHeader>
-        <CardContent>
-          {riesgoStockOutSemanal.length > 0 ? (
-            <RiesgoStockOutSemanalChart data={riesgoStockOutSemanal} />
-          ) : (
-            <div className="h-[280px] flex items-center justify-center text-slate-400">
-              <div className="text-center">
-                <p className="text-4xl mb-2">📉</p>
                 <p>Sin visitas registradas todavía en ninguna semana de auditoría (S2/S4/S6/S8).</p>
               </div>
             </div>

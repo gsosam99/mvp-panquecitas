@@ -8,7 +8,6 @@ import { ReportPrintHeader } from "@/components/dashboard/ReportPrintHeader";
 import { CoberturaComunicacionChart } from "@/components/dashboard/CoberturaComunicacionChart";
 import { DemandaInsatisfechaChart } from "@/components/dashboard/DemandaInsatisfechaChart";
 import { VentaRecompraActivacionChart } from "@/components/dashboard/VentaRecompraActivacionChart";
-import { VentaActivacionChart } from "@/components/dashboard/VentaActivacionChart";
 import { VolumenHpmChart } from "@/components/dashboard/VolumenHpmChart";
 import { PanVsHarinaPanChart } from "@/components/dashboard/PanVsHarinaPanChart";
 import { RoundLegend } from "@/components/dashboard/RoundLegend";
@@ -120,7 +119,6 @@ export function DiennDashboardClient({
   const [granularity, setGranularity] = useState<TimeGranularity>("week");
   const [comboGranularity, setComboGranularity] = useState<TimeGranularity>("week");
   const [hpmGranularity, setHpmGranularity] = useState<TimeGranularity>("week");
-  const [ventaActGranularity, setVentaActGranularity] = useState<TimeGranularity>("week");
   const [panPoblacion, setPanPoblacion] = useState<PanComparisonPoblacion>("clientes");
   const [panGranularity, setPanGranularity] = useState<PanComparisonGranularity>("month");
   const bundle = bundles[filter];
@@ -149,7 +147,6 @@ export function DiennDashboardClient({
 
   const comboPoints = bundle.ventaRecompraActivacion[comboGranularity];
   const hpmPoints = bundle.volumenVendido[hpmGranularity];
-  const ventaActPoints = bundle.volumenVendido[ventaActGranularity];
 
   const filtroTexto = filter === "TOTAL" ? "Total sectores piloto" : sectorLabels[filter];
 
@@ -337,6 +334,15 @@ export function DiennDashboardClient({
                 </button>
               ))}
             </div>
+            <ExportExcelButton
+              filename="datos_panquecitas_vs_harina_pan"
+              rows={panPoints}
+              columns={[
+                { header: "Período", value: (r) => r.label },
+                { header: "Panquecitas (kg)", value: (r) => r.panquecitasKg },
+                { header: "Harina PAN (kg)", value: (r) => r.harinaPanKg },
+              ]}
+            />
           </div>
         </CardHeader>
         <CardContent>
@@ -376,12 +382,24 @@ export function DiennDashboardClient({
 
       {/* ── Demanda Insatisfecha (Pedido / Facturado / Radar acumulados) ─── */}
       <Card className="mb-6 print-avoid-break">
-        <CardHeader>
-          <CardTitle>Demanda Insatisfecha (venta acumulada)</CardTitle>
-          <p className="text-xs text-slate-400 mt-1">
-            Pedido, Facturado y Radar de Panquecitas, acumulados en el tiempo. La brecha entre Pedido y las otras
-            dos líneas es la demanda que todavía no se resuelve — si se mantiene o si se estabiliza.
-          </p>
+        <CardHeader className="flex flex-row items-start justify-between gap-3 space-y-0">
+          <div>
+            <CardTitle>Demanda Insatisfecha (venta acumulada)</CardTitle>
+            <p className="text-xs text-slate-400 mt-1">
+              Pedido, Facturado y Radar de Panquecitas, acumulados en el tiempo. La brecha entre Pedido y las otras
+              dos líneas es la demanda que todavía no se resuelve — si se mantiene o si se estabiliza.
+            </p>
+          </div>
+          <ExportExcelButton
+            filename="datos_demanda_insatisfecha"
+            rows={bundle.demandaInsatisfecha[granularity]}
+            columns={[
+              { header: "Período", value: (r) => r.label },
+              { header: "Pedido (kg)", value: (r) => r.pedidoKg },
+              { header: "Facturado (kg)", value: (r) => r.facturadoKg },
+              { header: "Radar (kg)", value: (r) => r.radarKg },
+            ]}
+          />
         </CardHeader>
         <CardContent>
           {bundle.demandaInsatisfecha[granularity].length > 0 ? (
@@ -407,18 +425,30 @@ export function DiennDashboardClient({
               clientes sobre la cartera fija de 358.
             </p>
           </div>
-          <div className="flex rounded-lg border border-slate-200 overflow-hidden text-xs font-medium print:hidden">
-            {GRANULARITY_OPTIONS.map((opt) => (
-              <button
-                key={opt.key}
-                onClick={() => setComboGranularity(opt.key)}
-                className={`px-3 py-1.5 transition-colors ${
-                  comboGranularity === opt.key ? "bg-slate-900 text-white" : "bg-white text-slate-500 hover:bg-slate-50"
-                }`}
-              >
-                {opt.label}
-              </button>
-            ))}
+          <div className="flex flex-wrap items-center gap-2 print:hidden">
+            <div className="flex rounded-lg border border-slate-200 overflow-hidden text-xs font-medium">
+              {GRANULARITY_OPTIONS.map((opt) => (
+                <button
+                  key={opt.key}
+                  onClick={() => setComboGranularity(opt.key)}
+                  className={`px-3 py-1.5 transition-colors ${
+                    comboGranularity === opt.key ? "bg-slate-900 text-white" : "bg-white text-slate-500 hover:bg-slate-50"
+                  }`}
+                >
+                  {opt.label}
+                </button>
+              ))}
+            </div>
+            <ExportExcelButton
+              filename="datos_venta_recompra_activacion"
+              rows={comboPoints}
+              columns={[
+                { header: "Período", value: (r) => r.label },
+                { header: "Venta acumulada (kg)", value: (r) => r.ventaAcumuladaKg },
+                { header: "Tasa de recompra (%)", value: (r) => r.recompraPct },
+                { header: "Activación (%)", value: (r) => r.activacionPct },
+              ]}
+            />
           </div>
         </CardHeader>
         <CardContent>
@@ -444,18 +474,28 @@ export function DiennDashboardClient({
               Volumen de Harina PAN vendido por período, a partir del Radar de HPM.
             </p>
           </div>
-          <div className="flex rounded-lg border border-slate-200 overflow-hidden text-xs font-medium print:hidden">
-            {GRANULARITY_OPTIONS.map((opt) => (
-              <button
-                key={opt.key}
-                onClick={() => setHpmGranularity(opt.key)}
-                className={`px-3 py-1.5 transition-colors ${
-                  hpmGranularity === opt.key ? "bg-slate-900 text-white" : "bg-white text-slate-500 hover:bg-slate-50"
-                }`}
-              >
-                {opt.label}
-              </button>
-            ))}
+          <div className="flex flex-wrap items-center gap-2 print:hidden">
+            <div className="flex rounded-lg border border-slate-200 overflow-hidden text-xs font-medium">
+              {GRANULARITY_OPTIONS.map((opt) => (
+                <button
+                  key={opt.key}
+                  onClick={() => setHpmGranularity(opt.key)}
+                  className={`px-3 py-1.5 transition-colors ${
+                    hpmGranularity === opt.key ? "bg-slate-900 text-white" : "bg-white text-slate-500 hover:bg-slate-50"
+                  }`}
+                >
+                  {opt.label}
+                </button>
+              ))}
+            </div>
+            <ExportExcelButton
+              filename="datos_volumen_hpm"
+              rows={hpmPoints}
+              columns={[
+                { header: "Período", value: (r) => r.label },
+                { header: "Volumen HPM (kg)", value: (r) => r.hpmKg },
+              ]}
+            />
           </div>
         </CardHeader>
         <CardContent>
@@ -472,53 +512,28 @@ export function DiennDashboardClient({
         </CardContent>
       </Card>
 
-      {/* ── Volumen de venta Panquecitas vs Activación (combo, por período) ─── */}
-      <Card className="mb-6 print-avoid-break">
-        <CardHeader className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between space-y-0">
-          <div>
-            <CardTitle>Volumen de venta Panquecitas vs Activación</CardTitle>
-            <p className="text-xs text-slate-400 mt-1">
-              Barras: volumen de venta de Panquecitas por período (Radar). Línea (eje derecho, %): evolución del % de
-              activación de clientes.
-            </p>
-          </div>
-          <div className="flex rounded-lg border border-slate-200 overflow-hidden text-xs font-medium print:hidden">
-            {GRANULARITY_OPTIONS.map((opt) => (
-              <button
-                key={opt.key}
-                onClick={() => setVentaActGranularity(opt.key)}
-                className={`px-3 py-1.5 transition-colors ${
-                  ventaActGranularity === opt.key ? "bg-slate-900 text-white" : "bg-white text-slate-500 hover:bg-slate-50"
-                }`}
-              >
-                {opt.label}
-              </button>
-            ))}
-          </div>
-        </CardHeader>
-        <CardContent>
-          {ventaActPoints.length > 0 ? (
-            <VentaActivacionChart data={ventaActPoints} />
-          ) : (
-            <div className="h-[320px] flex items-center justify-center text-slate-400">
-              <div className="text-center">
-                <p className="text-4xl mb-2">📈</p>
-                <p>Sin datos de Radar de Panquecitas todavía.</p>
-              </div>
-            </div>
-          )}
-        </CardContent>
-      </Card>
-
       {/* ── Gráfico 2: Cobertura y Comunicación por Ciudad ────────────────── */}
       <Card className="mb-6 print-avoid-break">
-        <CardHeader>
-          <CardTitle>Cobertura y Comunicación por Ciudad (% vs Universo)</CardTitle>
-          <p className="text-xs text-slate-400 mt-1 mb-2">
-            Proxy con datos disponibles: cobertura = % PDV visitados; comunicación = % PDV con material POP.
-            {granularity === "month" && " Las rondas de auditoría no se distinguen en vista mensual — cambia a Día o Semana."}
-          </p>
-          <RoundLegend />
+        <CardHeader className="flex flex-row items-start justify-between gap-3 space-y-0">
+          <div>
+            <CardTitle>Cobertura y Comunicación por Ciudad (% vs Universo)</CardTitle>
+            <p className="text-xs text-slate-400 mt-1 mb-2">
+              Proxy con datos disponibles: cobertura = % PDV visitados; comunicación = % PDV con material POP.
+              {granularity === "month" && " Las rondas de auditoría no se distinguen en vista mensual — cambia a Día o Semana."}
+            </p>
+            <RoundLegend />
+          </div>
+          <ExportExcelButton
+            filename="datos_cobertura_comunicacion"
+            rows={coberturaComunicacion[granularity]}
+            columns={[
+              { header: "Período", value: (r) => r.label },
+              ...scatterSectors.flatMap((s) => [
+                { header: `Cobertura ${sectorLabels[s]} (%)`, value: (r: CoberturaComunicacionPoint) => r[`${s}_cobertura`] },
+                { header: `Comunicación ${sectorLabels[s]} (%)`, value: (r: CoberturaComunicacionPoint) => r[`${s}_comunicacion`] },
+              ]),
+            ]}
+          />
         </CardHeader>
         <CardContent>
           {coberturaComunicacion[granularity].length > 0 ? (
@@ -592,6 +607,16 @@ export function DiennDashboardClient({
               </button>
             ))}
           </div>
+          <ExportExcelButton
+            filename="datos_sell_in_sell_out"
+            rows={sellOutPorRonda}
+            columns={[
+              { header: "Ronda", value: (r) => r.roundLabel },
+              { header: "Sell-In (kg)", value: (r) => r.sellInKg },
+              { header: "Sell-Out (kg)", value: (r) => r.sellOutKg },
+              { header: "Inventario promedio (kg)", value: (r) => r.inventarioPromedioKg },
+            ]}
+          />
         </div>
       </div>
 

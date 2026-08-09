@@ -340,44 +340,6 @@ export function computeEjecucionSemanal(
   return points;
 }
 
-export interface RiesgoStockOutPoint {
-  label: string;
-  /** Color fijo de la ronda (ver CAMPAIGN_WEEKS) — mismo color en todos los gráficos que usan rondas. */
-  color: string;
-  count: number;
-}
-
-/**
- * Clientes en riesgo de stock-out "al cierre" de cada semana de auditoría
- * (S2/S4/S6/S8): usa la última visita conocida de cada PDV hasta esa fecha
- * (acumulado, no solo las visitas de esa semana puntual) — así un cliente
- * visitado en S2 y no revisitado en S4 sigue contando con su dato de S2.
- */
-export function computeRiesgoStockOutSemanal(
-  visits: AdminVisitSnapshot[],
-  allowedLocationIds: Set<string>
-): RiesgoStockOutPoint[] {
-  const points: RiesgoStockOutPoint[] = [];
-  for (const week of CAMPAIGN_WEEKS) {
-    const upToClose = visits.filter((v) => v.createdAt.slice(0, 10) <= week.end && allowedLocationIds.has(v.locationId));
-    if (upToClose.length === 0) continue;
-
-    const lastByLocation = new Map<string, AdminVisitSnapshot>();
-    for (const v of upToClose) {
-      const prev = lastByLocation.get(v.locationId);
-      if (!prev || v.createdAt > prev.createdAt) lastByLocation.set(v.locationId, v);
-    }
-
-    let count = 0;
-    for (const v of lastByLocation.values()) {
-      const total = (v.unidadesAnaquel ?? 0) + v.unidadesDeposito;
-      if (total < STOCK_OUT_UMBRAL_UNIDADES) count++;
-    }
-    points.push({ label: week.label, color: week.color, count });
-  }
-  return points;
-}
-
 export function computeActivacionSemanal(rows: AdminPdvRow[]): ActivacionPoint[] {
   const total = rows.length;
   if (total === 0) return [];
