@@ -3,6 +3,7 @@
 // Components — ver src/lib/sellout-queries.ts, que las usa junto con
 // computeSellOut() (server-only, hace las consultas a Supabase).
 import { VARIANT_IDS } from "@/data/catalog";
+import { DIAS_HABILES_POR_QUINCENA } from "@/lib/business-days";
 import type { Location } from "@/types";
 
 export type Presentacion = "400g" | "800g";
@@ -104,9 +105,10 @@ export function computeRotacion(records: SellOutRecord[]): RotacionResult {
   const invPromedio =
     invPromEntries.length > 0 ? invPromEntries.reduce((s, r) => s + r.inventarioPromedioKg, 0) / invPromEntries.length : 0;
 
-  // Días cubiertos por ronda (≈14 días entre rondas) × número de pares con dato.
+  // Días HÁBILES cubiertos por ronda (≈10 días hábiles entre rondas, excluyendo
+  // fines de semana) × número de pares con dato. Ver business-days.ts.
   const pares = new Set(records.map((r) => r.roundIndex)).size;
-  const diasTotales = pares * 14;
+  const diasTotales = pares * DIAS_HABILES_POR_QUINCENA;
   const kgPorDia = diasTotales > 0 ? totalSellOut / diasTotales : 0;
 
   return {

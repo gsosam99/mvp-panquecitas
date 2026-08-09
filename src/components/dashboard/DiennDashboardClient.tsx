@@ -148,6 +148,15 @@ export function DiennDashboardClient({
   const comboPoints = bundle.ventaRecompraActivacion[comboGranularity];
   const hpmPoints = bundle.volumenVendido[hpmGranularity];
 
+  // Proporción de volumen Panquecitas sobre Harina PAN (Radar) — solo se
+  // muestra como acotación en la tarjeta de volumen de Panquecitas.
+  const proporcionPanqVsHpm =
+    bundle.volumenRadarAcumulado.harinaPanTon > 0
+      ? Math.round(
+          (bundle.volumenRadarAcumulado.panquecitasTon / bundle.volumenRadarAcumulado.harinaPanTon) * 1000
+        ) / 10
+      : 0;
+
   const filtroTexto = filter === "TOTAL" ? "Total sectores piloto" : sectorLabels[filter];
 
   return (
@@ -198,12 +207,15 @@ export function DiennDashboardClient({
         ))}
       </div>
 
-      {/* ── Tarjetas de KPIs dinámicos ─────────────────────────────────── */}
-      <div className="grid grid-cols-1 md:grid-cols-4 gap-4 mb-6 print-avoid-break">
+      {/* ── BLOQUE 1 · Tarjetas principales (KPI) ─────────────────────── */}
+      <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mb-6 print-avoid-break">
         <KpiCard
           title="Vol. acumulado en radar — Panquecitas"
           value={`${bundle.volumenRadarAcumulado.panquecitasTon.toLocaleString("es-VE", { maximumFractionDigits: 2 })} Ton`}
-          annotation={`Penetración ${bundle.penetracionRadarVsHpm.radarPanquecitasPct}%`}
+          annotation={[
+            `Activación de cliente ${bundle.penetracionRadarVsHpm.radarPanquecitasPct}%`,
+            `Proporción vs Harina PAN ${proporcionPanqVsHpm}%`,
+          ]}
           subtitle="Confirmado en anaquel — solo Carga Radar"
           product="panquecitas"
         />
@@ -211,84 +223,15 @@ export function DiennDashboardClient({
         <KpiCard
           title="Vol. acumulado en radar — Harina PAN"
           value={`${bundle.volumenRadarAcumulado.harinaPanTon.toLocaleString("es-VE", { maximumFractionDigits: 2 })} Ton`}
-          annotation={`Penetración ${bundle.penetracionRadarVsHpm.hpmPct}%`}
+          annotation={`Activación de cliente ${bundle.penetracionRadarVsHpm.hpmPct}%`}
           subtitle="Confirmado en anaquel — solo Carga Radar"
           product="pan"
         />
 
-        <Card>
-          <CardContent className="pt-5">
-            <p className="text-xs font-semibold uppercase tracking-widest mb-2 text-muted-foreground">
-              Running de Ventas
-            </p>
-            <div className="space-y-1 text-sm">
-              <div className="flex justify-between">
-                <span className="text-slate-500">Kg / sem</span>
-                <span className="font-bold text-slate-900">
-                  {bundle.runningVentas.kgPerWeek.toLocaleString("es-VE", { maximumFractionDigits: 1 })}
-                </span>
-              </div>
-              <div className="flex justify-between">
-                <span className="text-slate-500">Días de inv.</span>
-                <span className="font-bold text-slate-900">{bundle.runningVentas.diasInventario}</span>
-              </div>
-              <div className="flex justify-between">
-                <span className="text-slate-500">Ton → {bundle.runningVentas.proyeccionMeses} meses</span>
-                <span className="font-bold text-slate-900">
-                  {bundle.runningVentas.proyeccionToneladas.toLocaleString("es-VE", { maximumFractionDigits: 2 })}
-                </span>
-              </div>
-            </div>
-          </CardContent>
-        </Card>
-
-        <Card>
-          <CardContent className="pt-5">
-            <p className="text-xs font-semibold uppercase tracking-widest mb-2 text-muted-foreground">
-              Mix de Producto
-            </p>
-            {mixProducto.every((m) => m.toneladas === 0) ? (
-              <p className="text-sm text-slate-400">
-                Sin Radar por presentación — carga el reporte de Carga Radar
-                (Panquecitas 400g y 800g).
-              </p>
-            ) : (
-              <div className="flex items-baseline gap-4">
-                {mixProducto.map((m) => (
-                  <div key={m.variant}>
-                    <p className="text-2xl font-bold text-slate-900">{m.toneladas} Ton</p>
-                    <p className="text-xs text-slate-500">{m.variant}</p>
-                    <p className="text-xs text-slate-400">{m.pctSobreTotal}% del total Radar</p>
-                  </div>
-                ))}
-              </div>
-            )}
-          </CardContent>
-        </Card>
-      </div>
-
-      <div className="grid grid-cols-2 md:grid-cols-4 gap-4 mb-6 print-avoid-break">
         <KpiCard
           title="Índice Tienda Ideal"
           value={`${tiendaIdeal.pct}%`}
           subtitle={`${tiendaIdeal.cumplen} de ${tiendaIdeal.total} PDVs (sectores piloto)`}
-        />
-        <KpiCard
-          title="Tasa de Conversión — Degustaciones"
-          value={`${conversionDegustaciones.rate}%`}
-          subtitle={`${conversionDegustaciones.conversions} de ${conversionDegustaciones.samples} tickets`}
-          product="panquecitas"
-        />
-        <KpiCard
-          title="Rotación Total"
-          value={`${(rotacion.rotacionTotalKg / 1000).toLocaleString("es-VE", { maximumFractionDigits: 2 })} Ton`}
-          subtitle="Sell-Out acumulado (calculado + reportado)"
-          product="panquecitas"
-        />
-        <KpiCard
-          title="Días de Inventario en Calle"
-          value={`${rotacion.diasInventarioEnCalle}`}
-          subtitle="Inventario promedio ÷ ritmo de Sell-Out"
         />
       </div>
 
@@ -639,6 +582,80 @@ export function DiennDashboardClient({
         </CardContent>
       </Card>
 
+      <Separator className="mb-4 print:hidden" />
+
+      {/* ── BLOQUE 3 · Métricas complementarias (tarjetas restantes) ────── */}
+      <h2 className="text-lg font-bold text-slate-900 mb-3 print:hidden">Métricas complementarias</h2>
+      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4 mb-6 print-avoid-break">
+        <Card>
+          <CardContent className="pt-5">
+            <p className="text-xs font-semibold uppercase tracking-widest mb-2 text-muted-foreground">
+              Running de Ventas
+            </p>
+            <div className="space-y-1 text-sm">
+              <div className="flex justify-between">
+                <span className="text-slate-500">Kg / sem</span>
+                <span className="font-bold text-slate-900">
+                  {bundle.runningVentas.kgPerWeek.toLocaleString("es-VE", { maximumFractionDigits: 1 })}
+                </span>
+              </div>
+              <div className="flex justify-between">
+                <span className="text-slate-500">Días hábiles de inv.</span>
+                <span className="font-bold text-slate-900">{bundle.runningVentas.diasInventario}</span>
+              </div>
+              <div className="flex justify-between">
+                <span className="text-slate-500">Ton → {bundle.runningVentas.proyeccionMeses} meses</span>
+                <span className="font-bold text-slate-900">
+                  {bundle.runningVentas.proyeccionToneladas.toLocaleString("es-VE", { maximumFractionDigits: 2 })}
+                </span>
+              </div>
+            </div>
+          </CardContent>
+        </Card>
+
+        <Card>
+          <CardContent className="pt-5">
+            <p className="text-xs font-semibold uppercase tracking-widest mb-2 text-muted-foreground">
+              Mix de Producto
+            </p>
+            {mixProducto.every((m) => m.toneladas === 0) ? (
+              <p className="text-sm text-slate-400">
+                Sin Radar por presentación — carga el reporte de Carga Radar
+                (Panquecitas 400g y 800g).
+              </p>
+            ) : (
+              <div className="flex items-baseline gap-4">
+                {mixProducto.map((m) => (
+                  <div key={m.variant}>
+                    <p className="text-2xl font-bold text-slate-900">{m.toneladas} Ton</p>
+                    <p className="text-xs text-slate-500">{m.variant}</p>
+                    <p className="text-xs text-slate-400">{m.pctSobreTotal}% del total Radar</p>
+                  </div>
+                ))}
+              </div>
+            )}
+          </CardContent>
+        </Card>
+
+        <KpiCard
+          title="Tasa de Conversión — Degustaciones"
+          value={`${conversionDegustaciones.rate}%`}
+          subtitle={`${conversionDegustaciones.conversions} de ${conversionDegustaciones.samples} tickets`}
+          product="panquecitas"
+        />
+        <KpiCard
+          title="Rotación Total"
+          value={`${(rotacion.rotacionTotalKg / 1000).toLocaleString("es-VE", { maximumFractionDigits: 2 })} Ton`}
+          subtitle="Sell-Out acumulado (calculado + reportado)"
+          product="panquecitas"
+        />
+        <KpiCard
+          title="Días de Inventario en Calle"
+          value={`${rotacion.diasInventarioEnCalle}`}
+          subtitle="Inventario promedio ÷ ritmo de Sell-Out (días hábiles)"
+        />
+      </div>
+
       <Separator className="mb-6 print:hidden" />
 
       {/* ── Tabla: Detalle de Clientes ─────────────────────────────────── */}
@@ -650,7 +667,7 @@ export function DiennDashboardClient({
             rows={bundle.detalleSegmentos}
             columns={[
               { header: "Segmento", value: (r) => r.segmento, width: 30 },
-              { header: "Penetración x seg (%)", value: (r) => r.penetracionPct, width: 22 },
+              { header: "Activación x seg (%)", value: (r) => r.penetracionPct, width: 22 },
               { header: "Recompra x seg (%)", value: (r) => r.recompraPct, width: 22 },
               { header: "% HPM vs Base", value: (r) => r.hpmVsBasePct, width: 18 },
               { header: "% HPM TOTAL", value: (r) => r.hpmTotalPct, width: 18 },
@@ -666,7 +683,7 @@ export function DiennDashboardClient({
                 <TableHeader>
                   <TableRow>
                     <TableHead>Segmento</TableHead>
-                    <TableHead className="text-right">Penetración x seg (%)</TableHead>
+                    <TableHead className="text-right">Activación x seg (%)</TableHead>
                     <TableHead className="text-right">Recompra x seg (%)</TableHead>
                     <TableHead className="text-right">% HPM vs Base</TableHead>
                     <TableHead className="text-right">% HPM TOTAL</TableHead>

@@ -6,8 +6,8 @@ interface KpiCardProps {
   title: string;
   value: string;
   subtitle?: string;
-  /** Acotación destacada bajo el valor (p. ej. la penetración de esta categoría). */
-  annotation?: string;
+  /** Acotación(es) destacada(s) bajo el valor (p. ej. la activación/proporción de esta categoría). */
+  annotation?: string | string[];
   highlight?: boolean;
   critical?: boolean;
   trend?: "up" | "down" | "neutral";
@@ -68,11 +68,12 @@ export function KpiCard({ title, value, subtitle, annotation, highlight, critica
             </span>
           )}
         </div>
-        {annotation && (
-          <p className={`text-sm mt-1 font-semibold ${inverted ? "text-white" : "text-slate-700"}`}>
-            {annotation}
-          </p>
-        )}
+        {annotation &&
+          (Array.isArray(annotation) ? annotation : [annotation]).map((line, i) => (
+            <p key={i} className={`text-sm mt-1 font-semibold ${inverted ? "text-white" : "text-slate-700"}`}>
+              {line}
+            </p>
+          ))}
         {subtitle && (
           <p className={`text-xs mt-1 ${inverted ? "text-white/60" : "text-muted-foreground"}`}>
             {subtitle}

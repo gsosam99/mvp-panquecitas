@@ -1,5 +1,6 @@
 import { createSupabaseServiceClient } from "@/lib/supabase/server";
 import { PRODUCT_IDS, VARIANT_IDS } from "@/data/catalog";
+import { DIAS_HABILES_POR_SEMANA } from "@/lib/business-days";
 import {
   PILOT_SECTORS,
   SECTOR_LABELS,
@@ -184,11 +185,12 @@ export async function getVolumenRadarAcumulado(sector?: Sector): Promise<Volumen
 }
 
 // ── 2. Running de Ventas ──────────────────────────────────────────
-// Kg_Semanal_Promedio = Total_Kg_Vendidos / Numero_Semanas_Evaluadas
-// (fórmula dada en el documento). Días de inventario = inventario
-// actual en depósito (última visita por PDV) / ritmo diario de venta.
-// Proyección: a 3 meses del ritmo semanal actual (horizonte fijo — no
-// especificado en el documento, ver docs/decisiones-implementacion.md).
+// Kg_Semanal_Promedio = Total_Kg_Vendidos / Numero_Semanas_Evaluadas,
+// calculado sobre una VENTANA MÓVIL de los últimos 2 meses de Radar (no
+// sobre todo el histórico). Días de inventario = inventario actual en
+// depósito (última visita por PDV) / ritmo diario de venta, expresado en
+// DÍAS HÁBILES (kg por semana / 5, ver business-days.ts). Proyección: a 2
+// meses del ritmo semanal actual (ver docs/decisiones-implementacion.md).
 
 export interface RunningVentasResult {
   kgPerWeek: number;
@@ -237,7 +239,11 @@ async function getInventarioDepositoKg(sector?: Sector): Promise<number> {
   return totalKg;
 }
 
-const PROYECCION_MESES = 3;
+const PROYECCION_MESES = 2;
+/** Ventana móvil del promedio Running: solo los últimos N meses de Radar. */
+const RUNNING_VENTANA_MESES = 2;
+/** Semanas promedio por mes (calendario) — para proyectar el ritmo semanal. */
+const SEMANAS_POR_MES = 4.345;
 
 export async function getRunningVentas(sector?: Sector): Promise<RunningVentasResult> {
   const supabase = createSupabaseServiceClient();
@@ -248,9 +254,21 @@ export async function getRunningVentas(sector?: Sector): Promise<RunningVentasRe
     .eq("product_id", PRODUCT_IDS.PANQUECITAS)
     .order("date_of_sale");
 
-  const rows = ((data ?? []) as { quantity_kg: number; date_of_sale: string; location_id: string }[]).filter((r) =>
+  const rowsAll = ((data ?? []) as { quantity_kg: number; date_of_sale: string; location_id: string }[]).filter((r) =>
     ids.has(r.location_id)
   );
+
+  // Ventana móvil: solo los últimos RUNNING_VENTANA_MESES desde la última
+  // fecha con Radar (promedio estricto de 2 meses, no de todo el histórico).
+  let rows = rowsAll;
+  if (rowsAll.length > 0) {
+    const lastIso = rowsAll[rowsAll.length - 1].date_of_sale.slice(0, 10);
+    const cutoff = new Date(`${lastIso}T00:00:00Z`);
+    cutoff.setUTCMonth(cutoff.getUTCMonth() - RUNNING_VENTANA_MESES);
+    const cutoffIso = cutoff.toISOString().slice(0, 10);
+    rows = rowsAll.filter((r) => r.date_of_sale.slice(0, 10) >= cutoffIso);
+  }
+
   const totalKg = rows.reduce((s, r) => s + r.quantity_kg, 0);
 
   let numSemanas = 1;
@@ -262,10 +280,12 @@ export async function getRunningVentas(sector?: Sector): Promise<RunningVentasRe
 
   const kgPerWeek = totalKg / numSemanas;
   const inventarioKg = await getInventarioDepositoKg(sector);
-  const kgPerDay = kgPerWeek / 7;
+  // Ritmo diario en DÍAS HÁBILES (L–V): el producto se vende de lunes a
+  // viernes, así que se divide por 5, no por 7. Ver business-days.ts.
+  const kgPerDay = kgPerWeek / DIAS_HABILES_POR_SEMANA;
   const diasInventario = kgPerDay > 0 ? Math.round(inventarioKg / kgPerDay) : 0;
 
-  const proyeccionKg = kgPerWeek * 4.345 * PROYECCION_MESES;
+  const proyeccionKg = kgPerWeek * SEMANAS_POR_MES * PROYECCION_MESES;
 
   return {
     kgPerWeek: Math.round(kgPerWeek * 10) / 10,
