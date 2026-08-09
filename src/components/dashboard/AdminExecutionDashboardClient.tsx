@@ -218,7 +218,7 @@ export function AdminExecutionDashboardClient({
         <KpiCard
           title="Clientes Sin ventas en SAP"
           value={String(sinVenta.length)}
-          subtitle="Cartera inicial sin venta en el Radar de Panquecitas"
+          subtitle="Clientes de la cartera sin venta en el Radar de Panquecitas"
         />
         <KpiCard
           title="% Cobertura de mercaderista"
