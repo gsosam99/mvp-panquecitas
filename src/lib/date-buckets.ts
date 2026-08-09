@@ -41,15 +41,17 @@ export function bucketLabelFor(bucket: string, granularity: TimeGranularity): st
     const mes = MESES_ES[Number(bucket.slice(5, 7)) - 1];
     return mes.charAt(0).toUpperCase() + mes.slice(1);
   }
-  // Semana ISO ("YYYY-Www") → rango lunes-domingo. El lunes de la semana 1
-  // es el lunes de la semana que contiene el 4 de enero (regla ISO 8601).
+  // Semana ISO ("YYYY-Www") → rango lunes-viernes (solo DÍAS HÁBILES; el
+  // producto se vende de L–V, así que la semana se muestra 3–7, no 3–9). El
+  // lunes de la semana 1 es el lunes de la semana que contiene el 4 de enero
+  // (regla ISO 8601).
   const [yyyyStr, wStr] = bucket.split("-W");
   const jan4 = new Date(Date.UTC(Number(yyyyStr), 0, 4));
   const jan4DayNr = (jan4.getUTCDay() + 6) % 7;
   const week1Monday = new Date(jan4.getTime() - jan4DayNr * 86400000);
   const monday = new Date(week1Monday.getTime() + (Number(wStr) - 1) * 7 * 86400000);
-  const sunday = new Date(monday.getTime() + 6 * 86400000);
-  return `${shortDate(monday)} - ${shortDate(sunday)}`;
+  const friday = new Date(monday.getTime() + 4 * 86400000);
+  return `${shortDate(monday)} - ${shortDate(friday)}`;
 }
 
 // ── Día / Semana / Mes / Trimestre ────────────────────────────────
