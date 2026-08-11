@@ -197,9 +197,9 @@ export function clientesFaltaPorVisitar(rows: AdminPdvRow[]): AdminPdvRow[] {
 export interface AdminKpis {
   /** % de la cartera del corte de filtros vigente con venta publicada en el Radar de Panquecitas. */
   compraron: { pct: number; count: number; total: number };
-  /** % de clientes evaluables con el precio de su zona correcto. */
+  /** % de clientes con ventas en SAP evaluables con el precio de su zona correcto. */
   precioCorrecto: { pct: number; count: number; total: number };
-  /** % de clientes visitados con material POP presente. */
+  /** % de clientes con ventas en SAP visitados con material POP presente. */
   materialPop: { pct: number; count: number; total: number };
   /** Clientes con menos de 2 unidades entre anaquel y depósito. */
   riesgoStockOut: { count: number; total: number };
@@ -218,11 +218,16 @@ export function computeAdminKpis(rows: AdminPdvRow[]): AdminKpis {
 
   const compradores = rows.filter((r) => r.comprador).length;
 
-  const evaluables = rows.filter(precioEvaluable);
+  // Ejecución (precio y POP) se mide SOLO sobre clientes con ventas en SAP
+  // (compradores), igual que las listas de incidencias: así la tarjeta y su
+  // lista siempre miden la misma población y cuadran. La cobertura de
+  // mercaderista y "% compraron" sí van sobre toda la cartera del corte.
+  const evaluables = rows.filter((r) => r.comprador && precioEvaluable(r));
   const correctos = evaluables.filter((r) => !precioIncorrecto(r)).length;
 
   const visitados = rows.filter((r) => r.visitado);
-  const conPop = visitados.filter((r) => r.popPresent === true).length;
+  const visitadosCompradores = rows.filter((r) => r.comprador && r.visitado);
+  const conPop = visitadosCompradores.filter((r) => r.popPresent === true).length;
 
   const enRiesgo = clientesRiesgoStockOut(rows).length;
   const faltantes = total - visitados.length;
@@ -233,7 +238,7 @@ export function computeAdminKpis(rows: AdminPdvRow[]): AdminKpis {
     // filtran juntos porque `rows` ya viene recortado por Oficina/Grupo.
     compraron: { pct: pct(compradores, total), count: compradores, total },
     precioCorrecto: { pct: pct(correctos, evaluables.length), count: correctos, total: evaluables.length },
-    materialPop: { pct: pct(conPop, visitados.length), count: conPop, total: visitados.length },
+    materialPop: { pct: pct(conPop, visitadosCompradores.length), count: conPop, total: visitadosCompradores.length },
     riesgoStockOut: { count: enRiesgo, total: visitados.length },
     coberturaMercaderista: { pct: pct(visitados.length, total), count: visitados.length, total },
     faltaPorVisitar: { pct: pct(faltantes, total), count: faltantes, total },
