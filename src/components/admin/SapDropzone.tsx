@@ -108,9 +108,10 @@ export function SapDropzone({ mode, onCommitSuccess }: SapDropzoneProps) {
         duplicates_skipped?: number;
         clientes_fuera_cartera?: number;
         error?: string;
+        detail?: string;
       };
       if (!res.ok) {
-        toast.error(data.error ?? "Error al guardar");
+        toast.error(data.detail ? `${data.error}: ${data.detail}` : (data.error ?? "Error al guardar"));
         setState("previewing");
         return;
       }

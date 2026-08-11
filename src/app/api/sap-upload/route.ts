@@ -28,6 +28,20 @@ function monthKey(dateStr: string): string {
   return dateStr.slice(0, 7); // "YYYY-MM"
 }
 
+// Los errores de supabase-js (PostgrestError) traen message/details/hint/code
+// en vez de un Error normal. Los aplanamos a un string legible para
+// devolverlo en el 500 — esto es una ruta solo-admin (hasDashboardSession),
+// así que exponer el detalle real de la BD ayuda a diagnosticar sin filtrar
+// nada sensible a usuarios finales.
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+function errorDetail(error: any): string {
+  if (error && typeof error === "object") {
+    const parts = [error.message, error.details, error.hint, error.code].filter(Boolean);
+    if (parts.length) return parts.join(" · ");
+  }
+  return String(error);
+}
+
 // Mapa dedupeKey → id de la fila ya existente (para actualizar en vez de
 // duplicar/omitir, reporte "Pedidos y Facturado" — llave por fecha exacta).
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -89,7 +103,10 @@ export async function POST(req: Request) {
     return Response.json({ error: "Formato de reporte desconocido" }, { status: 400 });
   } catch (error) {
     console.error("[POST /api/sap-upload]", error);
-    return Response.json({ error: "Error interno del servidor" }, { status: 500 });
+    return Response.json(
+      { error: "Error interno del servidor", detail: errorDetail(error) },
+      { status: 500 }
+    );
   }
 }
 
@@ -335,15 +352,22 @@ async function handleFacturacionUpload(supabase: any, rows: ParsedSapFacturacion
     }
     const variant_id = SAP_MATERIAL_VARIANT_MAP[row.material_code] ?? null;
 
-    if (row.cantidad_pedido_kg <= 0 && row.cantidad_facturada_kg <= 0) continue; // fila sin datos útiles
+    // La tabla exige cantidad_pedido_kg / cantidad_facturada_kg >= 0 (CHECK
+    // de la migración 010). En el reporte SAP un valor negativo representa un
+    // dato nulo/sin cantidad, así que cuenta como 0. Insertarlo tal cual
+    // violaba el CHECK y hacía fallar TODA la carga con un 500. Se recorta a 0
+    // por columna, de forma independiente entre pedido y facturado.
+    const cantidad_pedido_kg = Math.max(0, row.cantidad_pedido_kg);
+    const cantidad_facturada_kg = Math.max(0, row.cantidad_facturada_kg);
+    if (cantidad_pedido_kg <= 0 && cantidad_facturada_kg <= 0) continue; // fila sin datos útiles
 
     pedidoFacturadoRows.push({
       upload_batch_id: batchId,
       location_id,
       product_id,
       variant_id,
-      cantidad_pedido_kg: row.cantidad_pedido_kg,
-      cantidad_facturada_kg: row.cantidad_facturada_kg,
+      cantidad_pedido_kg,
+      cantidad_facturada_kg,
       fecha: row.fecha,
     });
   }
@@ -412,6 +436,9 @@ export async function DELETE(req: Request) {
     return Response.json({ ok: true });
   } catch (error) {
     console.error("[DELETE /api/sap-upload]", error);
-    return Response.json({ error: "Error interno del servidor" }, { status: 500 });
+    return Response.json(
+      { error: "Error interno del servidor", detail: errorDetail(error) },
+      { status: 500 }
+    );
   }
 }
