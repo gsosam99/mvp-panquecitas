@@ -37,7 +37,10 @@ import type {
   PanComparisonPoblacion,
   PanVsHarinaPanPoint,
   PenetracionRadarVsHpm,
+  MaterialPopPreciadorResult,
   RunningVentasResult,
+  StockOutClientePoint,
+  StockOutResult,
   TimeGranularity,
   VentaRecompraActivacionPoint,
   VolumenRadarAcumulado,
@@ -65,6 +68,10 @@ export interface SectorBundle {
   volumenVendido: Record<TimeGranularity, VolumenVendidoPoint[]>;
   /** Comparativa de penetración Radar Panquecitas vs. HPM sobre la lista objetivo. */
   penetracionRadarVsHpm: PenetracionRadarVsHpm;
+  /** Clientes con venta y ≤3 unidades en tienda, con su ubicación. */
+  stockOut: StockOutResult;
+  /** Ratio de preciador sobre clientes con presencia del producto. */
+  materialPopPreciador: MaterialPopPreciadorResult;
   detalleSegmentos: DetalleSegmentoRow[];
 }
 
@@ -88,6 +95,10 @@ const GRANULARITY_OPTIONS: { key: TimeGranularity; label: string }[] = [
   { key: "week", label: "Semana" },
   { key: "month", label: "Mes" },
 ];
+
+// Espejo del umbral de backend (getStockOut) — dienn-queries es server-only y no
+// puede importarse como valor en este Client Component; solo para mostrar el texto.
+const STOCK_OUT_UMBRAL_DIENN = 3;
 
 interface Props {
   bundles: Record<FilterKey, SectorBundle>;
@@ -119,6 +130,7 @@ export function DiennDashboardClient({
   const [granularity, setGranularity] = useState<TimeGranularity>("week");
   const [comboGranularity, setComboGranularity] = useState<TimeGranularity>("week");
   const [hpmGranularity, setHpmGranularity] = useState<TimeGranularity>("week");
+  const [stockOutOpen, setStockOutOpen] = useState(false);
   const [panPoblacion, setPanPoblacion] = useState<PanComparisonPoblacion>("clientes");
   const [panGranularity, setPanGranularity] = useState<PanComparisonGranularity>("month");
   const bundle = bundles[filter];
@@ -653,7 +665,83 @@ export function DiennDashboardClient({
           value={`${rotacion.diasInventarioEnCalle}`}
           subtitle="Inventario promedio ÷ ritmo de Sell-Out (días hábiles)"
         />
+        <KpiCard
+          title="Clientes en Stock Out"
+          value={String(bundle.stockOut.enStockOut)}
+          subtitle={`≤ ${STOCK_OUT_UMBRAL_DIENN} unidades en tienda · de ${bundle.stockOut.universo} clientes con venta`}
+          critical={bundle.stockOut.enStockOut > 0}
+        />
+        <KpiCard
+          title="Material POP con Preciador"
+          value={bundle.materialPopPreciador.conPresencia > 0 ? `${bundle.materialPopPreciador.ratio}%` : "s/d"}
+          subtitle={`${bundle.materialPopPreciador.conPreciador} de ${bundle.materialPopPreciador.conPresencia} con presencia del producto`}
+          product="panquecitas"
+        />
       </div>
+
+      {/* ── Lista desplegable: Stock Out (con ubicación) ───────────────── */}
+      <Card className="mb-6 print:hidden">
+        <CardHeader className="flex flex-row items-start justify-between gap-3 space-y-0">
+          <button
+            type="button"
+            onClick={() => setStockOutOpen((v) => !v)}
+            className="flex items-center gap-2 text-left"
+          >
+            <span className="text-slate-400">{stockOutOpen ? "▾" : "▸"}</span>
+            <div>
+              <CardTitle>Clientes en Stock Out ({bundle.stockOut.enStockOut})</CardTitle>
+              <p className="text-xs text-slate-400 mt-1">
+                Clientes con venta y ≤ {STOCK_OUT_UMBRAL_DIENN} unidades en tienda (anaquel + depósito; solo anaquel si
+                no hubo acceso al depósito). Incluye la ubicación del producto.
+              </p>
+            </div>
+          </button>
+          <ExportExcelButton
+            filename={`Stock Out — ${filtroTexto}`}
+            rows={bundle.stockOut.clientes}
+            columns={[
+              { header: "Código SAP", value: (r) => r.sapCode ?? "", width: 16 },
+              { header: "Cliente", value: (r) => r.name, width: 34 },
+              { header: "Unidades en tienda", value: (r) => r.unidadesTienda, width: 18 },
+              { header: "Incluye depósito", value: (r) => (r.depositoIncluido ? "Sí" : "No (sin acceso)"), width: 18 },
+              { header: "Ubicación", value: (r) => r.ubicacion, width: 40 },
+            ]}
+          />
+        </CardHeader>
+        {stockOutOpen && (
+          <CardContent className="p-0">
+            {bundle.stockOut.clientes.length === 0 ? (
+              <p className="text-sm text-slate-400 py-6 text-center">
+                Ningún cliente con venta está en stock out (≤ {STOCK_OUT_UMBRAL_DIENN} unidades).
+              </p>
+            ) : (
+              <div className="max-h-[360px] overflow-y-auto">
+                <Table>
+                  <TableHeader>
+                    <TableRow>
+                      <TableHead>Cliente</TableHead>
+                      <TableHead className="text-right">Unidades en tienda</TableHead>
+                      <TableHead>Ubicación</TableHead>
+                    </TableRow>
+                  </TableHeader>
+                  <TableBody>
+                    {bundle.stockOut.clientes.map((c: StockOutClientePoint) => (
+                      <TableRow key={c.locationId}>
+                        <TableCell className="font-medium">{c.name}</TableCell>
+                        <TableCell className="text-right">
+                          {c.unidadesTienda}
+                          {!c.depositoIncluido && <span className="text-xs text-slate-400"> (solo anaquel)</span>}
+                        </TableCell>
+                        <TableCell className="text-slate-500">{c.ubicacion}</TableCell>
+                      </TableRow>
+                    ))}
+                  </TableBody>
+                </Table>
+              </div>
+            )}
+          </CardContent>
+        )}
+      </Card>
 
       <Separator className="mb-6 print:hidden" />
 

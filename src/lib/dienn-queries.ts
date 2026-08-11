@@ -955,5 +955,164 @@ export async function getDemandaInsatisfecha(sector?: Sector): Promise<Record<Ti
   };
 }
 
+// ── 9. Stock Out (DIENN) ────────────────────────────────────────────
+// Clientes CON VENTA (Radar de Panquecitas > 0) cuya cantidad de producto en
+// tienda es ≤ 3 unidades. "En tienda" = anaquel + depósito; si el mercaderista
+// no tuvo acceso al depósito, solo anaquel. Se usa la última visita por PDV.
+// La lista incluye la ubicación (anaquel) donde se encontró/debe ir el producto.
+
+export const STOCK_OUT_UMBRAL_DIENN = 3;
+
+export interface StockOutClientePoint {
+  locationId: string;
+  sapCode: string | null;
+  name: string;
+  unidadesTienda: number;
+  /** true si el total incluye depósito (hubo acceso); false = solo anaquel. */
+  depositoIncluido: boolean;
+  ubicacion: string;
+}
+
+export interface StockOutResult {
+  enStockOut: number;
+  /** Compradores con visita considerados (denominador de contexto). */
+  universo: number;
+  clientes: StockOutClientePoint[];
+}
+
+function formatUbicacionProducto(loc: string[] | null, other: string | null): string {
+  if (!loc || loc.length === 0) return "Sin ubicación registrada";
+  return loc
+    .map((o) => (o === "HARINA_TRIGO" ? "Junto a harina de trigo" : `Junto a otra categoría${other ? ` (${other})` : ""}`))
+    .join(" · ");
+}
+
+export async function getStockOut(sector?: Sector): Promise<StockOutResult> {
+  const empty: StockOutResult = { enStockOut: 0, universo: 0, clientes: [] };
+  const universo = await getUniverseLocations();
+  const universoFiltrado = sector ? universo.filter((l) => sectorGroup(l.oficina_venta) === sector) : universo;
+  const ids = new Set(universoFiltrado.map((l) => l.id));
+  if (ids.size === 0) return empty;
+
+  const supabase = createSupabaseServiceClient();
+
+  // Compradores = Radar de Panquecitas > 0 dentro del universo del corte.
+  const { data: sellInData } = await supabase
+    .from("sap_sell_in_records")
+    .select("location_id")
+    .eq("product_id", PRODUCT_IDS.PANQUECITAS)
+    .gt("quantity_kg", 0);
+  const compradorIds = new Set(
+    ((sellInData ?? []) as { location_id: string }[]).map((r) => r.location_id).filter((id) => ids.has(id))
+  );
+  if (compradorIds.size === 0) return empty;
+
+  // Última visita por PDV comprador.
+  const { data: visitsData } = await supabase
+    .from("mercaderista_visits")
+    .select("id, location_id, created_at, deposit_access, total_units_anaquel, product_location, product_location_other")
+    .order("created_at", { ascending: false });
+
+  type Visita = {
+    id: string;
+    location_id: string;
+    deposit_access: boolean;
+    total_units_anaquel: number | null;
+    product_location: string[] | null;
+    product_location_other: string | null;
+  };
+  const lastVisit = new Map<string, Visita>();
+  for (const v of (visitsData ?? []) as Visita[]) {
+    if (!compradorIds.has(v.location_id)) continue;
+    if (!lastVisit.has(v.location_id)) lastVisit.set(v.location_id, v);
+  }
+
+  // Unidades en depósito (BODEGA) de esas últimas visitas — bultos→unidades.
+  const visitIds = Array.from(lastVisit.values()).map((v) => v.id);
+  const unidadesDepositoByVisit = new Map<string, number>();
+  if (visitIds.length > 0) {
+    const { data: variantsData } = await supabase.from("variants").select("id, units_per_bulk");
+    const unitsPerBulk = new Map(
+      ((variantsData ?? []) as { id: string; units_per_bulk: number }[]).map((v) => [v.id, v.units_per_bulk])
+    );
+    const { data: auditsData } = await supabase
+      .from("inventory_audits")
+      .select("visit_id, variant_id, quantity")
+      .eq("zone", "BODEGA")
+      .in("visit_id", visitIds);
+    for (const a of (auditsData ?? []) as { visit_id: string; variant_id: string; quantity: number }[]) {
+      const unidades = a.quantity * (unitsPerBulk.get(a.variant_id) ?? 1);
+      unidadesDepositoByVisit.set(a.visit_id, (unidadesDepositoByVisit.get(a.visit_id) ?? 0) + unidades);
+    }
+  }
+
+  const locById = new Map(universoFiltrado.map((l) => [l.id, l]));
+  const clientes: StockOutClientePoint[] = [];
+  for (const [locId, v] of lastVisit) {
+    const anaquel = v.total_units_anaquel ?? 0;
+    const deposito = v.deposit_access ? unidadesDepositoByVisit.get(v.id) ?? 0 : 0;
+    const unidadesTienda = anaquel + deposito;
+    if (unidadesTienda <= STOCK_OUT_UMBRAL_DIENN) {
+      const loc = locById.get(locId);
+      clientes.push({
+        locationId: locId,
+        sapCode: loc?.sap_code ?? null,
+        name: loc?.name ?? "",
+        unidadesTienda,
+        depositoIncluido: !!v.deposit_access,
+        ubicacion: formatUbicacionProducto(v.product_location, v.product_location_other),
+      });
+    }
+  }
+  clientes.sort((a, b) => a.unidadesTienda - b.unidadesTienda);
+
+  return { enStockOut: clientes.length, universo: compradorIds.size, clientes };
+}
+
+// ── 10. Material POP con Preciador (DIENN) ──────────────────────────
+// Ratio = clientes con preciador (pop_price_tag) / clientes con presencia del
+// producto (product_present). Ambos de la última visita del mercaderista. El
+// numerador se cuenta dentro de la población con presencia, así el ratio ≤ 100%.
+
+export interface MaterialPopPreciadorResult {
+  ratio: number;
+  conPreciador: number;
+  conPresencia: number;
+}
+
+export async function getMaterialPopPreciador(sector?: Sector): Promise<MaterialPopPreciadorResult> {
+  const empty: MaterialPopPreciadorResult = { ratio: 0, conPreciador: 0, conPresencia: 0 };
+  const ids = await getUniverseLocationIds(sector);
+  if (ids.size === 0) return empty;
+
+  const supabase = createSupabaseServiceClient();
+  const { data: visitsData } = await supabase
+    .from("mercaderista_visits")
+    .select("location_id, created_at, product_present, pop_price_tag")
+    .order("created_at", { ascending: false });
+
+  type Visita = { location_id: string; product_present: boolean; pop_price_tag: boolean | null };
+  const lastVisit = new Map<string, Visita>();
+  for (const v of (visitsData ?? []) as Visita[]) {
+    if (!ids.has(v.location_id)) continue;
+    if (!lastVisit.has(v.location_id)) lastVisit.set(v.location_id, v);
+  }
+
+  let conPresencia = 0;
+  let conPreciador = 0;
+  for (const v of lastVisit.values()) {
+    if (v.product_present === true) {
+      conPresencia++;
+      if (v.pop_price_tag === true) conPreciador++;
+    }
+  }
+
+  return {
+    conPreciador,
+    conPresencia,
+    ratio: conPresencia > 0 ? Math.round((conPreciador / conPresencia) * 1000) / 10 : 0,
+  };
+}
+
 export { PILOT_SECTORS, SECTOR_LABELS };
 export type { LocationType };
