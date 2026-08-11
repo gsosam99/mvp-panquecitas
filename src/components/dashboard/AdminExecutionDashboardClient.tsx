@@ -218,13 +218,13 @@ export function AdminExecutionDashboardClient({
         <KpiCard
           title="% Precio correcto por zona"
           value={kpis.precioCorrecto.total > 0 ? `${kpis.precioCorrecto.pct}%` : "s/d"}
-          subtitle={`${kpis.precioCorrecto.count} de ${kpis.precioCorrecto.total} con ventas en SAP y precio observado`}
+          subtitle={`${kpis.precioCorrecto.count} de ${kpis.precioCorrecto.total} con presencia del producto y precio observado`}
           critical={kpis.precioCorrecto.total > 0 && kpis.precioCorrecto.pct < 100}
         />
         <KpiCard
           title="% Clientes con material POP"
           value={kpis.materialPop.total > 0 ? `${kpis.materialPop.pct}%` : "s/d"}
-          subtitle={`${kpis.materialPop.count} de ${kpis.materialPop.total} con ventas en SAP visitados`}
+          subtitle={`${kpis.materialPop.count} de ${kpis.materialPop.total} con presencia del producto`}
         />
         <KpiCard
           title="Clientes Sin ventas en SAP"
