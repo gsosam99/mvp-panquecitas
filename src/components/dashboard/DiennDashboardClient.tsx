@@ -11,7 +11,7 @@ import { VentaRecompraActivacionChart } from "@/components/dashboard/VentaRecomp
 import { PosicionPdvChart } from "@/components/dashboard/PosicionPdvChart";
 import { PanVsHarinaPanChart } from "@/components/dashboard/PanVsHarinaPanChart";
 import { RoundLegend } from "@/components/dashboard/RoundLegend";
-import { SellOutChart } from "@/components/dashboard/SellOutChart";
+import { SellOutResumenChart } from "@/components/dashboard/SellOutResumenChart";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Separator } from "@/components/ui/separator";
 import {
@@ -23,7 +23,6 @@ import {
   TableRow,
 } from "@/components/ui/table";
 import {
-  aggregateByRound,
   computeRotacion,
   filterRecords,
   filterSellOutClientes,
@@ -155,7 +154,6 @@ export function DiennDashboardClient({
     [sellOutRecords, filter, zonaFilter, asesorFilter, fuenteFilter]
   );
 
-  const sellOutPorRonda = useMemo(() => aggregateByRound(filteredSellOut), [filteredSellOut]);
   const sellOutPorCliente = useMemo(
     () =>
       filterSellOutClientes(sellOutClientes, {
@@ -166,6 +164,17 @@ export function DiennDashboardClient({
       }),
     [sellOutClientes, filter, zonaFilter, asesorFilter, fuenteFilter]
   );
+  // Resumen agregado (SAP − inventario PDV) para el gráfico comparativo.
+  const sellOutResumen = useMemo(() => {
+    const sellIn = sellOutPorCliente.reduce((s, r) => s + r.sellInSapKg, 0);
+    const inv = sellOutPorCliente.reduce((s, r) => s + r.inventarioPdvKg, 0);
+    const sellOut = sellOutPorCliente.reduce((s, r) => s + r.sellOutKg, 0);
+    return [
+      { concepto: "Sell-In SAP", kg: Math.round(sellIn * 10) / 10 },
+      { concepto: "Inventario PDV", kg: Math.round(inv * 10) / 10 },
+      { concepto: "Sell-Out", kg: Math.round(sellOut * 10) / 10 },
+    ];
+  }, [sellOutPorCliente]);
   const rotacion = useMemo(() => computeRotacion(filteredSellOut), [filteredSellOut]);
   const mixProducto = bundle.mixProducto;
 
@@ -509,12 +518,13 @@ export function DiennDashboardClient({
 
       <Separator className="mb-6 print:hidden" />
 
-      {/* ── Gráfico 3: Sell-In vs Sell-Out por ronda ──────────────────────── */}
+      {/* ── Gráfico 3: Sell-In (SAP) vs Inventario PDV vs Sell-Out ────────── */}
       <div className="mb-2 flex flex-wrap items-center justify-between gap-3">
         <div>
-          <h2 className="text-lg font-bold text-slate-900">Sell-In vs Sell-Out por ronda</h2>
+          <h2 className="text-lg font-bold text-slate-900">Sell-In (SAP) vs Sell-Out (PDV)</h2>
           <p className="text-sm text-slate-400">
-            Agrupado por ciclo de rondas (nunca diario). Corte D-1 estricto entre visitas consecutivas.
+            Comparativo agregado: reporte SAP (Radar), inventario contado en PDV por el mercaderista, y el Sell-Out
+            como su diferencia. Una sola visita — no depende de dos rondas.
           </p>
         </div>
         <div className="flex flex-wrap gap-2 print:hidden">
@@ -563,12 +573,10 @@ export function DiennDashboardClient({
           </div>
           <ExportExcelButton
             filename="datos_sell_in_sell_out"
-            rows={sellOutPorRonda}
+            rows={sellOutResumen}
             columns={[
-              { header: "Ronda", value: (r) => r.roundLabel },
-              { header: "Sell-In (kg)", value: (r) => r.sellInKg },
-              { header: "Sell-Out (kg)", value: (r) => r.sellOutKg },
-              { header: "Inventario promedio (kg)", value: (r) => r.inventarioPromedioKg },
+              { header: "Concepto", value: (r) => r.concepto, width: 20 },
+              { header: "Total (kg)", value: (r) => r.kg, width: 16 },
             ]}
           />
         </div>
@@ -576,16 +584,15 @@ export function DiennDashboardClient({
 
       <Card className="mb-6 print-avoid-break">
         <CardContent className="pt-6">
-          {sellOutPorRonda.length > 0 ? (
-            <SellOutChart data={sellOutPorRonda} />
+          {sellOutPorCliente.length > 0 ? (
+            <SellOutResumenChart data={sellOutResumen} />
           ) : (
             <div className="h-[300px] flex items-center justify-center text-slate-400">
               <div className="text-center">
                 <p className="text-4xl mb-2">📦</p>
-                <p>Sin datos de Sell-Out todavía.</p>
+                <p>Sin visitas de mercaderista para el corte de filtros vigente.</p>
                 <p className="text-xs mt-1">
-                  Necesita despachos SAP (Admin → Despachos SAP) y al menos 2 visitas de mercaderista del mismo
-                  cliente en rondas consecutivas.
+                  El Sell-Out se calcula como reporte SAP (Radar) − inventario contado en PDV.
                 </p>
               </div>
             </div>
