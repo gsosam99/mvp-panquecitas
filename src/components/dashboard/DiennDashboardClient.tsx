@@ -12,6 +12,7 @@ import { PosicionPdvChart } from "@/components/dashboard/PosicionPdvChart";
 import { PanVsHarinaPanChart } from "@/components/dashboard/PanVsHarinaPanChart";
 import { RoundLegend } from "@/components/dashboard/RoundLegend";
 import { SellOutResumenChart } from "@/components/dashboard/SellOutResumenChart";
+import { MotivosNoVentaTable } from "@/components/admin/MotivosNoVentaTable";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Separator } from "@/components/ui/separator";
 import {
@@ -47,6 +48,7 @@ import type {
   VentaRecompraActivacionPoint,
   VolumenRadarAcumulado,
 } from "@/lib/dienn-queries";
+import type { MotivoNoVentaRow } from "@/lib/efectividad-queries";
 import type { Sector } from "@/lib/sectors";
 
 export interface SectorBundle {
@@ -112,6 +114,8 @@ interface Props {
   sellOutClientes: SellOutClienteDiffRow[];
   zonas: string[];
   asesores: string[];
+  /** Motivos de no venta clasificados (reporte SAP de Efectividad de Visita). Globales, no por sector. */
+  motivosNoVenta: MotivoNoVentaRow[];
 }
 
 export function DiennDashboardClient({
@@ -125,6 +129,7 @@ export function DiennDashboardClient({
   sellOutClientes,
   zonas,
   asesores,
+  motivosNoVenta,
 }: Props) {
   const [filter, setFilter] = useState<FilterKey>("TOTAL");
   const [zonaFilter, setZonaFilter] = useState("");
@@ -133,6 +138,17 @@ export function DiennDashboardClient({
   const [granularity, setGranularity] = useState<TimeGranularity>("week");
   const [comboGranularity, setComboGranularity] = useState<TimeGranularity>("week");
   const [stockOutOpen, setStockOutOpen] = useState(false);
+
+  // Motivos de no venta: son globales (todo el reporte SAP, sin corte por
+  // sector), solo se separan por tipo para las dos listas.
+  const motivosNoActivacion = useMemo(
+    () => motivosNoVenta.filter((r) => r.tipo === "NO_ACTIVACION"),
+    [motivosNoVenta]
+  );
+  const motivosNoRecompra = useMemo(
+    () => motivosNoVenta.filter((r) => r.tipo === "NO_RECOMPRA"),
+    [motivosNoVenta]
+  );
   const [sellOutClienteOpen, setSellOutClienteOpen] = useState(false);
   const [panPoblacion, setPanPoblacion] = useState<PanComparisonPoblacion>("clientes");
   const [panGranularity, setPanGranularity] = useState<PanComparisonGranularity>("month");
@@ -867,6 +883,29 @@ export function DiennDashboardClient({
           )}
         </CardContent>
       </Card>
+
+      {/* ── Motivos de No Venta (reporte SAP de Efectividad de Visita) ──── */}
+      <div className="space-y-4 mb-6 print:hidden">
+        <div>
+          <h2 className="text-lg font-semibold text-slate-900">Motivos de No Venta</h2>
+          <p className="text-sm text-slate-500 mt-0.5">
+            Del reporte SAP de Efectividad de Visita. No Activación = clientes que nunca han facturado;
+            No Recompra = clientes que ya facturaron antes.
+          </p>
+        </div>
+        <MotivosNoVentaTable
+          title="Motivos de No Activación"
+          description="Clientes que nunca han facturado y no compraron en la última visita."
+          rows={motivosNoActivacion}
+          exportName="Motivos No Activación"
+        />
+        <MotivosNoVentaTable
+          title="Motivos de No Recompra"
+          description="Clientes que ya facturaron antes pero no compraron en la última visita."
+          rows={motivosNoRecompra}
+          exportName="Motivos No Recompra"
+        />
+      </div>
 
     </div>
   );
