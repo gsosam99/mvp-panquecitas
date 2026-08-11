@@ -58,6 +58,22 @@ async function getPedidosFacturadosLocationIds(sector?: Sector): Promise<Set<str
   return new Set(filtered.map((l) => l.id));
 }
 
+/**
+ * Clientes con VENTAS EN SAP = location_id con Radar de Panquecitas > 0
+ * (sap_sell_in_records). Misma definición de "comprador" que el Stock Out y el
+ * perfil Administrador. Se usa para acotar los indicadores de ejecución
+ * (Material POP, Cobertura) a clientes reales que venden.
+ */
+async function getCompradorLocationIds(): Promise<Set<string>> {
+  const supabase = createSupabaseServiceClient();
+  const { data } = await supabase
+    .from("sap_sell_in_records")
+    .select("location_id")
+    .eq("product_id", PRODUCT_IDS.PANQUECITAS)
+    .gt("quantity_kg", 0);
+  return new Set(((data ?? []) as { location_id: string }[]).map((r) => r.location_id));
+}
+
 // ── 1. Volumen facturado / 1b. Volumen pedido / 3. Mix de Producto ─────
 // Las tres cifras (facturado, pedido total, y el desglose por presentación
 // 400g/800g) se calculan de UNA sola pasada sobre sap_pedidos_facturados
@@ -602,6 +618,7 @@ function computeCoberturaComunicacionPoints(
   relevantRows: { location_id: string; created_at: string; pop_present: boolean }[],
   sectorByLocation: Map<string, Sector | null>,
   universoBySector: Map<Sector, number>,
+  compradorIds: Set<string>,
   granularity: TimeGranularity
 ): CoberturaComunicacionPoint[] {
   if (relevantRows.length === 0) return [];
@@ -614,12 +631,19 @@ function computeCoberturaComunicacionPoints(
     const point: CoberturaComunicacionPoint = { bucket, label: bucketLabelFor(bucket, granularity) };
     for (const sector of ["cumana", "barquisimeto_este"] as Sector[]) {
       const sectorRows = rowsUpToBucket.filter((r) => sectorByLocation.get(r.location_id) === sector);
-      const visitados = new Set(sectorRows.map((r) => r.location_id));
-      const conPop = new Set(sectorRows.filter((r) => r.pop_present).map((r) => r.location_id));
-      const universoSector = universoBySector.get(sector) ?? 0;
 
+      // Cobertura: visitados sobre la cartera TOTAL de la zona.
+      const visitados = new Set(sectorRows.map((r) => r.location_id));
+      const universoSector = universoBySector.get(sector) ?? 0;
       point[`${sector}_cobertura`] = universoSector > 0 ? Math.round((visitados.size / universoSector) * 1000) / 10 : 0;
-      point[`${sector}_comunicacion`] = universoSector > 0 ? Math.round((conPop.size / universoSector) * 1000) / 10 : 0;
+
+      // Comunicación (material POP): solo sobre los visitados que ADEMÁS tienen
+      // ventas en SAP (Radar > 0).
+      const sectorRowsConVenta = sectorRows.filter((r) => compradorIds.has(r.location_id));
+      const visitadosConVenta = new Set(sectorRowsConVenta.map((r) => r.location_id));
+      const conPop = new Set(sectorRowsConVenta.filter((r) => r.pop_present).map((r) => r.location_id));
+      point[`${sector}_comunicacion`] =
+        visitadosConVenta.size > 0 ? Math.round((conPop.size / visitadosConVenta.size) * 1000) / 10 : 0;
     }
     points.push(point);
   }
@@ -632,6 +656,11 @@ export async function getCoberturaComunicacionPorSector(): Promise<Record<TimeGr
   const empty = { day: [], week: [], month: [] };
   const universo = await getUniverseLocations();
   if (universo.length === 0) return empty;
+
+  // Cobertura se mide sobre la cartera TOTAL por zona; la comunicación (material
+  // POP) solo sobre los visitados que ADEMÁS tienen ventas en SAP (Radar > 0) —
+  // decisión con Alejandro (11-08-2026). Ver computeCoberturaComunicacionPoints.
+  const compradorIds = await getCompradorLocationIds();
 
   const universoBySector = new Map<Sector, number>();
   for (const sector of ["cumana", "barquisimeto_este"] as Sector[]) {
@@ -650,9 +679,9 @@ export async function getCoberturaComunicacionPorSector(): Promise<Record<TimeGr
   if (relevantRows.length === 0) return empty;
 
   return {
-    day: computeCoberturaComunicacionPoints(relevantRows, sectorByLocation, universoBySector, "day"),
-    week: computeCoberturaComunicacionPoints(relevantRows, sectorByLocation, universoBySector, "week"),
-    month: computeCoberturaComunicacionPoints(relevantRows, sectorByLocation, universoBySector, "month"),
+    day: computeCoberturaComunicacionPoints(relevantRows, sectorByLocation, universoBySector, compradorIds, "day"),
+    week: computeCoberturaComunicacionPoints(relevantRows, sectorByLocation, universoBySector, compradorIds, "week"),
+    month: computeCoberturaComunicacionPoints(relevantRows, sectorByLocation, universoBySector, compradorIds, "month"),
   };
 }
 
@@ -971,47 +1000,49 @@ export async function getStockOut(sector?: Sector): Promise<StockOutResult> {
 }
 
 // ── 10. Material POP con Preciador (DIENN) ──────────────────────────
-// Ratio = clientes con preciador (pop_price_tag) / clientes con presencia del
-// producto (product_present). Ambos de la última visita del mercaderista. El
-// numerador se cuenta dentro de la población con presencia, así el ratio ≤ 100%.
+// Ratio = clientes con preciador (pop_price_tag) / clientes VISITADOS con
+// VENTAS EN SAP (Radar > 0), de la última visita del mercaderista. Decisión
+// con Alejandro (11-08-2026): la población pasa a ser el cliente real (el que
+// compra), sin exigir presencia del producto.
 
 export interface MaterialPopPreciadorResult {
   ratio: number;
   conPreciador: number;
-  conPresencia: number;
+  /** Denominador: clientes visitados con ventas en SAP (Radar > 0). */
+  poblacion: number;
 }
 
 export async function getMaterialPopPreciador(sector?: Sector): Promise<MaterialPopPreciadorResult> {
-  const empty: MaterialPopPreciadorResult = { ratio: 0, conPreciador: 0, conPresencia: 0 };
+  const empty: MaterialPopPreciadorResult = { ratio: 0, conPreciador: 0, poblacion: 0 };
   const ids = await getUniverseLocationIds(sector);
   if (ids.size === 0) return empty;
+  const compradorIds = await getCompradorLocationIds();
 
   const supabase = createSupabaseServiceClient();
   const { data: visitsData } = await supabase
     .from("mercaderista_visits")
-    .select("location_id, created_at, product_present, pop_price_tag")
+    .select("location_id, created_at, pop_price_tag")
     .order("created_at", { ascending: false });
 
-  type Visita = { location_id: string; product_present: boolean; pop_price_tag: boolean | null };
+  type Visita = { location_id: string; pop_price_tag: boolean | null };
   const lastVisit = new Map<string, Visita>();
   for (const v of (visitsData ?? []) as Visita[]) {
-    if (!ids.has(v.location_id)) continue;
+    // Solo clientes del universo del corte que además tienen ventas en SAP.
+    if (!ids.has(v.location_id) || !compradorIds.has(v.location_id)) continue;
     if (!lastVisit.has(v.location_id)) lastVisit.set(v.location_id, v);
   }
 
-  let conPresencia = 0;
+  let poblacion = 0;
   let conPreciador = 0;
   for (const v of lastVisit.values()) {
-    if (v.product_present === true) {
-      conPresencia++;
-      if (v.pop_price_tag === true) conPreciador++;
-    }
+    poblacion++;
+    if (v.pop_price_tag === true) conPreciador++;
   }
 
   return {
     conPreciador,
-    conPresencia,
-    ratio: conPresencia > 0 ? Math.round((conPreciador / conPresencia) * 1000) / 10 : 0,
+    poblacion,
+    ratio: poblacion > 0 ? Math.round((conPreciador / poblacion) * 1000) / 10 : 0,
   };
 }
 
@@ -1036,6 +1067,9 @@ function stripAccents(s: string): string {
 function agruparCategoriaAnaquel(raw: string): string {
   const t = stripAccents(raw.toLowerCase());
   const has = (...kws: string[]) => kws.some((k) => t.includes(k));
+  // "Caja" es una ubicación (cerca de la caja / mostrador), no una categoría
+  // vecina — tiene prioridad sobre el resto.
+  if (has("mostrador", "caja")) return "Caja";
   if (has("margarita", "enlatados", "rikesa", "endiablado", "atun")) return "Enlatados";
   if (has("jugos")) return "Jugos";
   if (has("margarina", "mantequilla", "mavesa")) return "Mavesa";

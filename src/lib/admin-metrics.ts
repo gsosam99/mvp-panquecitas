@@ -148,17 +148,18 @@ export function clientesConVentaSap(rows: AdminPdvRow[]): AdminPdvRow[] {
   return rows.filter((r) => r.comprador);
 }
 
-// Estas tres listas (precio incorrecto / sin POP / exhibición) SOLO incluyen a
-// clientes con PRESENCIA DEL PRODUCTO (productPresent === true, según la encuesta
-// del mercaderista): un cliente donde el mercaderista no encontró el producto no
-// debe aparecer como incidencia de ejecución. Las tarjetas de KPI de precio y POP
-// usan la misma población (ver computeAdminKpis).
+// Estas tres listas (precio incorrecto / sin POP / exhibición) se miden sobre
+// los clientes VISITADOS que además tienen VENTAS EN SAP (r.comprador = Radar de
+// Panquecitas > 0) — decisión con Alejandro (11-08-2026): los indicadores de
+// ejecución van sobre el cliente real (el que compra), SIN exigir que el
+// producto esté presente. Las tarjetas de KPI de precio y POP usan la misma
+// población (ver computeAdminKpis).
 export function clientesPrecioIncorrecto(rows: AdminPdvRow[]): AdminPdvRow[] {
-  return rows.filter((r) => r.productPresent === true && precioIncorrecto(r));
+  return rows.filter((r) => r.visitado && r.comprador && precioIncorrecto(r));
 }
 
 export function clientesSinMaterialPop(rows: AdminPdvRow[]): AdminPdvRow[] {
-  return rows.filter((r) => r.productPresent === true && r.visitado && r.popPresent === false);
+  return rows.filter((r) => r.visitado && r.comprador && r.popPresent === false);
 }
 
 export function clientesRiesgoStockOut(rows: AdminPdvRow[]): AdminPdvRow[] {
@@ -175,10 +176,15 @@ export interface ExhibicionRow {
 export function clientesExhibicionDeficiente(rows: AdminPdvRow[]): ExhibicionRow[] {
   const result: ExhibicionRow[] = [];
   for (const row of rows) {
-    // Solo clientes con PRESENCIA del producto (ver nota en clientesPrecioIncorrecto).
-    // Por eso el motivo "SIN_PRESENCIA" ya no aplica aquí: si el producto no está,
-    // el cliente no entra a esta población; la incidencia es "caras insuficientes".
-    if (row.productPresent !== true) continue;
+    // Población: visitados con ventas en SAP (ver nota en clientesPrecioIncorrecto).
+    // Como ya NO se exige presencia del producto, un cliente comprador visitado
+    // donde el producto no está presente es una incidencia de exhibición
+    // ("sin presencia"); los formatos con caras se evalúan por caras frontales.
+    if (!row.visitado || !row.comprador) continue;
+    if (row.productPresent !== true) {
+      result.push({ row, motivo: "SIN_PRESENCIA" });
+      continue;
+    }
     if (exigeCarasFrontales(row.location) && (row.frontFaces ?? 0) < CARAS_FRONTALES_MINIMO) {
       result.push({ row, motivo: "CARAS_INSUFICIENTES" });
     }
@@ -195,9 +201,9 @@ export function clientesFaltaPorVisitar(rows: AdminPdvRow[]): AdminPdvRow[] {
 export interface AdminKpis {
   /** % de la cartera del corte de filtros vigente con venta publicada en el Radar de Panquecitas. */
   compraron: { pct: number; count: number; total: number };
-  /** % de clientes con presencia del producto evaluables con el precio de su zona correcto. */
+  /** % de clientes visitados con ventas SAP (y precio observable) con el precio de su zona correcto. */
   precioCorrecto: { pct: number; count: number; total: number };
-  /** % de clientes con presencia del producto con material POP presente. */
+  /** % de clientes visitados con ventas SAP con material POP presente. */
   materialPop: { pct: number; count: number; total: number };
   /** Clientes con menos de 2 unidades entre anaquel y depósito. */
   riesgoStockOut: { count: number; total: number };
@@ -216,17 +222,18 @@ export function computeAdminKpis(rows: AdminPdvRow[]): AdminKpis {
 
   const compradores = rows.filter((r) => r.comprador).length;
 
-  // Ejecución (precio y POP) se mide SOLO sobre clientes con PRESENCIA del
-  // producto (productPresent === true, según la encuesta), igual que las listas
-  // de incidencias: así la tarjeta y su lista siempre miden la misma población y
-  // cuadran. La cobertura de mercaderista y "% compraron" sí van sobre toda la
-  // cartera del corte.
-  const evaluables = rows.filter((r) => r.productPresent === true && precioEvaluable(r));
+  // Ejecución (precio y POP) se mide sobre los clientes VISITADOS con VENTAS EN
+  // SAP (r.comprador), igual que las listas de incidencias, sin exigir presencia
+  // del producto (decisión 11-08-2026). Precio correcto conserva además el
+  // requisito de que haya un precio observable (precioEvaluable): no se puede
+  // calificar un precio que el mercaderista no registró. La cobertura de
+  // mercaderista y "% compraron" sí van sobre toda la cartera del corte.
+  const evaluables = rows.filter((r) => r.visitado && r.comprador && precioEvaluable(r));
   const correctos = evaluables.filter((r) => !precioIncorrecto(r)).length;
 
   const visitados = rows.filter((r) => r.visitado);
-  const conPresencia = rows.filter((r) => r.productPresent === true && r.visitado);
-  const conPop = conPresencia.filter((r) => r.popPresent === true).length;
+  const visitadosConVenta = rows.filter((r) => r.visitado && r.comprador);
+  const conPop = visitadosConVenta.filter((r) => r.popPresent === true).length;
 
   const enRiesgo = clientesRiesgoStockOut(rows).length;
   const faltantes = total - visitados.length;
@@ -237,7 +244,7 @@ export function computeAdminKpis(rows: AdminPdvRow[]): AdminKpis {
     // filtran juntos porque `rows` ya viene recortado por Oficina/Grupo.
     compraron: { pct: pct(compradores, total), count: compradores, total },
     precioCorrecto: { pct: pct(correctos, evaluables.length), count: correctos, total: evaluables.length },
-    materialPop: { pct: pct(conPop, conPresencia.length), count: conPop, total: conPresencia.length },
+    materialPop: { pct: pct(conPop, visitadosConVenta.length), count: conPop, total: visitadosConVenta.length },
     riesgoStockOut: { count: enRiesgo, total: visitados.length },
     coberturaMercaderista: { pct: pct(visitados.length, total), count: visitados.length, total },
     faltaPorVisitar: { pct: pct(faltantes, total), count: faltantes, total },

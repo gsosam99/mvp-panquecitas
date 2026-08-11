@@ -110,7 +110,12 @@ export function AdminExecutionDashboardClient({
     for (const r of rows) map.set(r.location.id, { target400: r.target400, target800: r.target800 });
     return map;
   }, [rows]);
-  const allowedLocationIds = useMemo(() => new Set(filtered.map((r) => r.location.id)), [filtered]);
+  // El gráfico semanal de ejecución (POP y precio) también va sobre clientes
+  // visitados con ventas en SAP (r.comprador), igual que las tarjetas de KPI.
+  const allowedLocationIds = useMemo(
+    () => new Set(filtered.filter((r) => r.comprador).map((r) => r.location.id)),
+    [filtered]
+  );
 
   const ejecucionSemanal = useMemo(
     () => computeEjecucionSemanal(visits, locationsById, targetsByLocation, allowedLocationIds),
@@ -218,13 +223,13 @@ export function AdminExecutionDashboardClient({
         <KpiCard
           title="% Precio correcto por zona"
           value={kpis.precioCorrecto.total > 0 ? `${kpis.precioCorrecto.pct}%` : "s/d"}
-          subtitle={`${kpis.precioCorrecto.count} de ${kpis.precioCorrecto.total} con presencia del producto y precio observado`}
+          subtitle={`${kpis.precioCorrecto.count} de ${kpis.precioCorrecto.total} visitados con ventas SAP y precio observado`}
           critical={kpis.precioCorrecto.total > 0 && kpis.precioCorrecto.pct < 100}
         />
         <KpiCard
           title="% Clientes con material POP"
           value={kpis.materialPop.total > 0 ? `${kpis.materialPop.pct}%` : "s/d"}
-          subtitle={`${kpis.materialPop.count} de ${kpis.materialPop.total} con presencia del producto`}
+          subtitle={`${kpis.materialPop.count} de ${kpis.materialPop.total} visitados con ventas SAP`}
         />
         <KpiCard
           title="Clientes Sin ventas en SAP"
@@ -295,7 +300,7 @@ export function AdminExecutionDashboardClient({
           <div>
             <CardTitle>Ejecución por semana de auditoría (POP y Precio)</CardTitle>
             <p className="text-xs text-slate-400 mt-1 mb-2">
-              % de clientes visitados esa semana con material POP y con precio correcto según su zona.
+              % de clientes visitados con ventas SAP esa semana con material POP y con precio correcto según su zona.
             </p>
             <RoundLegend />
           </div>

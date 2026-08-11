@@ -71,7 +71,7 @@ export interface SectorBundle {
   penetracionRadarVsHpm: PenetracionRadarVsHpm;
   /** Clientes con venta y ≤3 unidades en tienda, con su ubicación. */
   stockOut: StockOutResult;
-  /** Ratio de preciador sobre clientes con presencia del producto. */
+  /** Ratio de preciador sobre clientes visitados con ventas en SAP (Radar > 0). */
   materialPopPreciador: MaterialPopPreciadorResult;
   /** Distribución de la posición del producto en el PDV (encuestas). */
   posicionPdv: PosicionPdvPoint[];
@@ -462,9 +462,9 @@ export function DiennDashboardClient({
       <Card className="mb-6 print-avoid-break">
         <CardHeader className="flex flex-row items-start justify-between gap-3 space-y-0">
           <div>
-            <CardTitle>Cobertura y Comunicación por Ciudad (% vs Universo)</CardTitle>
+            <CardTitle>Cobertura y Comunicación por Ciudad</CardTitle>
             <p className="text-xs text-slate-400 mt-1 mb-2">
-              Proxy con datos disponibles: cobertura = % PDV visitados; comunicación = % PDV con material POP.
+              Cobertura = % de la cartera (por zona) visitada. Comunicación = % con material POP entre los visitados con ventas en SAP (Radar &gt; 0).
               {granularity === "month" && " Las rondas de auditoría no se distinguen en vista mensual — cambia a Día o Semana."}
             </p>
             <RoundLegend />
@@ -764,8 +764,8 @@ export function DiennDashboardClient({
         />
         <KpiCard
           title="Material POP con Preciador"
-          value={bundle.materialPopPreciador.conPresencia > 0 ? `${bundle.materialPopPreciador.ratio}%` : "s/d"}
-          subtitle={`${bundle.materialPopPreciador.conPreciador} de ${bundle.materialPopPreciador.conPresencia} con presencia del producto`}
+          value={bundle.materialPopPreciador.poblacion > 0 ? `${bundle.materialPopPreciador.ratio}%` : "s/d"}
+          subtitle={`${bundle.materialPopPreciador.conPreciador} de ${bundle.materialPopPreciador.poblacion} visitados con ventas SAP`}
           product="panquecitas"
         />
       </div>
