@@ -1025,6 +1025,23 @@ export interface PosicionPdvPoint {
   clientes: number;
 }
 
+// Consolida el texto libre de "otra categoría" en categorías fijas del
+// anaquel. El mercaderista lo escribe a mano, así que se normaliza a
+// minúsculas y sin acentos antes de buscar palabras clave. Si no calza con
+// ninguna, se conserva el texto tal cual (una categoría propia).
+function stripAccents(s: string): string {
+  return s.normalize("NFD").replace(/\p{Diacritic}/gu, "");
+}
+
+function agruparCategoriaAnaquel(raw: string): string {
+  const t = stripAccents(raw.toLowerCase());
+  const has = (...kws: string[]) => kws.some((k) => t.includes(k));
+  if (has("margarita", "enlatados", "rikesa", "endiablado", "atun")) return "Enlatados";
+  if (has("jugos")) return "Jugos";
+  if (has("margarina", "mantequilla", "mavesa")) return "Mavesa";
+  return raw.trim();
+}
+
 export async function getPosicionPdv(sector?: Sector): Promise<PosicionPdvPoint[]> {
   const ids = await getUniverseLocationIds(sector);
   if (ids.size === 0) return [];
@@ -1047,9 +1064,12 @@ export async function getPosicionPdv(sector?: Sector): Promise<PosicionPdvPoint[
     if (!lastVisit.has(v.location_id)) lastVisit.set(v.location_id, v);
   }
 
-  // "Junto a harina de trigo" es una categoría fija; "otra categoría" NO se
-  // agrupa en una sola barra: se desglosa por la categoría específica que
-  // indicó el mercaderista en product_location_other.
+  // "Junto a harina de trigo" es una categoría fija; "otra categoría" se
+  // desglosa por lo que escribió a mano el mercaderista en
+  // product_location_other, pero ese texto libre genera decenas de barras
+  // casi-duplicadas ("Atún Margarita", "jugos naturales", "mantequilla
+  // Mavesa"…). Se consolidan en categorías fijas por palabra clave (ver
+  // agruparCategoriaAnaquel).
   const HARINA_TRIGO = "Junto a harina de trigo";
   const counts = new Map<string, number>();
   const add = (categoria: string) => counts.set(categoria, (counts.get(categoria) ?? 0) + 1);
@@ -1059,7 +1079,7 @@ export async function getPosicionPdv(sector?: Sector): Promise<PosicionPdvPoint[
     if (v.product_location.includes("HARINA_TRIGO")) add(HARINA_TRIGO);
     if (v.product_location.includes("OTRA_CATEGORIA")) {
       const especifica = v.product_location_other?.trim();
-      add(especifica && especifica.length > 0 ? especifica : "Otra categoría (sin especificar)");
+      add(especifica && especifica.length > 0 ? agruparCategoriaAnaquel(especifica) : "Otra categoría (sin especificar)");
     }
   }
 

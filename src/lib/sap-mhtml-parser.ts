@@ -1,7 +1,9 @@
 import type {
+  ParsedSapEfectividadRow,
   ParsedSapFacturacionRow,
   ParsedSapRadarRow,
   ParseError,
+  SapEfectividadParseResult,
   SapFacturacionParseResult,
   SapRadarParseResult,
 } from "@/types";
@@ -293,6 +295,118 @@ export function parseSapRadarMhtml(buffer: ArrayBuffer): SapRadarParseResult {
   }
 
   const valid = Array.from(latestByKey.values());
+  if (valid.length === 0 && errors.length === 0) {
+    errors.push({ row: 0, field: "datos", message: "No se encontraron filas de datos en el reporte." });
+  }
+
+  return { valid, errors };
+}
+
+// ════════════════════════════════════════════════════════════════
+// Reporte SAP N7_V_SD85_WEB_001_OP — Efectividad de Visita / Motivos de No
+// Venta. Mismo mecanismo MHTML. Estructura fija:
+//   Fila de ratios : … | Efectividad de Visita | … de Pedidos | … de Ventas
+//   Encabezado     : Cliente (T)[×2] | Material | Justificación | % | % | %
+//   Datos          : códCliente | nombreCliente | material | justificación | %v | %p | %vt
+// La "Justificación" es el motivo: "Venta Efectiva" o "NVE ...". El reporte
+// NO trae fecha (la fija el usuario al cargar).
+// ════════════════════════════════════════════════════════════════
+
+interface EfectividadColumnMap {
+  clienteCodigo: number;
+  clienteNombre: number;
+  material: number;
+  justificacion: number;
+  efVisita: number;
+  efPedidos: number;
+  efVentas: number;
+}
+
+function findEfectividadHeader(headerRow: string[]): { clienteCodigo: number; clienteNombre: number; material: number; justificacion: number } | null {
+  const norm = headerRow.map(normalizeHeader);
+  // "Cliente (T)" ocupa 2 columnas (código + nombre, celda combinada).
+  const cliente = indicesOf(norm, "clientet");
+  const material = indicesOf(norm, "material");
+  const justificacion = indicesOf(norm, "justificacion");
+  if (cliente.length < 2 || material.length < 1 || justificacion.length < 1) return null;
+  return { clienteCodigo: cliente[0], clienteNombre: cliente[1], material: material[0], justificacion: justificacion[0] };
+}
+
+/** Los 3 ratios de efectividad viven en la fila de encima del encabezado. */
+function findEfectividadRatios(ratioRow: string[]): { efVisita: number; efPedidos: number; efVentas: number } | null {
+  const norm = ratioRow.map(normalizeHeader);
+  const efVisita = norm.indexOf("efectividaddevisita");
+  const efPedidos = norm.indexOf("efectividaddepedidos");
+  const efVentas = norm.indexOf("efectividaddeventas");
+  if (efVisita < 0 || efPedidos < 0 || efVentas < 0) return null;
+  return { efVisita, efPedidos, efVentas };
+}
+
+export function parseSapEfectividadMhtml(buffer: ArrayBuffer): SapEfectividadParseResult {
+  const errors: ParseError[] = [];
+
+  let html: string;
+  try {
+    html = extractHtmlFromMhtml(buffer);
+  } catch (e) {
+    return {
+      valid: [],
+      errors: [{ row: 0, field: "file", message: `No se pudo leer el archivo SAP: ${e instanceof Error ? e.message : String(e)}` }],
+    };
+  }
+
+  const grid = parseHtmlTableGrid(html);
+  if (grid.length === 0) {
+    return { valid: [], errors: [{ row: 0, field: "file", message: "No se encontró ninguna tabla en el archivo." }] };
+  }
+
+  let headerRowIdx = -1;
+  let cols: EfectividadColumnMap | null = null;
+  for (let r = 0; r < grid.length; r++) {
+    const header = findEfectividadHeader(grid[r]);
+    if (!header) continue;
+    const ratios = r > 0 ? findEfectividadRatios(grid[r - 1]) : null;
+    if (!ratios) continue;
+    headerRowIdx = r;
+    cols = { ...header, ...ratios };
+    break;
+  }
+
+  if (headerRowIdx < 0 || !cols) {
+    return {
+      valid: [],
+      errors: [
+        {
+          row: 0,
+          field: "formato",
+          message:
+            'No se encontraron las columnas esperadas ("Cliente (T)", "Material", "Justificación" y los ratios de Efectividad). Verifica que sea el reporte SAP N7_V_SD85 (Efectividad de Visita / Motivos de No Venta).',
+        },
+      ],
+    };
+  }
+
+  const valid: ParsedSapEfectividadRow[] = [];
+  for (let r = headerRowIdx + 1; r < grid.length; r++) {
+    const row = grid[r];
+    const sapCode = (row[cols.clienteCodigo] ?? "").trim();
+    if (!sapCode) continue;
+    if (normalizeHeader(sapCode) === "resultadototal") break; // fila de totales: fin de los datos
+
+    const justificacion = (row[cols.justificacion] ?? "").trim();
+    if (!justificacion) continue; // fila sin motivo → nada que clasificar
+
+    valid.push({
+      sap_code: sapCode,
+      client_name: (row[cols.clienteNombre] ?? "").trim(),
+      material_name: (row[cols.material] ?? "").trim(),
+      justificacion,
+      efectividad_visita: parseLatinNumber(row[cols.efVisita]),
+      efectividad_pedidos: parseLatinNumber(row[cols.efPedidos]),
+      efectividad_ventas: parseLatinNumber(row[cols.efVentas]),
+    });
+  }
+
   if (valid.length === 0 && errors.length === 0) {
     errors.push({ row: 0, field: "datos", message: "No se encontraron filas de datos en el reporte." });
   }

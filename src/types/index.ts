@@ -239,6 +239,30 @@ export interface CarteraParseResult {
   errors: ParseError[];
 }
 
+// ════════════════════════════════════════════════════════════════
+// Reporte SAP N7_V_SD85_WEB_001_OP (Efectividad de Visita / Motivos de No
+// Venta) — export "Web Page, Single File" de SAP BW (MHTML .xls). Una fila
+// por cliente + material + justificación, con 3 % de efectividad. No trae
+// fecha. Ver src/lib/sap-mhtml-parser.ts y migración 011.
+// ════════════════════════════════════════════════════════════════
+
+export type MotivoNoVentaTipo = "NO_ACTIVACION" | "NO_RECOMPRA" | "VENTA_EFECTIVA";
+
+export interface ParsedSapEfectividadRow {
+  sap_code: string;
+  client_name: string;
+  material_name: string;
+  justificacion: string; // motivo crudo ("Venta Efectiva", "NVE - Sin pedido PIM", …)
+  efectividad_visita: number;
+  efectividad_pedidos: number;
+  efectividad_ventas: number;
+}
+
+export interface SapEfectividadParseResult {
+  valid: ParsedSapEfectividadRow[];
+  errors: ParseError[];
+}
+
 export interface SapDispatch {
   id: string;
   created_at: string;
