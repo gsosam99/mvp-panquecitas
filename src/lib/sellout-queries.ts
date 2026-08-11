@@ -169,6 +169,8 @@ export async function computeSellOut(): Promise<SellOutRecord[]> {
               : 0;
           records.push({
             locationId: location.id,
+            name: location.name,
+            sapCode: location.sap_code,
             sector,
             zona: location.region,
             asesor: location.asesor_encargado,
@@ -222,6 +224,8 @@ export async function computeSellOut(): Promise<SellOutRecord[]> {
 
         records.push({
           locationId: location.id,
+          name: location.name,
+          sapCode: location.sap_code,
           sector,
           zona: location.region,
           asesor: location.asesor_encargado,

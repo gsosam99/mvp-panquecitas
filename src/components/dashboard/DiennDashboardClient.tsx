@@ -24,6 +24,7 @@ import {
 } from "@/components/ui/table";
 import {
   aggregateByRound,
+  aggregateSellOutPorCliente,
   computeRotacion,
   filterRecords,
   type SellOutRecord,
@@ -130,6 +131,7 @@ export function DiennDashboardClient({
   const [granularity, setGranularity] = useState<TimeGranularity>("week");
   const [comboGranularity, setComboGranularity] = useState<TimeGranularity>("week");
   const [stockOutOpen, setStockOutOpen] = useState(false);
+  const [sellOutClienteOpen, setSellOutClienteOpen] = useState(false);
   const [panPoblacion, setPanPoblacion] = useState<PanComparisonPoblacion>("clientes");
   const [panGranularity, setPanGranularity] = useState<PanComparisonGranularity>("month");
   const bundle = bundles[filter];
@@ -151,6 +153,7 @@ export function DiennDashboardClient({
   );
 
   const sellOutPorRonda = useMemo(() => aggregateByRound(filteredSellOut), [filteredSellOut]);
+  const sellOutPorCliente = useMemo(() => aggregateSellOutPorCliente(filteredSellOut), [filteredSellOut]);
   const rotacion = useMemo(() => computeRotacion(filteredSellOut), [filteredSellOut]);
   const mixProducto = bundle.mixProducto;
 
@@ -578,6 +581,84 @@ export function DiennDashboardClient({
         </CardContent>
       </Card>
 
+      {/* ── Lista desplegable: Sell-Out por cliente (descargable) ──────── */}
+      <Card className="mb-6 print:hidden">
+        <CardHeader className="flex flex-row items-start justify-between gap-3 space-y-0">
+          <button
+            type="button"
+            onClick={() => setSellOutClienteOpen((v) => !v)}
+            className="flex items-center gap-2 text-left"
+          >
+            <span className="text-slate-400">{sellOutClienteOpen ? "▾" : "▸"}</span>
+            <div>
+              <CardTitle>Sell-Out por cliente ({sellOutPorCliente.length})</CardTitle>
+              <p className="text-xs text-slate-400 mt-1">
+                Sell-Out semanal por cliente y ronda (Inv. R1 + Sell-In − Inv. R2, corte D-1). Fuente Calculado
+                (bodegas/panaderías) o Reportado_B2B (cadenas). &quot;Ajuste&quot; = quincena con Sell-Out negativo
+                llevada a 0 (mercancía en tránsito, se compensa en la siguiente).
+              </p>
+            </div>
+          </button>
+          <ExportExcelButton
+            filename={`Sell-Out por cliente — ${filtroTexto}`}
+            rows={sellOutPorCliente}
+            columns={[
+              { header: "Código SAP", value: (r) => r.sapCode ?? "", width: 16 },
+              { header: "Cliente", value: (r) => r.name, width: 34 },
+              { header: "Fuente", value: (r) => r.fuente, width: 16 },
+              { header: "Ronda (semana)", value: (r) => r.roundLabel, width: 18 },
+              { header: "Sell-In (kg)", value: (r) => r.sellInKg, width: 14 },
+              { header: "Sell-Out (kg)", value: (r) => r.sellOutKg, width: 14 },
+              { header: "Inventario prom. (kg)", value: (r) => r.inventarioPromedioKg, width: 18 },
+              { header: "Ajuste inventario", value: (r) => (r.ajusteInventario ? "Sí" : "No"), width: 16 },
+            ]}
+          />
+        </CardHeader>
+        {sellOutClienteOpen && (
+          <CardContent className="p-0">
+            {sellOutPorCliente.length === 0 ? (
+              <p className="text-sm text-slate-400 py-6 text-center">
+                Sin datos de Sell-Out para el corte de filtros vigente.
+              </p>
+            ) : (
+              <div className="max-h-[420px] overflow-y-auto">
+                <Table>
+                  <TableHeader>
+                    <TableRow>
+                      <TableHead>Cliente</TableHead>
+                      <TableHead>Ronda</TableHead>
+                      <TableHead>Fuente</TableHead>
+                      <TableHead className="text-right">Sell-In (kg)</TableHead>
+                      <TableHead className="text-right">Sell-Out (kg)</TableHead>
+                      <TableHead className="text-right">Inv. prom. (kg)</TableHead>
+                    </TableRow>
+                  </TableHeader>
+                  <TableBody>
+                    {sellOutPorCliente.map((r) => (
+                      <TableRow key={`${r.locationId}-${r.roundIndex}`}>
+                        <TableCell className="font-medium">{r.name}</TableCell>
+                        <TableCell className="text-slate-500">{r.roundLabel}</TableCell>
+                        <TableCell className="text-slate-500">{r.fuente}</TableCell>
+                        <TableCell className="text-right">
+                          {r.sellInKg.toLocaleString("es-VE", { maximumFractionDigits: 1 })}
+                        </TableCell>
+                        <TableCell className="text-right">
+                          {r.sellOutKg.toLocaleString("es-VE", { maximumFractionDigits: 1 })}
+                          {r.ajusteInventario && <span className="text-xs text-amber-600"> (ajuste)</span>}
+                        </TableCell>
+                        <TableCell className="text-right">
+                          {r.inventarioPromedioKg.toLocaleString("es-VE", { maximumFractionDigits: 1 })}
+                        </TableCell>
+                      </TableRow>
+                    ))}
+                  </TableBody>
+                </Table>
+              </div>
+            )}
+          </CardContent>
+        )}
+      </Card>
+
       <Separator className="mb-4 print:hidden" />
 
       {/* ── BLOQUE 3 · Métricas complementarias (tarjetas restantes) ────── */}
@@ -636,12 +717,6 @@ export function DiennDashboardClient({
           title="Tasa de Conversión — Degustaciones"
           value={`${conversionDegustaciones.rate}%`}
           subtitle={`${conversionDegustaciones.conversions} de ${conversionDegustaciones.samples} tickets`}
-          product="panquecitas"
-        />
-        <KpiCard
-          title="Rotación Total"
-          value={`${(rotacion.rotacionTotalKg / 1000).toLocaleString("es-VE", { maximumFractionDigits: 2 })} Ton`}
-          subtitle="Sell-Out acumulado (calculado + reportado)"
           product="panquecitas"
         />
         <KpiCard

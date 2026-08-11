@@ -10,6 +10,8 @@ export type Presentacion = "400g" | "800g";
 
 export interface SellOutRecord {
   locationId: string;
+  name: string;
+  sapCode: string | null;
   sector: string | null;
   zona: string | null; // locations.region ("Territorio de ventas2")
   asesor: string | null; // locations.asesor_encargado
@@ -77,6 +79,61 @@ export function aggregateByRound(records: SellOutRecord[]): SellOutPorRondaPoint
       sellOutKg: Math.round(v.sellOutKg * 10) / 10,
       inventarioPromedioKg: v.count > 0 ? Math.round((v.inventarioPromedioKg / v.count) * 10) / 10 : 0,
     }));
+}
+
+// ── Sell-Out desglosado por cliente (por ronda/semana) ─────────────
+// Una fila por (cliente, ronda), sumando las dos presentaciones (400g+800g).
+// Es la vista tipo lista descargable que reemplaza al indicador acumulado.
+
+export interface SellOutClienteRondaRow {
+  locationId: string;
+  name: string;
+  sapCode: string | null;
+  fuente: "Calculado" | "Reportado_B2B";
+  roundIndex: number;
+  roundLabel: string;
+  sellInKg: number;
+  sellOutKg: number;
+  inventarioPromedioKg: number;
+  /** true si en esa quincena hubo clamp a 0 por Sell-Out negativo (mercancía en tránsito). */
+  ajusteInventario: boolean;
+}
+
+export function aggregateSellOutPorCliente(records: SellOutRecord[]): SellOutClienteRondaRow[] {
+  const byKey = new Map<string, SellOutClienteRondaRow & { invCount: number }>();
+  for (const r of records) {
+    const key = `${r.locationId}__${r.roundIndex}`;
+    if (!byKey.has(key)) {
+      byKey.set(key, {
+        locationId: r.locationId,
+        name: r.name,
+        sapCode: r.sapCode,
+        fuente: r.fuente,
+        roundIndex: r.roundIndex,
+        roundLabel: r.roundLabel,
+        sellInKg: 0,
+        sellOutKg: 0,
+        inventarioPromedioKg: 0,
+        invCount: 0,
+        ajusteInventario: false,
+      });
+    }
+    const e = byKey.get(key)!;
+    e.sellInKg += r.sellInKg;
+    e.sellOutKg += r.sellOutKg;
+    e.inventarioPromedioKg += r.inventarioPromedioKg;
+    e.invCount += 1;
+    e.ajusteInventario = e.ajusteInventario || r.ajusteInventario;
+  }
+
+  return Array.from(byKey.values())
+    .map(({ invCount, ...row }) => ({
+      ...row,
+      sellInKg: Math.round(row.sellInKg * 10) / 10,
+      sellOutKg: Math.round(row.sellOutKg * 10) / 10,
+      inventarioPromedioKg: invCount > 0 ? Math.round((row.inventarioPromedioKg / invCount) * 10) / 10 : 0,
+    }))
+    .sort((a, b) => a.name.localeCompare(b.name) || a.roundIndex - b.roundIndex);
 }
 
 export interface MixProductoTonPoint {
