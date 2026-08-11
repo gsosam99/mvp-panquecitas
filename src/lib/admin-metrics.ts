@@ -5,7 +5,7 @@
 
 import { isPvpDeviated } from "@/data/pvp-thresholds";
 import { sectorGroup, SECTOR_LABELS, type Sector } from "@/lib/sectors";
-import { bucketKeyFor, bucketLabelFor } from "@/lib/date-buckets";
+import { bucketKeyFor, bucketLabelFor, type TimeGranularity } from "@/lib/date-buckets";
 import { CAMPAIGN_WEEKS } from "@/lib/campaign-weeks";
 import type { Location } from "@/types";
 
@@ -148,12 +148,17 @@ export function clientesConVentaSap(rows: AdminPdvRow[]): AdminPdvRow[] {
   return rows.filter((r) => r.comprador);
 }
 
+// Estas tres listas (precio incorrecto / sin POP / exhibición) SOLO incluyen a
+// clientes con venta en SAP (r.comprador): un cliente que todavía no ha pedido
+// ni facturado no debe aparecer como incidencia — recién cuando se convierte en
+// cliente con ventas en SAP entra a estas listas. No afecta a los KPIs, que
+// usan los predicados directamente sobre toda la cartera filtrada.
 export function clientesPrecioIncorrecto(rows: AdminPdvRow[]): AdminPdvRow[] {
-  return rows.filter(precioIncorrecto);
+  return rows.filter((r) => r.comprador && precioIncorrecto(r));
 }
 
 export function clientesSinMaterialPop(rows: AdminPdvRow[]): AdminPdvRow[] {
-  return rows.filter((r) => r.visitado && r.popPresent === false);
+  return rows.filter((r) => r.comprador && r.visitado && r.popPresent === false);
 }
 
 export function clientesRiesgoStockOut(rows: AdminPdvRow[]): AdminPdvRow[] {
@@ -170,7 +175,8 @@ export interface ExhibicionRow {
 export function clientesExhibicionDeficiente(rows: AdminPdvRow[]): ExhibicionRow[] {
   const result: ExhibicionRow[] = [];
   for (const row of rows) {
-    if (!row.visitado) continue;
+    // Solo clientes con venta en SAP (ver nota en clientesPrecioIncorrecto).
+    if (!row.comprador || !row.visitado) continue;
     if (row.productPresent === false) {
       result.push({ row, motivo: "SIN_PRESENCIA" });
       continue;
@@ -334,17 +340,20 @@ export function computeEjecucionSemanal(
   return points;
 }
 
-export function computeActivacionSemanal(rows: AdminPdvRow[]): ActivacionPoint[] {
+export function computeActivacionSemanal(
+  rows: AdminPdvRow[],
+  granularity: TimeGranularity = "week"
+): ActivacionPoint[] {
   const total = rows.length;
   if (total === 0) return [];
 
   const conFecha = rows.filter((r): r is AdminPdvRow & { primeraCompra: string } => r.primeraCompra !== null);
   if (conFecha.length === 0) return [];
 
-  const buckets = Array.from(new Set(conFecha.map((r) => bucketKeyFor(r.primeraCompra, "week")))).sort();
+  const buckets = Array.from(new Set(conFecha.map((r) => bucketKeyFor(r.primeraCompra, granularity)))).sort();
 
   return buckets.map((bucket) => {
-    const count = conFecha.filter((r) => bucketKeyFor(r.primeraCompra, "week") <= bucket).length;
-    return { bucket, label: bucketLabelFor(bucket, "week"), pct: pct(count, total), count };
+    const count = conFecha.filter((r) => bucketKeyFor(r.primeraCompra, granularity) <= bucket).length;
+    return { bucket, label: bucketLabelFor(bucket, granularity), pct: pct(count, total), count };
   });
 }

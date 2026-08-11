@@ -13,6 +13,7 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Separator } from "@/components/ui/separator";
 import { SECTOR_LABELS, type Sector } from "@/lib/sectors";
+import type { TimeGranularity } from "@/lib/date-buckets";
 import type { Location } from "@/types";
 import {
   CARAS_FRONTALES_MINIMO,
@@ -38,6 +39,12 @@ import {
 } from "@/lib/admin-metrics";
 
 const SECTOR_KEYS = Object.keys(SECTOR_LABELS) as Sector[];
+
+const GRANULARITY_OPTIONS: { key: TimeGranularity; label: string }[] = [
+  { key: "day", label: "Día" },
+  { key: "week", label: "Semana" },
+  { key: "month", label: "Mes" },
+];
 
 function money(value: number | null): string {
   return value === null ? "s/d" : `$${value.toFixed(2)}`;
@@ -75,6 +82,7 @@ export function AdminExecutionDashboardClient({
   const [oficina, setOficina] = useState<OficinaFilter>("TOTAL");
   const [grupoVendedor, setGrupoVendedor] = useState("");
   const [tipoClienteFilter, setTipoClienteFilter] = useState("");
+  const [activacionGranularity, setActivacionGranularity] = useState<TimeGranularity>("week");
 
   const grupos = useMemo(() => grupoVendedorOptions(rows), [rows]);
 
@@ -84,7 +92,10 @@ export function AdminExecutionDashboardClient({
   );
 
   const kpis = useMemo(() => computeAdminKpis(filtered), [filtered]);
-  const activacion = useMemo(() => computeActivacionSemanal(filtered), [filtered]);
+  const activacion = useMemo(
+    () => computeActivacionSemanal(filtered, activacionGranularity),
+    [filtered, activacionGranularity]
+  );
 
   // Mapas de apoyo para los gráficos semanales (S2/S4/S6/S8): se derivan de
   // `rows` completo (universo entero, no `filtered`) porque el recorte por
@@ -233,19 +244,36 @@ export function AdminExecutionDashboardClient({
           <div>
             <CardTitle>Activación de clientes en el tiempo</CardTitle>
             <p className="text-xs text-slate-400 mt-1">
-              % acumulado de la cartera (según los filtros vigentes) con al menos una venta facturada en SAP, semana a
-              semana.
+              % acumulado de la cartera (según los filtros vigentes) con al menos una venta facturada en SAP, en el
+              tiempo.
             </p>
           </div>
-          <ExportExcelButton
-            filename="datos_activacion_clientes"
-            rows={activacion}
-            columns={[
-              { header: "Semana", value: (r) => r.label },
-              { header: "% Activación", value: (r) => r.pct },
-              { header: "# Clientes activados", value: (r) => r.count },
-            ]}
-          />
+          <div className="flex flex-wrap items-center gap-2 print:hidden">
+            <div className="flex rounded-lg border border-slate-200 overflow-hidden text-xs font-medium">
+              {GRANULARITY_OPTIONS.map((opt) => (
+                <button
+                  key={opt.key}
+                  onClick={() => setActivacionGranularity(opt.key)}
+                  className={`px-3 py-1.5 transition-colors ${
+                    activacionGranularity === opt.key
+                      ? "bg-slate-900 text-white"
+                      : "bg-white text-slate-500 hover:bg-slate-50"
+                  }`}
+                >
+                  {opt.label}
+                </button>
+              ))}
+            </div>
+            <ExportExcelButton
+              filename="datos_activacion_clientes"
+              rows={activacion}
+              columns={[
+                { header: "Período", value: (r) => r.label },
+                { header: "% Activación", value: (r) => r.pct },
+                { header: "# Clientes activados", value: (r) => r.count },
+              ]}
+            />
+          </div>
         </CardHeader>
         <CardContent>
           {activacion.length > 0 ? (
