@@ -51,5 +51,16 @@ const Inner = dynamic(
 );
 
 export function PanVsHarinaPanChart({ data }: { data: PanVsHarinaPanPoint[] }) {
-  return <Inner data={data} />;
+  return (
+    <div>
+      <Inner data={data} />
+      {/* Fórmula/cálculo del ratio que genera la gráfica (pedido explícito). */}
+      <div className="mt-3 rounded-lg border border-slate-200 bg-slate-50 px-3 py-2 text-xs text-slate-600">
+        <span className="font-semibold">Ratio Panquecitas / HPM</span> ={" "}
+        <span className="font-mono">Σ Radar Panquecitas ÷ Σ Radar Harina PAN</span> (por período). ·{" "}
+        <span className="font-semibold">Clientes</span>: solo compradores de Panquecitas (Radar &gt; 0). ·{" "}
+        <span className="font-semibold">Universo</span>: los 358 clientes del piloto, hayan comprado o no.
+      </div>
+    </div>
+  );
 }

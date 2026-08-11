@@ -8,7 +8,7 @@ import { ReportPrintHeader } from "@/components/dashboard/ReportPrintHeader";
 import { CoberturaComunicacionChart } from "@/components/dashboard/CoberturaComunicacionChart";
 import { DemandaInsatisfechaChart } from "@/components/dashboard/DemandaInsatisfechaChart";
 import { VentaRecompraActivacionChart } from "@/components/dashboard/VentaRecompraActivacionChart";
-import { VolumenHpmChart } from "@/components/dashboard/VolumenHpmChart";
+import { PosicionPdvChart } from "@/components/dashboard/PosicionPdvChart";
 import { PanVsHarinaPanChart } from "@/components/dashboard/PanVsHarinaPanChart";
 import { RoundLegend } from "@/components/dashboard/RoundLegend";
 import { SellOutChart } from "@/components/dashboard/SellOutChart";
@@ -37,6 +37,7 @@ import type {
   PanComparisonPoblacion,
   PanVsHarinaPanPoint,
   PenetracionRadarVsHpm,
+  PosicionPdvPoint,
   MaterialPopPreciadorResult,
   RunningVentasResult,
   StockOutClientePoint,
@@ -44,7 +45,6 @@ import type {
   TimeGranularity,
   VentaRecompraActivacionPoint,
   VolumenRadarAcumulado,
-  VolumenVendidoPoint,
 } from "@/lib/dienn-queries";
 import type { Sector } from "@/lib/sectors";
 
@@ -64,14 +64,14 @@ export interface SectorBundle {
   runningVentas: RunningVentasResult;
   /** Venta acumulada (Radar) + tasa de recompra + % activación de clientes, por día/semana/mes. */
   ventaRecompraActivacion: Record<TimeGranularity, VentaRecompraActivacionPoint[]>;
-  /** Volumen vendido por período (Panquecitas / HPM) + % activación, por día/semana/mes. */
-  volumenVendido: Record<TimeGranularity, VolumenVendidoPoint[]>;
   /** Comparativa de penetración Radar Panquecitas vs. HPM sobre la lista objetivo. */
   penetracionRadarVsHpm: PenetracionRadarVsHpm;
   /** Clientes con venta y ≤3 unidades en tienda, con su ubicación. */
   stockOut: StockOutResult;
   /** Ratio de preciador sobre clientes con presencia del producto. */
   materialPopPreciador: MaterialPopPreciadorResult;
+  /** Distribución de la posición del producto en el PDV (encuestas). */
+  posicionPdv: PosicionPdvPoint[];
   detalleSegmentos: DetalleSegmentoRow[];
 }
 
@@ -129,7 +129,6 @@ export function DiennDashboardClient({
   const [fuenteFilter, setFuenteFilter] = useState<FuenteFilter>("TODOS");
   const [granularity, setGranularity] = useState<TimeGranularity>("week");
   const [comboGranularity, setComboGranularity] = useState<TimeGranularity>("week");
-  const [hpmGranularity, setHpmGranularity] = useState<TimeGranularity>("week");
   const [stockOutOpen, setStockOutOpen] = useState(false);
   const [panPoblacion, setPanPoblacion] = useState<PanComparisonPoblacion>("clientes");
   const [panGranularity, setPanGranularity] = useState<PanComparisonGranularity>("month");
@@ -158,7 +157,6 @@ export function DiennDashboardClient({
   const panPoints = bundle.panVsHarinaPan[panPoblacion][panGranularity];
 
   const comboPoints = bundle.ventaRecompraActivacion[comboGranularity];
-  const hpmPoints = bundle.volumenVendido[hpmGranularity];
 
   // Proporción de volumen Panquecitas sobre Harina PAN (Radar) — solo se
   // muestra como acotación en la tarjeta de volumen de Panquecitas.
@@ -420,53 +418,6 @@ export function DiennDashboardClient({
         </CardContent>
       </Card>
 
-      {/* ── Volumen vendido HPM (barras, por período) ─────────────────────── */}
-      <Card className="mb-6 print-avoid-break">
-        <CardHeader className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between space-y-0">
-          <div>
-            <CardTitle>Volumen vendido HPM</CardTitle>
-            <p className="text-xs text-slate-400 mt-1">
-              Volumen de Harina PAN vendido por período, a partir del Radar de HPM.
-            </p>
-          </div>
-          <div className="flex flex-wrap items-center gap-2 print:hidden">
-            <div className="flex rounded-lg border border-slate-200 overflow-hidden text-xs font-medium">
-              {GRANULARITY_OPTIONS.map((opt) => (
-                <button
-                  key={opt.key}
-                  onClick={() => setHpmGranularity(opt.key)}
-                  className={`px-3 py-1.5 transition-colors ${
-                    hpmGranularity === opt.key ? "bg-slate-900 text-white" : "bg-white text-slate-500 hover:bg-slate-50"
-                  }`}
-                >
-                  {opt.label}
-                </button>
-              ))}
-            </div>
-            <ExportExcelButton
-              filename="datos_volumen_hpm"
-              rows={hpmPoints}
-              columns={[
-                { header: "Período", value: (r) => r.label },
-                { header: "Volumen HPM (kg)", value: (r) => r.hpmKg },
-              ]}
-            />
-          </div>
-        </CardHeader>
-        <CardContent>
-          {hpmPoints.some((p) => p.hpmKg > 0) ? (
-            <VolumenHpmChart data={hpmPoints} />
-          ) : (
-            <div className="h-[300px] flex items-center justify-center text-slate-400">
-              <div className="text-center">
-                <p className="text-4xl mb-2">📊</p>
-                <p>Sin datos de Radar de Harina PAN todavía.</p>
-              </div>
-            </div>
-          )}
-        </CardContent>
-      </Card>
-
       {/* ── Gráfico 2: Cobertura y Comunicación por Ciudad ────────────────── */}
       <Card className="mb-6 print-avoid-break">
         <CardHeader className="flex flex-row items-start justify-between gap-3 space-y-0">
@@ -502,6 +453,39 @@ export function DiennDashboardClient({
               <div className="text-center">
                 <p className="text-4xl mb-2">🗺️</p>
                 <p>Sin visitas de mercaderista registradas aún.</p>
+              </div>
+            </div>
+          )}
+        </CardContent>
+      </Card>
+
+      {/* ── Posición del producto en el PDV (encuestas) ───────────────────── */}
+      <Card className="mb-6 print-avoid-break">
+        <CardHeader className="flex flex-row items-start justify-between gap-3 space-y-0">
+          <div>
+            <CardTitle>Posición del producto en el PDV</CardTitle>
+            <p className="text-xs text-slate-400 mt-1">
+              Dónde ubican el producto los mercaderistas, entre clientes con presencia del producto. Un cliente puede
+              contar en más de una ubicación.
+            </p>
+          </div>
+          <ExportExcelButton
+            filename={`Posición en PDV — ${filtroTexto}`}
+            rows={bundle.posicionPdv}
+            columns={[
+              { header: "Ubicación", value: (r) => r.categoria, width: 34 },
+              { header: "Clientes", value: (r) => r.clientes, width: 14 },
+            ]}
+          />
+        </CardHeader>
+        <CardContent>
+          {bundle.posicionPdv.some((p) => p.clientes > 0) ? (
+            <PosicionPdvChart data={bundle.posicionPdv} />
+          ) : (
+            <div className="h-[300px] flex items-center justify-center text-slate-400">
+              <div className="text-center">
+                <p className="text-4xl mb-2">📍</p>
+                <p>Sin datos de ubicación del producto todavía.</p>
               </div>
             </div>
           )}

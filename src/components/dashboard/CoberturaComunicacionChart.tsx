@@ -80,7 +80,14 @@ const Inner = dynamic(
             ))}
             <XAxis dataKey="label" tick={{ fontSize: 11, fill: "#94a3b8" }} />
             <YAxis tick={{ fontSize: 11, fill: "#94a3b8" }} unit="%" width={44} />
-            <Tooltip contentStyle={{ fontSize: 12, borderRadius: 8, border: "1px solid #e2e8f0" }} />
+            <Tooltip
+              contentStyle={{ fontSize: 12, borderRadius: 8, border: "1px solid #e2e8f0" }}
+              labelFormatter={(label) => String(label)}
+              formatter={(value, name) => [
+                `${Number(value ?? 0).toLocaleString("es-VE", { maximumFractionDigits: 1 })}%`,
+                String(name),
+              ]}
+            />
             <Legend wrapperStyle={{ fontSize: 12 }} />
             {sectors.map((s) => (
               <Bar

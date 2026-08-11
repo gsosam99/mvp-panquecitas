@@ -7,13 +7,13 @@ import {
   getMixProducto,
   getPanVsHarinaPan,
   getPenetracionRadarVsHpm,
+  getPosicionPdv,
   getRunningVentas,
   getStockOut,
   getTotalToneladas,
   getTotalToneladasPedidas,
   getVentaRecompraActivacion,
   getVolumenRadarAcumulado,
-  getVolumenVendido,
 } from "@/lib/dienn-queries";
 import { getIndiceTiendaPerfecta } from "@/lib/admin-queries";
 import { computeSellOut } from "@/lib/sellout-queries";
@@ -34,10 +34,10 @@ async function getBundle(sector?: Sector): Promise<SectorBundle> {
     panVsHarinaPanUniverso,
     runningVentas,
     ventaRecompraActivacion,
-    volumenVendido,
     penetracionRadarVsHpm,
     stockOut,
     materialPopPreciador,
+    posicionPdv,
     detalleSegmentos,
   ] = await Promise.all([
     getTotalToneladas(sector),
@@ -49,10 +49,10 @@ async function getBundle(sector?: Sector): Promise<SectorBundle> {
     getPanVsHarinaPan(sector, "universo"),
     getRunningVentas(sector),
     getVentaRecompraActivacion(sector),
-    getVolumenVendido(sector),
     getPenetracionRadarVsHpm(sector),
     getStockOut(sector),
     getMaterialPopPreciador(sector),
+    getPosicionPdv(sector),
     getDetalleClientesPorSegmento(sector),
   ]);
 
@@ -65,10 +65,10 @@ async function getBundle(sector?: Sector): Promise<SectorBundle> {
     panVsHarinaPan: { clientes: panVsHarinaPanClientes, universo: panVsHarinaPanUniverso },
     runningVentas,
     ventaRecompraActivacion,
-    volumenVendido,
     penetracionRadarVsHpm,
     stockOut,
     materialPopPreciador,
+    posicionPdv,
     detalleSegmentos,
   };
 }
