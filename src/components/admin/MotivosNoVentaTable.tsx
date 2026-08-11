@@ -129,6 +129,7 @@ export function MotivosNoVentaTable({ title, description, rows, exportName }: Mo
                   <TableHead>Ciudad</TableHead>
                   <TableHead>Material</TableHead>
                   <TableHead>Motivo</TableHead>
+                  <TableHead className="text-right">% Efectividad visita</TableHead>
                 </TableRow>
               </TableHeader>
               <TableBody>
@@ -141,6 +142,11 @@ export function MotivosNoVentaTable({ title, description, rows, exportName }: Mo
                     <TableCell className="text-xs text-slate-600">{r.ciudad ?? "—"}</TableCell>
                     <TableCell className="text-xs text-slate-500 max-w-[220px] truncate">{r.materialName ?? "—"}</TableCell>
                     <TableCell className="text-xs text-slate-700">{r.motivo}</TableCell>
+                    <TableCell className="text-xs text-slate-700 text-right whitespace-nowrap">
+                      {r.efectividadVisita == null
+                        ? "—"
+                        : `${r.efectividadVisita.toLocaleString("es-VE", { maximumFractionDigits: 1 })}%`}
+                    </TableCell>
                   </TableRow>
                 ))}
               </TableBody>
