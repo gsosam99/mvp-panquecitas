@@ -24,9 +24,10 @@ import {
 } from "@/components/ui/table";
 import {
   aggregateByRound,
-  aggregateSellOutPorCliente,
   computeRotacion,
   filterRecords,
+  filterSellOutClientes,
+  type SellOutClienteDiffRow,
   type SellOutRecord,
 } from "@/lib/sellout-utils";
 import type {
@@ -109,6 +110,7 @@ interface Props {
   sectorLabels: Record<Sector, string>;
   pilotSectors: readonly Sector[];
   sellOutRecords: SellOutRecord[];
+  sellOutClientes: SellOutClienteDiffRow[];
   zonas: string[];
   asesores: string[];
 }
@@ -121,6 +123,7 @@ export function DiennDashboardClient({
   sectorLabels,
   pilotSectors,
   sellOutRecords,
+  sellOutClientes,
   zonas,
   asesores,
 }: Props) {
@@ -153,7 +156,16 @@ export function DiennDashboardClient({
   );
 
   const sellOutPorRonda = useMemo(() => aggregateByRound(filteredSellOut), [filteredSellOut]);
-  const sellOutPorCliente = useMemo(() => aggregateSellOutPorCliente(filteredSellOut), [filteredSellOut]);
+  const sellOutPorCliente = useMemo(
+    () =>
+      filterSellOutClientes(sellOutClientes, {
+        sector: filter === "TOTAL" ? undefined : filter,
+        zona: zonaFilter || undefined,
+        asesor: asesorFilter || undefined,
+        fuente: fuenteFilter,
+      }),
+    [sellOutClientes, filter, zonaFilter, asesorFilter, fuenteFilter]
+  );
   const rotacion = useMemo(() => computeRotacion(filteredSellOut), [filteredSellOut]);
   const mixProducto = bundle.mixProducto;
 
@@ -593,9 +605,9 @@ export function DiennDashboardClient({
             <div>
               <CardTitle>Sell-Out por cliente ({sellOutPorCliente.length})</CardTitle>
               <p className="text-xs text-slate-400 mt-1">
-                Sell-Out semanal por cliente y ronda (Inv. R1 + Sell-In − Inv. R2, corte D-1). Fuente Calculado
-                (bodegas/panaderías) o Reportado_B2B (cadenas). &quot;Ajuste&quot; = quincena con Sell-Out negativo
-                llevada a 0 (mercancía en tránsito, se compensa en la siguiente).
+                Sell-Out = <span className="font-semibold">reporte SAP (Radar) − inventario en PDV</span> (lo que contó
+                el mercaderista en su última visita: anaquel + depósito). No requiere dos visitas. &quot;Ajuste&quot; =
+                había más inventario que lo registrado por SAP (diferencia negativa llevada a 0).
               </p>
             </div>
           </button>
@@ -606,10 +618,9 @@ export function DiennDashboardClient({
               { header: "Código SAP", value: (r) => r.sapCode ?? "", width: 16 },
               { header: "Cliente", value: (r) => r.name, width: 34 },
               { header: "Fuente", value: (r) => r.fuente, width: 16 },
-              { header: "Ronda (semana)", value: (r) => r.roundLabel, width: 18 },
-              { header: "Sell-In (kg)", value: (r) => r.sellInKg, width: 14 },
+              { header: "Sell-In SAP (kg)", value: (r) => r.sellInSapKg, width: 16 },
+              { header: "Inventario PDV (kg)", value: (r) => r.inventarioPdvKg, width: 18 },
               { header: "Sell-Out (kg)", value: (r) => r.sellOutKg, width: 14 },
-              { header: "Inventario prom. (kg)", value: (r) => r.inventarioPromedioKg, width: 18 },
               { header: "Ajuste inventario", value: (r) => (r.ajusteInventario ? "Sí" : "No"), width: 16 },
             ]}
           />
@@ -618,7 +629,7 @@ export function DiennDashboardClient({
           <CardContent className="p-0">
             {sellOutPorCliente.length === 0 ? (
               <p className="text-sm text-slate-400 py-6 text-center">
-                Sin datos de Sell-Out para el corte de filtros vigente.
+                Sin visitas de mercaderista para el corte de filtros vigente.
               </p>
             ) : (
               <div className="max-h-[420px] overflow-y-auto">
@@ -626,28 +637,26 @@ export function DiennDashboardClient({
                   <TableHeader>
                     <TableRow>
                       <TableHead>Cliente</TableHead>
-                      <TableHead>Ronda</TableHead>
                       <TableHead>Fuente</TableHead>
-                      <TableHead className="text-right">Sell-In (kg)</TableHead>
+                      <TableHead className="text-right">Sell-In SAP (kg)</TableHead>
+                      <TableHead className="text-right">Inventario PDV (kg)</TableHead>
                       <TableHead className="text-right">Sell-Out (kg)</TableHead>
-                      <TableHead className="text-right">Inv. prom. (kg)</TableHead>
                     </TableRow>
                   </TableHeader>
                   <TableBody>
                     {sellOutPorCliente.map((r) => (
-                      <TableRow key={`${r.locationId}-${r.roundIndex}`}>
+                      <TableRow key={r.locationId}>
                         <TableCell className="font-medium">{r.name}</TableCell>
-                        <TableCell className="text-slate-500">{r.roundLabel}</TableCell>
                         <TableCell className="text-slate-500">{r.fuente}</TableCell>
                         <TableCell className="text-right">
-                          {r.sellInKg.toLocaleString("es-VE", { maximumFractionDigits: 1 })}
+                          {r.sellInSapKg.toLocaleString("es-VE", { maximumFractionDigits: 1 })}
+                        </TableCell>
+                        <TableCell className="text-right">
+                          {r.inventarioPdvKg.toLocaleString("es-VE", { maximumFractionDigits: 1 })}
                         </TableCell>
                         <TableCell className="text-right">
                           {r.sellOutKg.toLocaleString("es-VE", { maximumFractionDigits: 1 })}
                           {r.ajusteInventario && <span className="text-xs text-amber-600"> (ajuste)</span>}
-                        </TableCell>
-                        <TableCell className="text-right">
-                          {r.inventarioPromedioKg.toLocaleString("es-VE", { maximumFractionDigits: 1 })}
                         </TableCell>
                       </TableRow>
                     ))}

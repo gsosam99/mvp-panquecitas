@@ -1032,28 +1032,43 @@ export async function getPosicionPdv(sector?: Sector): Promise<PosicionPdvPoint[
   const supabase = createSupabaseServiceClient();
   const { data: visitsData } = await supabase
     .from("mercaderista_visits")
-    .select("location_id, created_at, product_present, product_location")
+    .select("location_id, created_at, product_present, product_location, product_location_other")
     .order("created_at", { ascending: false });
 
-  type Visita = { location_id: string; product_present: boolean; product_location: string[] | null };
+  type Visita = {
+    location_id: string;
+    product_present: boolean;
+    product_location: string[] | null;
+    product_location_other: string | null;
+  };
   const lastVisit = new Map<string, Visita>();
   for (const v of (visitsData ?? []) as Visita[]) {
     if (!ids.has(v.location_id)) continue;
     if (!lastVisit.has(v.location_id)) lastVisit.set(v.location_id, v);
   }
 
-  let harinaTrigo = 0;
-  let otraCategoria = 0;
+  // "Junto a harina de trigo" es una categoría fija; "otra categoría" NO se
+  // agrupa en una sola barra: se desglosa por la categoría específica que
+  // indicó el mercaderista en product_location_other.
+  const HARINA_TRIGO = "Junto a harina de trigo";
+  const counts = new Map<string, number>();
+  const add = (categoria: string) => counts.set(categoria, (counts.get(categoria) ?? 0) + 1);
+
   for (const v of lastVisit.values()) {
     if (v.product_present !== true || !v.product_location) continue;
-    if (v.product_location.includes("HARINA_TRIGO")) harinaTrigo++;
-    if (v.product_location.includes("OTRA_CATEGORIA")) otraCategoria++;
+    if (v.product_location.includes("HARINA_TRIGO")) add(HARINA_TRIGO);
+    if (v.product_location.includes("OTRA_CATEGORIA")) {
+      const especifica = v.product_location_other?.trim();
+      add(especifica && especifica.length > 0 ? especifica : "Otra categoría (sin especificar)");
+    }
   }
 
-  return [
-    { categoria: "Junto a harina de trigo", clientes: harinaTrigo },
-    { categoria: "Otra categoría complementaria", clientes: otraCategoria },
-  ];
+  return Array.from(counts.entries())
+    .map(([categoria, clientes]) => ({ categoria, clientes }))
+    // Harina de trigo primero; el resto por cantidad de clientes desc.
+    .sort((a, b) =>
+      a.categoria === HARINA_TRIGO ? -1 : b.categoria === HARINA_TRIGO ? 1 : b.clientes - a.clientes
+    );
 }
 
 export { PILOT_SECTORS, SECTOR_LABELS };

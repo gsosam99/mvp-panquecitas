@@ -1,4 +1,5 @@
 import { createSupabaseServiceClient } from "@/lib/supabase/server";
+import { PRODUCT_IDS } from "@/data/catalog";
 import { VISIT_ROUNDS } from "@/data/visit-rounds";
 import { getUniverseLocations } from "@/lib/universe";
 import { sectorGroup } from "@/lib/sectors";
@@ -6,6 +7,7 @@ import {
   presentacionFromVariant,
   pickVisitForRound,
   type Presentacion,
+  type SellOutClienteDiffRow,
   type SellOutRecord,
   type VisitRow,
 } from "@/lib/sellout-utils";
@@ -245,16 +247,102 @@ export async function computeSellOut(): Promise<SellOutRecord[]> {
   return records;
 }
 
+// ── Sell-Out por cliente = diferencia SAP − inventario en PDV ──────
+// No requiere dos visitas: una sola visita de mercaderista (inventario en
+// tienda) contra el reporte de SAP (Radar de Panquecitas). Ver
+// SellOutClienteDiffRow en sellout-utils.
+export async function getSellOutPorClienteDiff(): Promise<SellOutClienteDiffRow[]> {
+  const supabase = createSupabaseServiceClient();
+  const universo = await getUniverseLocations();
+  if (universo.length === 0) return [];
+  const locationIds = universo.map((l) => l.id);
+
+  // 1. Reporte SAP (Radar de Panquecitas) en kg por cliente.
+  const { data: radarData } = await supabase
+    .from("sap_sell_in_records")
+    .select("location_id, quantity_kg")
+    .eq("product_id", PRODUCT_IDS.PANQUECITAS)
+    .in("location_id", locationIds);
+  const sellInByLocation = new Map<string, number>();
+  for (const r of (radarData ?? []) as { location_id: string; quantity_kg: number }[]) {
+    sellInByLocation.set(r.location_id, (sellInByLocation.get(r.location_id) ?? 0) + r.quantity_kg);
+  }
+
+  // 2. Última visita de mercaderista por cliente (inventario en PDV).
+  const { data: visitsData } = await supabase
+    .from("mercaderista_visits")
+    .select("id, location_id, created_at, anaquel_400_units, anaquel_800_units, deposit_access")
+    .in("location_id", locationIds)
+    .order("created_at", { ascending: false });
+  const lastVisit = new Map<string, VisitRow>();
+  for (const v of (visitsData ?? []) as VisitRow[]) {
+    if (!lastVisit.has(v.location_id)) lastVisit.set(v.location_id, v);
+  }
+
+  // 3. Depósito (BODEGA) en kg de esas visitas.
+  const visitIds = Array.from(lastVisit.values()).map((v) => v.id);
+  const depositoKgByVisit = new Map<string, number>();
+  if (visitIds.length > 0) {
+    const { data: variantsData } = await supabase.from("variants").select("id, presentation_kg, units_per_bulk");
+    const kgPerUnit = new Map<string, number>(
+      ((variantsData ?? []) as { id: string; presentation_kg: number; units_per_bulk: number }[]).map((v) => [
+        v.id,
+        v.presentation_kg * v.units_per_bulk,
+      ])
+    );
+    const { data: auditsData } = await supabase
+      .from("inventory_audits")
+      .select("visit_id, variant_id, quantity")
+      .eq("zone", "BODEGA")
+      .in("visit_id", visitIds);
+    for (const a of (auditsData ?? []) as { visit_id: string; variant_id: string; quantity: number }[]) {
+      if (!presentacionFromVariant(a.variant_id)) continue;
+      const kg = a.quantity * (kgPerUnit.get(a.variant_id) ?? 0);
+      depositoKgByVisit.set(a.visit_id, (depositoKgByVisit.get(a.visit_id) ?? 0) + kg);
+    }
+  }
+
+  const rows: SellOutClienteDiffRow[] = [];
+  for (const location of universo) {
+    const visit = lastVisit.get(location.id);
+    if (!visit) continue; // sin reporte del mercaderista no hay diferencia que calcular
+
+    const anaquelKg = (visit.anaquel_400_units ?? 0) * 0.4 + (visit.anaquel_800_units ?? 0) * 0.8;
+    const depositoKg = visit.deposit_access ? depositoKgByVisit.get(visit.id) ?? 0 : 0;
+    const inventarioPdvKg = anaquelKg + depositoKg;
+    const sellInSapKg = sellInByLocation.get(location.id) ?? 0;
+    const diff = sellInSapKg - inventarioPdvKg;
+
+    rows.push({
+      locationId: location.id,
+      name: location.name,
+      sapCode: location.sap_code,
+      sector: sectorGroup(location.oficina_venta),
+      zona: location.region,
+      asesor: location.asesor_encargado,
+      fuente: location.fuente_sell_out === "Reportado_B2B" ? "Reportado_B2B" : "Calculado",
+      sellInSapKg: Math.round(sellInSapKg * 10) / 10,
+      inventarioPdvKg: Math.round(inventarioPdvKg * 10) / 10,
+      sellOutKg: Math.round(Math.max(0, diff) * 10) / 10,
+      ajusteInventario: diff < 0,
+    });
+  }
+
+  return rows.sort((a, b) => a.name.localeCompare(b.name));
+}
+
 export {
   aggregateByRound,
   aggregateMixProducto,
   computeRotacion,
   filterRecords,
+  filterSellOutClientes,
   getAvailableZonasYAsesores,
 } from "@/lib/sellout-utils";
 export type {
   Presentacion,
   SellOutRecord,
+  SellOutClienteDiffRow,
   SellOutPorRondaPoint,
   MixProductoTonPoint,
   RotacionResult,

@@ -16,7 +16,7 @@ import {
   getVolumenRadarAcumulado,
 } from "@/lib/dienn-queries";
 import { getIndiceTiendaPerfecta } from "@/lib/admin-queries";
-import { computeSellOut } from "@/lib/sellout-queries";
+import { computeSellOut, getSellOutPorClienteDiff } from "@/lib/sellout-queries";
 import { getAvailableZonasYAsesores } from "@/lib/sellout-utils";
 import { getUniverseLocations, SECTOR_LABELS, type Sector } from "@/lib/universe";
 import { DiennDashboardClient, type SectorBundle } from "@/components/dashboard/DiennDashboardClient";
@@ -81,7 +81,7 @@ async function getBundle(sector?: Sector): Promise<SectorBundle> {
 // Sell-Out completo (sin filtrar), y se le pasan al cliente, que decide
 // qué mostrar sin volver a pedir datos.
 export async function DiennStrategicDashboard() {
-  const [total, cumana, barquisimetoEste, coberturaComunicacion, conversionDegustaciones, tiendaIdeal, sellOutRecords, universo] =
+  const [total, cumana, barquisimetoEste, coberturaComunicacion, conversionDegustaciones, tiendaIdeal, sellOutRecords, sellOutClientes, universo] =
     await Promise.all([
       getBundle(undefined),
       getBundle("cumana"),
@@ -90,6 +90,7 @@ export async function DiennStrategicDashboard() {
       getConversionDegustaciones(),
       getIndiceTiendaPerfecta(),
       computeSellOut(),
+      getSellOutPorClienteDiff(),
       getUniverseLocations(),
     ]);
 
@@ -104,6 +105,7 @@ export async function DiennStrategicDashboard() {
       sectorLabels={SECTOR_LABELS}
       pilotSectors={PILOT_SECTOR_KEYS}
       sellOutRecords={sellOutRecords}
+      sellOutClientes={sellOutClientes}
       zonas={zonas}
       asesores={asesores}
     />

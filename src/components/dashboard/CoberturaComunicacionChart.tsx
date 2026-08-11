@@ -81,12 +81,25 @@ const Inner = dynamic(
             <XAxis dataKey="label" tick={{ fontSize: 11, fill: "#94a3b8" }} />
             <YAxis tick={{ fontSize: 11, fill: "#94a3b8" }} unit="%" width={44} />
             <Tooltip
-              contentStyle={{ fontSize: 12, borderRadius: 8, border: "1px solid #e2e8f0" }}
-              labelFormatter={(label) => String(label)}
-              formatter={(value, name) => [
-                `${Number(value ?? 0).toLocaleString("es-VE", { maximumFractionDigits: 1 })}%`,
-                String(name),
-              ]}
+              content={(props: { active?: boolean; label?: unknown; payload?: unknown[] }) => {
+                if (!props.active || !Array.isArray(props.payload) || props.payload.length === 0) return null;
+                // Solo entradas con valor NUMÉRICO (así se eliminan por completo
+                // los dos textos "label"/"NaN%" que metía el tooltip por defecto).
+                const items = (props.payload as { name?: string; value?: unknown; color?: string }[]).filter(
+                  (p) => typeof p.value === "number" && Number.isFinite(p.value)
+                );
+                if (items.length === 0) return null;
+                return (
+                  <div style={{ fontSize: 12, borderRadius: 8, border: "1px solid #e2e8f0", background: "#fff", padding: "6px 10px" }}>
+                    <div style={{ fontWeight: 600, marginBottom: 4 }}>{String(props.label ?? "")}</div>
+                    {items.map((p, i) => (
+                      <div key={i} style={{ color: p.color }}>
+                        {p.name}: {Number(p.value).toLocaleString("es-VE", { maximumFractionDigits: 1 })}%
+                      </div>
+                    ))}
+                  </div>
+                );
+              }}
             />
             <Legend wrapperStyle={{ fontSize: 12 }} />
             {sectors.map((s) => (

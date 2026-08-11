@@ -81,59 +81,42 @@ export function aggregateByRound(records: SellOutRecord[]): SellOutPorRondaPoint
     }));
 }
 
-// ── Sell-Out desglosado por cliente (por ronda/semana) ─────────────
-// Una fila por (cliente, ronda), sumando las dos presentaciones (400g+800g).
-// Es la vista tipo lista descargable que reemplaza al indicador acumulado.
+// ── Sell-Out por cliente = diferencia SAP − inventario en PDV ──────
+// NO depende de dos visitas de mercaderista: para cada cliente se toma el
+// reporte de SAP (despachado/Radar) y el inventario que el mercaderista contó
+// en su última visita (anaquel + depósito). El Sell-Out es la diferencia:
+//   Sell-Out = Sell-In (SAP) − Inventario en PDV (mercaderista)
+// Si la diferencia es negativa (hay más en tienda que lo que SAP registró) se
+// clampa a 0 y se marca ajuste_inventario. Filas construidas en sellout-queries.
 
-export interface SellOutClienteRondaRow {
+export interface SellOutClienteDiffRow {
   locationId: string;
   name: string;
   sapCode: string | null;
+  sector: string | null;
+  zona: string | null;
+  asesor: string | null;
   fuente: "Calculado" | "Reportado_B2B";
-  roundIndex: number;
-  roundLabel: string;
-  sellInKg: number;
+  /** Reporte SAP (kg despachado/Radar de Panquecitas del cliente). */
+  sellInSapKg: number;
+  /** Inventario que contó el mercaderista en la última visita (anaquel + depósito), kg. */
+  inventarioPdvKg: number;
+  /** Sell-Out = max(0, sellInSapKg − inventarioPdvKg). */
   sellOutKg: number;
-  inventarioPromedioKg: number;
-  /** true si en esa quincena hubo clamp a 0 por Sell-Out negativo (mercancía en tránsito). */
   ajusteInventario: boolean;
 }
 
-export function aggregateSellOutPorCliente(records: SellOutRecord[]): SellOutClienteRondaRow[] {
-  const byKey = new Map<string, SellOutClienteRondaRow & { invCount: number }>();
-  for (const r of records) {
-    const key = `${r.locationId}__${r.roundIndex}`;
-    if (!byKey.has(key)) {
-      byKey.set(key, {
-        locationId: r.locationId,
-        name: r.name,
-        sapCode: r.sapCode,
-        fuente: r.fuente,
-        roundIndex: r.roundIndex,
-        roundLabel: r.roundLabel,
-        sellInKg: 0,
-        sellOutKg: 0,
-        inventarioPromedioKg: 0,
-        invCount: 0,
-        ajusteInventario: false,
-      });
-    }
-    const e = byKey.get(key)!;
-    e.sellInKg += r.sellInKg;
-    e.sellOutKg += r.sellOutKg;
-    e.inventarioPromedioKg += r.inventarioPromedioKg;
-    e.invCount += 1;
-    e.ajusteInventario = e.ajusteInventario || r.ajusteInventario;
-  }
-
-  return Array.from(byKey.values())
-    .map(({ invCount, ...row }) => ({
-      ...row,
-      sellInKg: Math.round(row.sellInKg * 10) / 10,
-      sellOutKg: Math.round(row.sellOutKg * 10) / 10,
-      inventarioPromedioKg: invCount > 0 ? Math.round((row.inventarioPromedioKg / invCount) * 10) / 10 : 0,
-    }))
-    .sort((a, b) => a.name.localeCompare(b.name) || a.roundIndex - b.roundIndex);
+export function filterSellOutClientes(
+  rows: SellOutClienteDiffRow[],
+  opts: { sector?: string | null; zona?: string; asesor?: string; fuente?: "Calculado" | "Reportado_B2B" | "TODOS" }
+): SellOutClienteDiffRow[] {
+  return rows.filter((r) => {
+    if (opts.sector && r.sector !== opts.sector) return false;
+    if (opts.zona && r.zona !== opts.zona) return false;
+    if (opts.asesor && r.asesor !== opts.asesor) return false;
+    if (opts.fuente && opts.fuente !== "TODOS" && r.fuente !== opts.fuente) return false;
+    return true;
+  });
 }
 
 export interface MixProductoTonPoint {
