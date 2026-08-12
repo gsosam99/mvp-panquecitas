@@ -7,8 +7,8 @@ function formatKg(value: number): string {
   return `${value.toLocaleString("es-VE", { maximumFractionDigits: 1 })} kg`;
 }
 
-function formatRatio(value: number): string {
-  return value.toLocaleString("es-VE", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+function formatRatioPct(value: number): string {
+  return `${value.toLocaleString("es-VE", { maximumFractionDigits: 1 })}%`;
 }
 
 const Inner = dynamic(
@@ -17,10 +17,10 @@ const Inner = dynamic(
       await import("recharts");
 
     function PanVsHarinaPanInner({ data }: { data: PanVsHarinaPanPoint[] }) {
-      // Ratio Panquecitas / HPM por punto (Σ Radar Panquecitas ÷ Σ Radar Harina PAN).
+      // Ratio Panquecitas / HPM por punto, en % (Σ Radar Panquecitas ÷ Σ Radar Harina PAN × 100).
       const withRatio = data.map((d) => ({
         ...d,
-        ratio: d.harinaPanKg > 0 ? Math.round((d.panquecitasKg / d.harinaPanKg) * 100) / 100 : 0,
+        ratio: d.harinaPanKg > 0 ? Math.round((d.panquecitasKg / d.harinaPanKg) * 1000) / 10 : 0,
       }));
       return (
         <ResponsiveContainer width="100%" height={300}>
@@ -35,7 +35,7 @@ const Inner = dynamic(
             <Tooltip
               contentStyle={{ fontSize: 12, borderRadius: 8, border: "1px solid #e2e8f0" }}
               formatter={(value, name) => {
-                if (name === "ratio") return [formatRatio(Number(value ?? 0)), "Ratio Panq/HPM"];
+                if (name === "ratio") return [formatRatioPct(Number(value ?? 0)), "Ratio Panq/HPM"];
                 return [formatKg(Number(value ?? 0)), name === "panquecitasKg" ? "Panquecitas" : "Harina PAN"];
               }}
             />
@@ -54,7 +54,7 @@ const Inner = dynamic(
                 offset={10}
                 fill="#0f172a"
                 fontSize={10}
-                formatter={(v) => formatRatio(Number(v ?? 0))}
+                formatter={(v) => formatRatioPct(Number(v ?? 0))}
               />
             </Line>
           </ComposedChart>

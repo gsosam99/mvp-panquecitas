@@ -9,6 +9,7 @@ import { CoberturaComunicacionChart } from "@/components/dashboard/CoberturaComu
 import { DemandaInsatisfechaChart } from "@/components/dashboard/DemandaInsatisfechaChart";
 import { VentaRecompraActivacionChart } from "@/components/dashboard/VentaRecompraActivacionChart";
 import { PosicionPdvChart } from "@/components/dashboard/PosicionPdvChart";
+import { SellOutPorPosicionChart } from "@/components/dashboard/SellOutPorPosicionChart";
 import { PanVsHarinaPanChart } from "@/components/dashboard/PanVsHarinaPanChart";
 import { RoundLegend } from "@/components/dashboard/RoundLegend";
 import { SellOutResumenChart } from "@/components/dashboard/SellOutResumenChart";
@@ -40,6 +41,7 @@ import type {
   PanVsHarinaPanPoint,
   PenetracionRadarVsHpm,
   PosicionPdvPoint,
+  PosicionClienteRow,
   MaterialPopPreciadorResult,
   RunningVentasResult,
   StockOutClientePoint,
@@ -69,7 +71,7 @@ export interface SectorBundle {
   ventaRecompraActivacion: Record<TimeGranularity, VentaRecompraActivacionPoint[]>;
   /** Comparativa de penetración Radar Panquecitas vs. HPM sobre la lista objetivo. */
   penetracionRadarVsHpm: PenetracionRadarVsHpm;
-  /** Clientes con venta y ≤3 unidades en tienda, con su ubicación. */
+  /** Clientes con venta y pocas unidades en tienda (≤3 directo / ≤2 indirecto), con su ubicación. */
   stockOut: StockOutResult;
   /** Ratio de preciador sobre clientes visitados con ventas en SAP (Radar > 0). */
   materialPopPreciador: MaterialPopPreciadorResult;
@@ -102,6 +104,7 @@ const GRANULARITY_OPTIONS: { key: TimeGranularity; label: string }[] = [
 // Espejo del umbral de backend (getStockOut) — dienn-queries es server-only y no
 // puede importarse como valor en este Client Component; solo para mostrar el texto.
 const STOCK_OUT_UMBRAL_DIENN = 3;
+const STOCK_OUT_UMBRAL_INDIRECTO = 2;
 
 interface Props {
   bundles: Record<FilterKey, SectorBundle>;
@@ -116,6 +119,8 @@ interface Props {
   asesores: string[];
   /** Motivos de no venta clasificados (reporte SAP de Efectividad de Visita). Globales, no por sector. */
   motivosNoVenta: MotivoNoVentaRow[];
+  /** Posición en PDV por cliente (última visita), para cruzar con el Sell-Out. Global; se acota vía el Sell-Out filtrado. */
+  posicionPorCliente: PosicionClienteRow[];
 }
 
 export function DiennDashboardClient({
@@ -130,6 +135,7 @@ export function DiennDashboardClient({
   zonas,
   asesores,
   motivosNoVenta,
+  posicionPorCliente,
 }: Props) {
   const [filter, setFilter] = useState<FilterKey>("TOTAL");
   const [zonaFilter, setZonaFilter] = useState("");
@@ -191,6 +197,29 @@ export function DiennDashboardClient({
       { concepto: "Sell-Out", kg: Math.round(sellOut * 10) / 10 },
     ];
   }, [sellOutPorCliente]);
+
+  // Sell-Out por posición en PDV: cruza el Sell-Out por cliente (ya filtrado)
+  // con la posición de su última visita. Un cliente con el producto en varias
+  // ubicaciones suma su Sell-Out en cada categoría — así se ve qué posición
+  // generó más venta.
+  const sellOutPorPosicion = useMemo(() => {
+    const posByLoc = new Map<string, string[]>();
+    for (const p of posicionPorCliente) posByLoc.set(p.locationId, p.categorias);
+    const agg = new Map<string, { sellOutKg: number; clientes: number }>();
+    for (const r of sellOutPorCliente) {
+      const cats = posByLoc.get(r.locationId);
+      if (!cats) continue;
+      for (const cat of cats) {
+        const e = agg.get(cat) ?? { sellOutKg: 0, clientes: 0 };
+        e.sellOutKg += r.sellOutKg;
+        e.clientes += 1;
+        agg.set(cat, e);
+      }
+    }
+    return Array.from(agg.entries())
+      .map(([categoria, v]) => ({ categoria, sellOutKg: Math.round(v.sellOutKg * 10) / 10, clientes: v.clientes }))
+      .sort((a, b) => b.sellOutKg - a.sellOutKg);
+  }, [sellOutPorCliente, posicionPorCliente]);
   const rotacion = useMemo(() => computeRotacion(filteredSellOut), [filteredSellOut]);
   const mixProducto = bundle.mixProducto;
 
@@ -532,6 +561,40 @@ export function DiennDashboardClient({
         </CardContent>
       </Card>
 
+      {/* ── Sell-Out por posición en el PDV ──────────────────────────────── */}
+      <Card className="mb-6 print-avoid-break">
+        <CardHeader className="flex flex-row items-start justify-between gap-3 space-y-0">
+          <div>
+            <CardTitle>Sell-Out por posición en el PDV</CardTitle>
+            <p className="text-xs text-slate-400 mt-1">
+              Relación entre la ubicación del producto y el Sell-Out (SAP − inventario) que generó. Un cliente con el
+              producto en varias ubicaciones suma en cada una.
+            </p>
+          </div>
+          <ExportExcelButton
+            filename={`Sell-Out por posición en PDV — ${filtroTexto}`}
+            rows={sellOutPorPosicion}
+            columns={[
+              { header: "Ubicación", value: (r) => r.categoria, width: 34 },
+              { header: "Sell-Out (kg)", value: (r) => r.sellOutKg, width: 16 },
+              { header: "Clientes", value: (r) => r.clientes, width: 14 },
+            ]}
+          />
+        </CardHeader>
+        <CardContent>
+          {sellOutPorPosicion.length > 0 ? (
+            <SellOutPorPosicionChart data={sellOutPorPosicion} />
+          ) : (
+            <div className="h-[300px] flex items-center justify-center text-slate-400">
+              <div className="text-center">
+                <p className="text-4xl mb-2">📊</p>
+                <p>Sin datos de Sell-Out por posición todavía.</p>
+              </div>
+            </div>
+          )}
+        </CardContent>
+      </Card>
+
       <Separator className="mb-6 print:hidden" />
 
       {/* ── Gráfico 3: Sell-In (SAP) vs Inventario PDV vs Sell-Out ────────── */}
@@ -759,7 +822,7 @@ export function DiennDashboardClient({
         <KpiCard
           title="Clientes en Stock Out"
           value={String(bundle.stockOut.enStockOut)}
-          subtitle={`≤ ${STOCK_OUT_UMBRAL_DIENN} unidades en tienda · de ${bundle.stockOut.universo} clientes con venta`}
+          subtitle={`≤ ${STOCK_OUT_UMBRAL_DIENN} unid. (directo) / ≤ ${STOCK_OUT_UMBRAL_INDIRECTO} (indirecto) en tienda · de ${bundle.stockOut.universo} clientes con venta`}
           critical={bundle.stockOut.enStockOut > 0}
         />
         <KpiCard
@@ -782,8 +845,9 @@ export function DiennDashboardClient({
             <div>
               <CardTitle>Clientes en Stock Out ({bundle.stockOut.enStockOut})</CardTitle>
               <p className="text-xs text-slate-400 mt-1">
-                Clientes con venta y ≤ {STOCK_OUT_UMBRAL_DIENN} unidades en tienda (anaquel + depósito; solo anaquel si
-                no hubo acceso al depósito). Incluye la ubicación del producto.
+                Clientes con venta con pocas unidades en tienda (anaquel + depósito; solo anaquel si no hubo acceso al
+                depósito): ≤ {STOCK_OUT_UMBRAL_DIENN} en modelo directo, ≤ {STOCK_OUT_UMBRAL_INDIRECTO} en modelo
+                indirecto. Incluye la ubicación del producto.
               </p>
             </div>
           </button>
@@ -803,7 +867,7 @@ export function DiennDashboardClient({
           <CardContent className="p-0">
             {bundle.stockOut.clientes.length === 0 ? (
               <p className="text-sm text-slate-400 py-6 text-center">
-                Ningún cliente con venta está en stock out (≤ {STOCK_OUT_UMBRAL_DIENN} unidades).
+                Ningún cliente con venta está en stock out (≤ {STOCK_OUT_UMBRAL_DIENN} unid. directo / ≤ {STOCK_OUT_UMBRAL_INDIRECTO} indirecto).
               </p>
             ) : (
               <div className="max-h-[360px] overflow-y-auto">

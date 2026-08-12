@@ -307,10 +307,15 @@ export async function getSellOutPorClienteDiff(): Promise<SellOutClienteDiffRow[
     const visit = lastVisit.get(location.id);
     if (!visit) continue; // sin reporte del mercaderista no hay diferencia que calcular
 
+    // Solo PDV visitados que ADEMÁS tienen ventas en SAP (Radar de Panquecitas
+    // > 0): el sell out es SAP − inventario, así que sin sell-in SAP no hay
+    // nada que comparar. Decisión con Alejandro (11-08-2026).
+    const sellInSapKg = sellInByLocation.get(location.id) ?? 0;
+    if (sellInSapKg <= 0) continue;
+
     const anaquelKg = (visit.anaquel_400_units ?? 0) * 0.4 + (visit.anaquel_800_units ?? 0) * 0.8;
     const depositoKg = visit.deposit_access ? depositoKgByVisit.get(visit.id) ?? 0 : 0;
     const inventarioPdvKg = anaquelKg + depositoKg;
-    const sellInSapKg = sellInByLocation.get(location.id) ?? 0;
     const diff = sellInSapKg - inventarioPdvKg;
 
     rows.push({

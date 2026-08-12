@@ -887,11 +887,22 @@ export async function getDemandaInsatisfecha(sector?: Sector): Promise<Record<Ti
 
 // ── 9. Stock Out (DIENN) ────────────────────────────────────────────
 // Clientes CON VENTA (Radar de Panquecitas > 0) cuya cantidad de producto en
-// tienda es ≤ 3 unidades. "En tienda" = anaquel + depósito; si el mercaderista
-// no tuvo acceso al depósito, solo anaquel. Se usa la última visita por PDV.
-// La lista incluye la ubicación (anaquel) donde se encontró/debe ir el producto.
+// tienda queda en/bajo el umbral de stock out. "En tienda" = anaquel +
+// depósito; si el mercaderista no tuvo acceso al depósito, solo anaquel. Se usa
+// la última visita por PDV. La lista incluye la ubicación (anaquel) donde se
+// encontró/debe ir el producto.
+//
+// El umbral depende del modelo de atención (esquema_atencion de SAP): modelo
+// DIRECTO (y Mixto/otros) → ≤ 3 unidades; modelo INDIRECTO → ≤ 2 unidades
+// (decisión con Alejandro, 11-08-2026).
 
 export const STOCK_OUT_UMBRAL_DIENN = 3;
+export const STOCK_OUT_UMBRAL_INDIRECTO = 2;
+
+/** true si el PDV es de modelo Indirecto según su esquema de atención de SAP. */
+function esModeloIndirecto(loc: { esquema_atencion?: string | null } | undefined): boolean {
+  return stripAccents((loc?.esquema_atencion ?? "").toLowerCase()).includes("indirecto");
+}
 
 export interface StockOutClientePoint {
   locationId: string;
@@ -979,11 +990,12 @@ export async function getStockOut(sector?: Sector): Promise<StockOutResult> {
   const locById = new Map(universoFiltrado.map((l) => [l.id, l]));
   const clientes: StockOutClientePoint[] = [];
   for (const [locId, v] of lastVisit) {
+    const loc = locById.get(locId);
     const anaquel = v.total_units_anaquel ?? 0;
     const deposito = v.deposit_access ? unidadesDepositoByVisit.get(v.id) ?? 0 : 0;
     const unidadesTienda = anaquel + deposito;
-    if (unidadesTienda <= STOCK_OUT_UMBRAL_DIENN) {
-      const loc = locById.get(locId);
+    const umbral = esModeloIndirecto(loc) ? STOCK_OUT_UMBRAL_INDIRECTO : STOCK_OUT_UMBRAL_DIENN;
+    if (unidadesTienda <= umbral) {
       clientes.push({
         locationId: locId,
         sapCode: loc?.sap_code ?? null,
@@ -1123,6 +1135,52 @@ export async function getPosicionPdv(sector?: Sector): Promise<PosicionPdvPoint[
     .sort((a, b) =>
       a.categoria === HARINA_TRIGO ? -1 : b.categoria === HARINA_TRIGO ? 1 : b.clientes - a.clientes
     );
+}
+
+// ── 11b. Posición en PDV por cliente (para cruzar con Sell-Out) ─────
+// Categorías de posición de la última visita, por cliente. El gráfico de
+// "Sell-Out por posición en PDV" cruza esto (client-side) con el Sell-Out
+// por cliente ya filtrado, para ver qué ubicación genera más venta. No se
+// filtra por sector aquí: el cruce con el Sell-Out (ya filtrado) lo acota.
+
+export interface PosicionClienteRow {
+  locationId: string;
+  categorias: string[];
+}
+
+export async function getPosicionPorCliente(): Promise<PosicionClienteRow[]> {
+  const supabase = createSupabaseServiceClient();
+  const { data: visitsData } = await supabase
+    .from("mercaderista_visits")
+    .select("location_id, created_at, product_present, product_location, product_location_other")
+    .order("created_at", { ascending: false });
+
+  type Visita = {
+    location_id: string;
+    product_present: boolean;
+    product_location: string[] | null;
+    product_location_other: string | null;
+  };
+  const lastVisit = new Map<string, Visita>();
+  for (const v of (visitsData ?? []) as Visita[]) {
+    if (!lastVisit.has(v.location_id)) lastVisit.set(v.location_id, v);
+  }
+
+  const HARINA_TRIGO = "Junto a harina de trigo";
+  const rows: PosicionClienteRow[] = [];
+  for (const [locationId, v] of lastVisit) {
+    if (v.product_present !== true || !v.product_location) continue;
+    const categorias: string[] = [];
+    if (v.product_location.includes("HARINA_TRIGO")) categorias.push(HARINA_TRIGO);
+    if (v.product_location.includes("OTRA_CATEGORIA")) {
+      const especifica = v.product_location_other?.trim();
+      categorias.push(
+        especifica && especifica.length > 0 ? agruparCategoriaAnaquel(especifica) : "Otra categoría (sin especificar)"
+      );
+    }
+    if (categorias.length > 0) rows.push({ locationId, categorias });
+  }
+  return rows;
 }
 
 export { PILOT_SECTORS, SECTOR_LABELS };
