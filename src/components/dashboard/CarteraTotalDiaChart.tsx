@@ -65,15 +65,15 @@ const Inner = dynamic(
                 offset={4}
                 fill="#1e40af"
                 fontSize={9}
-                formatter={(v) => Number(v ?? 0).toLocaleString("es-VE", { maximumFractionDigits: 0 })}
+                formatter={(v) => `${Number(v ?? 0).toLocaleString("es-VE", { maximumFractionDigits: 0 })} kg`}
               />
             </Bar>
             <Line
               yAxisId="count"
               dataKey="programados"
               stroke="transparent"
-              dot={{ r: 4, fill: "#334155" }}
-              activeDot={{ r: 5 }}
+              dot={false}
+              activeDot={false}
               isAnimationActive={false}
             >
               {/* Cartera del día a visitar: número visible sobre cada barra, sin hover. */}
