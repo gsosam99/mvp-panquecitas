@@ -11,6 +11,7 @@ import { VentaRecompraActivacionChart } from "@/components/dashboard/VentaRecomp
 import { PosicionPdvChart } from "@/components/dashboard/PosicionPdvChart";
 import { SellOutPorPosicionChart } from "@/components/dashboard/SellOutPorPosicionChart";
 import { CarteraPorSegmentoChart } from "@/components/dashboard/CarteraPorSegmentoChart";
+import { CarteraTotalDiaChart } from "@/components/dashboard/CarteraTotalDiaChart";
 import { PanVsHarinaPanChart } from "@/components/dashboard/PanVsHarinaPanChart";
 import { RoundLegend } from "@/components/dashboard/RoundLegend";
 import { SellOutResumenChart } from "@/components/dashboard/SellOutResumenChart";
@@ -43,7 +44,7 @@ import type {
   PenetracionRadarVsHpm,
   PosicionPdvPoint,
   PosicionClienteRow,
-  CarteraSegmentoBucket,
+  CarteraSegmentoResult,
   MaterialPopPreciadorResult,
   RunningVentasResult,
   StockOutClientePoint,
@@ -123,8 +124,8 @@ interface Props {
   motivosNoVenta: MotivoNoVentaRow[];
   /** Posición en PDV por cliente (última visita), para cruzar con el Sell-Out. Global; se acota vía el Sell-Out filtrado. */
   posicionPorCliente: PosicionClienteRow[];
-  /** Cartera por ciudad × modelo con volumen Radar y efectividad, por bucket de tiempo (día/semana/mes). Global. */
-  carteraPorSegmento: Record<TimeGranularity, CarteraSegmentoBucket[]>;
+  /** Cartera por ciudad × modelo (volumen Radar + efectividad por plan de visita), por segmento y total por día. Global. */
+  carteraPorSegmento: CarteraSegmentoResult;
 }
 
 export function DiennDashboardClient({
@@ -149,9 +150,10 @@ export function DiennDashboardClient({
   const [granularity, setGranularity] = useState<TimeGranularity>("week");
   const [comboGranularity, setComboGranularity] = useState<TimeGranularity>("week");
   const [stockOutOpen, setStockOutOpen] = useState(false);
-  // Cartera por segmento (ciudad×modelo): granularidad + bucket seleccionado.
+  // Cartera por segmento (ciudad×modelo): granularidad + bucket + qué efectividad mostrar.
   const [segGranularity, setSegGranularity] = useState<TimeGranularity>("month");
   const [segBucketIdx, setSegBucketIdx] = useState<number | null>(null); // null = último bucket disponible
+  const [carteraMetrica, setCarteraMetrica] = useState<"activos" | "facturados">("activos");
 
   // Motivos de no venta: son globales (todo el reporte SAP, sin corte por
   // sector), solo se separan por tipo para las dos listas.
@@ -229,33 +231,34 @@ export function DiennDashboardClient({
       .sort((a, b) => b.sellOutKg - a.sellOutKg);
   }, [sellOutPorCliente, posicionPorCliente]);
 
-  // Cartera por ciudad×modelo: se muestra un bucket (por defecto el último)
-  // de la granularidad elegida. Cada gráfico usa una efectividad distinta.
-  const segBuckets = carteraPorSegmento[segGranularity];
+  // Cartera por ciudad×modelo: se muestra un bucket (por defecto el último) de
+  // la granularidad elegida. Un solo gráfico; el filtro elige qué efectividad
+  // (activos o facturados) va en el punto — mismo denominador (a visitar).
+  const segBuckets = carteraPorSegmento.segmentos[segGranularity];
   const segIdx =
     segBucketIdx !== null && segBucketIdx >= 0 && segBucketIdx < segBuckets.length
       ? segBucketIdx
       : Math.max(0, segBuckets.length - 1);
   const segBucket = segBuckets[segIdx] ?? null;
-  const carteraActivosData = useMemo(
+  const carteraSegmentoData = useMemo(
     () =>
       (segBucket?.puntos ?? []).map((p) => ({
         segmento: p.segmento,
         radarKg: p.radarKg,
-        cartera: p.cartera,
-        efectividad: p.efectividadActivos,
+        programados: p.programados,
+        efectividad: carteraMetrica === "activos" ? p.efectividadActivos : p.efectividadFacturados,
       })),
-    [segBucket]
+    [segBucket, carteraMetrica]
   );
-  const carteraFacturadosData = useMemo(
+  const carteraTotalDiaData = useMemo(
     () =>
-      (segBucket?.puntos ?? []).map((p) => ({
-        segmento: p.segmento,
-        radarKg: p.radarKg,
-        cartera: p.cartera,
-        efectividad: p.efectividadFacturados,
+      carteraPorSegmento.totalPorDia.map((p) => ({
+        label: p.label,
+        radarKgAcum: p.radarKgAcum,
+        programados: p.programados,
+        efectividad: carteraMetrica === "activos" ? p.efectividadActivos : p.efectividadFacturados,
       })),
-    [segBucket]
+    [carteraPorSegmento.totalPorDia, carteraMetrica]
   );
   const rotacion = useMemo(() => computeRotacion(filteredSellOut), [filteredSellOut]);
   const mixProducto = bundle.mixProducto;
@@ -639,12 +642,31 @@ export function DiennDashboardClient({
         <div>
           <h2 className="text-lg font-bold text-slate-900">Cartera actual por ciudad y modelo</h2>
           <p className="text-sm text-slate-400">
-            Volumen Radar (kg) por sector (Cumaná / Cabudare) y modelo (Directo / Indirecto), con la cartera de
-            clientes y la tasa de efectividad de cada segmento. El kg es el Radar registrado en el período; la
-            efectividad es acumulada hasta ese período.
+            Volumen Radar (kg) por sector (Cumaná / Cabudare) y modelo (Directo / Indirecto). El punto es la tasa de
+            efectividad: clientes con ventas ÷ los que <span className="font-medium">tocaba visitar</span> ese período
+            (plan de visita). El filtro elige si el numerador es Radar o facturado; la efectividad es acumulada.
           </p>
         </div>
         <div className="flex flex-wrap items-center gap-2 print:hidden">
+          {/* Filtro: qué efectividad mostrar (mismo denominador, distinto numerador). */}
+          <div className="flex rounded-lg border border-slate-200 overflow-hidden text-xs font-medium">
+            {(
+              [
+                ["activos", "Activos (Radar)"],
+                ["facturados", "Facturados"],
+              ] as const
+            ).map(([key, label]) => (
+              <button
+                key={key}
+                onClick={() => setCarteraMetrica(key)}
+                className={`px-3 py-1.5 transition-colors ${
+                  carteraMetrica === key ? "bg-red-600 text-white" : "bg-white text-slate-500 hover:bg-slate-50"
+                }`}
+              >
+                {label}
+              </button>
+            ))}
+          </div>
           <div className="flex rounded-lg border border-slate-200 overflow-hidden text-xs font-medium">
             {GRANULARITY_OPTIONS.map((opt) => (
               <button
@@ -678,62 +700,69 @@ export function DiennDashboardClient({
       </div>
 
       {segBucket ? (
-        <div className="grid grid-cols-1 xl:grid-cols-2 gap-6 mb-6">
-          <Card className="print-avoid-break">
-            <CardHeader className="flex flex-row items-start justify-between gap-3 space-y-0">
-              <div>
-                <CardTitle>Efectividad = Activos / Cartera</CardTitle>
-                <p className="text-xs text-slate-400 mt-1">
-                  Barras: volumen Radar (kg). Punto rojo: % de la cartera con ventas en Radar. Etiqueta: cartera del
-                  segmento.
-                </p>
-              </div>
-              <ExportExcelButton
-                filename={`Cartera x segmento (activos) — ${segBucket.label}`}
-                rows={segBucket.puntos}
-                columns={[
-                  { header: "Segmento", value: (r) => r.segmento, width: 22 },
-                  { header: "Volumen Radar (kg)", value: (r) => r.radarKg, width: 18 },
-                  { header: "Cartera", value: (r) => r.cartera, width: 12 },
-                  { header: "Activos", value: (r) => r.activos, width: 12 },
-                  { header: "% Efectividad (activos)", value: (r) => r.efectividadActivos, width: 20 },
-                ]}
-              />
-            </CardHeader>
-            <CardContent>
-              <CarteraPorSegmentoChart data={carteraActivosData} />
-            </CardContent>
-          </Card>
-
-          <Card className="print-avoid-break">
-            <CardHeader className="flex flex-row items-start justify-between gap-3 space-y-0">
-              <div>
-                <CardTitle>Efectividad = Facturados / Cartera</CardTitle>
-                <p className="text-xs text-slate-400 mt-1">
-                  Mismo volumen Radar; el punto rojo es el % de la cartera con facturado (Pedidos y Facturado).
-                </p>
-              </div>
-              <ExportExcelButton
-                filename={`Cartera x segmento (facturados) — ${segBucket.label}`}
-                rows={segBucket.puntos}
-                columns={[
-                  { header: "Segmento", value: (r) => r.segmento, width: 22 },
-                  { header: "Volumen Radar (kg)", value: (r) => r.radarKg, width: 18 },
-                  { header: "Cartera", value: (r) => r.cartera, width: 12 },
-                  { header: "Facturados", value: (r) => r.facturados, width: 12 },
-                  { header: "% Efectividad (facturados)", value: (r) => r.efectividadFacturados, width: 22 },
-                ]}
-              />
-            </CardHeader>
-            <CardContent>
-              <CarteraPorSegmentoChart data={carteraFacturadosData} />
-            </CardContent>
-          </Card>
-        </div>
+        <Card className="mb-6 print-avoid-break">
+          <CardHeader className="flex flex-row items-start justify-between gap-3 space-y-0">
+            <div>
+              <CardTitle>Volumen Radar y efectividad por segmento — {segBucket.label}</CardTitle>
+              <p className="text-xs text-slate-400 mt-1">
+                Efectividad = {carteraMetrica === "activos" ? "clientes con ventas Radar" : "clientes facturados"} ÷
+                clientes a visitar del período. Etiqueta &quot;A visitar&quot; = denominador.
+              </p>
+            </div>
+            <ExportExcelButton
+              filename={`Cartera x segmento — ${segBucket.label}`}
+              rows={segBucket.puntos}
+              columns={[
+                { header: "Segmento", value: (r) => r.segmento, width: 22 },
+                { header: "Volumen Radar (kg)", value: (r) => r.radarKg, width: 18 },
+                { header: "Cartera total", value: (r) => r.cartera, width: 14 },
+                { header: "A visitar (programados)", value: (r) => r.programados, width: 20 },
+                { header: "Activos", value: (r) => r.activos, width: 12 },
+                { header: "% Efect. activos", value: (r) => r.efectividadActivos, width: 16 },
+                { header: "Facturados", value: (r) => r.facturados, width: 12 },
+                { header: "% Efect. facturados", value: (r) => r.efectividadFacturados, width: 18 },
+              ]}
+            />
+          </CardHeader>
+          <CardContent>
+            <CarteraPorSegmentoChart data={carteraSegmentoData} />
+          </CardContent>
+        </Card>
       ) : (
         <Card className="mb-6">
           <CardContent className="py-10 text-center text-slate-400">
             Sin datos de cartera por segmento todavía. Carga el Modelo de Atención y el Radar.
+          </CardContent>
+        </Card>
+      )}
+
+      {/* ── Total acumulado por día (ambas ciudades y modelos) ──────────── */}
+      {carteraTotalDiaData.length > 0 && (
+        <Card className="mb-6 print-avoid-break">
+          <CardHeader className="flex flex-row items-start justify-between gap-3 space-y-0">
+            <div>
+              <CardTitle>Total acumulado por día (ambas ciudades y modelos)</CardTitle>
+              <p className="text-xs text-slate-400 mt-1">
+                Barras: Radar acumulado (kg). Línea: efectividad del día (
+                {carteraMetrica === "activos" ? "activos" : "facturados"} ÷ a visitar). Usa el mismo filtro de arriba.
+              </p>
+            </div>
+            <ExportExcelButton
+              filename="Cartera total por día"
+              rows={carteraPorSegmento.totalPorDia}
+              columns={[
+                { header: "Día", value: (r) => r.dia, width: 14 },
+                { header: "Radar acumulado (kg)", value: (r) => r.radarKgAcum, width: 20 },
+                { header: "A visitar", value: (r) => r.programados, width: 12 },
+                { header: "Activos", value: (r) => r.activos, width: 12 },
+                { header: "% Efect. activos", value: (r) => r.efectividadActivos, width: 16 },
+                { header: "Facturados", value: (r) => r.facturados, width: 12 },
+                { header: "% Efect. facturados", value: (r) => r.efectividadFacturados, width: 18 },
+              ]}
+            />
+          </CardHeader>
+          <CardContent>
+            <CarteraTotalDiaChart data={carteraTotalDiaData} />
           </CardContent>
         </Card>
       )}

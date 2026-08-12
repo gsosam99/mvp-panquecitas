@@ -1201,16 +1201,37 @@ const CIUDAD_POR_SECTOR: Record<Sector, string> = {
   barquisimeto_este: "Cabudare",
 };
 
+/** "YYYY-MM-DD" → día ISO de la semana (1=Lunes … 7=Domingo), en UTC (determinista). */
+function isoWeekday(dateStr: string): number {
+  const [y, m, d] = dateStr.slice(0, 10).split("-").map(Number);
+  const wd = new Date(Date.UTC(y, m - 1, d)).getUTCDay(); // 0=Dom … 6=Sáb
+  return wd === 0 ? 7 : wd;
+}
+
+/** "1,3,5" → Set{1,3,5} (días ISO del plan de visita). */
+function planSet(dias: string | null): Set<number> {
+  const s = new Set<number>();
+  if (!dias) return s;
+  for (const p of dias.split(",")) {
+    const n = Number(p.trim());
+    if (n >= 1 && n <= 7) s.add(n);
+  }
+  return s;
+}
+
+const TODOS_LOS_DIAS = new Set([1, 2, 3, 4, 5, 6, 7]);
+
 export interface CarteraSegmentoPunto {
   segmento: string; // "Cumaná Directo"
   ciudad: string;
   modelo: "Directo" | "Indirecto";
   radarKg: number;
-  cartera: number;
+  cartera: number; // total de clientes del segmento (estático)
+  programados: number; // clientes que tocaba visitar en el bucket (denominador)
   activos: number;
   facturados: number;
-  efectividadActivos: number; // activos / cartera (%)
-  efectividadFacturados: number; // facturados / cartera (%)
+  efectividadActivos: number; // activos / programados (%)
+  efectividadFacturados: number; // facturados / programados (%)
 }
 
 export interface CarteraSegmentoBucket {
@@ -1219,25 +1240,48 @@ export interface CarteraSegmentoBucket {
   puntos: CarteraSegmentoPunto[];
 }
 
-export async function getCarteraPorSegmento(): Promise<Record<TimeGranularity, CarteraSegmentoBucket[]>> {
-  const empty = { day: [], week: [], month: [] };
+export interface CarteraTotalDiaPunto {
+  dia: string; // "YYYY-MM-DD"
+  label: string;
+  radarKgAcum: number; // volumen Radar acumulado hasta ese día (total ambas ciudades y modelos)
+  programados: number; // clientes que tocaba visitar ese día (denominador)
+  activos: number;
+  facturados: number;
+  efectividadActivos: number;
+  efectividadFacturados: number;
+}
+
+export interface CarteraSegmentoResult {
+  segmentos: Record<TimeGranularity, CarteraSegmentoBucket[]>;
+  totalPorDia: CarteraTotalDiaPunto[];
+}
+
+export async function getCarteraPorSegmento(): Promise<CarteraSegmentoResult> {
+  const empty: CarteraSegmentoResult = { segmentos: { day: [], week: [], month: [] }, totalPorDia: [] };
   const universo = await getUniverseLocations();
   if (universo.length === 0) return empty;
 
-  type Seg = { key: string; ciudad: string; modelo: "Directo" | "Indirecto" };
-  const segByLocation = new Map<string, Seg>();
-  const segMeta = new Map<string, Seg>();
+  type Cli = { locId: string; segKey: string; plan: Set<number> };
+  const clientes: Cli[] = [];
+  const segMeta = new Map<string, { ciudad: string; modelo: "Directo" | "Indirecto" }>();
   const carteraCount = new Map<string, number>();
+  const clientesBySeg = new Map<string, Cli[]>();
   for (const l of universo) {
     const sector = sectorGroup(l.oficina_venta);
     if (!sector) continue;
     const modelo: "Directo" | "Indirecto" = esModeloIndirecto(l) ? "Indirecto" : "Directo";
-    const seg: Seg = { key: `${sector}|${modelo}`, ciudad: CIUDAD_POR_SECTOR[sector], modelo };
-    segByLocation.set(l.id, seg);
-    segMeta.set(seg.key, seg);
-    carteraCount.set(seg.key, (carteraCount.get(seg.key) ?? 0) + 1);
+    const segKey = `${sector}|${modelo}`;
+    const cli: Cli = { locId: l.id, segKey, plan: planSet(l.dias_visita) };
+    clientes.push(cli);
+    segMeta.set(segKey, { ciudad: CIUDAD_POR_SECTOR[sector], modelo });
+    carteraCount.set(segKey, (carteraCount.get(segKey) ?? 0) + 1);
+    if (!clientesBySeg.has(segKey)) clientesBySeg.set(segKey, []);
+    clientesBySeg.get(segKey)!.push(cli);
   }
-  if (segByLocation.size === 0) return empty;
+  if (clientes.length === 0) return empty;
+
+  const segByLoc = new Map(clientes.map((c) => [c.locId, c.segKey]));
+  const locSet = new Set(clientes.map((c) => c.locId));
 
   const supabase = createSupabaseServiceClient();
   const { data: radarData } = await supabase
@@ -1251,11 +1295,9 @@ export async function getCarteraPorSegmento(): Promise<Record<TimeGranularity, C
     .gt("cantidad_facturada_kg", 0);
 
   const radar = ((radarData ?? []) as { location_id: string; quantity_kg: number; date_of_sale: string }[]).filter(
-    (r) => segByLocation.has(r.location_id)
+    (r) => locSet.has(r.location_id)
   );
-  const fact = ((factData ?? []) as { location_id: string; fecha: string }[]).filter((r) =>
-    segByLocation.has(r.location_id)
-  );
+  const fact = ((factData ?? []) as { location_id: string; fecha: string }[]).filter((r) => locSet.has(r.location_id));
 
   // Segmentos ordenados: por ciudad y luego Directo antes que Indirecto.
   const segKeys = [...carteraCount.keys()].sort((a, b) => {
@@ -1264,7 +1306,12 @@ export async function getCarteraPorSegmento(): Promise<Record<TimeGranularity, C
     return sa.ciudad === sb.ciudad ? sa.modelo.localeCompare(sb.modelo) : sa.ciudad.localeCompare(sb.ciudad);
   });
 
-  function build(granularity: TimeGranularity): CarteraSegmentoBucket[] {
+  const pct = (n: number, d: number) => (d > 0 ? Math.round((n / d) * 1000) / 10 : 0);
+  const programadosEn = (clis: Cli[], covered: Set<number>) =>
+    clis.filter((c) => [...c.plan].some((w) => covered.has(w)));
+
+  // ── Gráficos por segmento (barras Radar del bucket; efectividad acumulada) ──
+  function buildSegmentos(granularity: TimeGranularity): CarteraSegmentoBucket[] {
     const radarByBucket = new Map<string, { locId: string; kg: number }[]>();
     for (const r of radar) {
       const b = bucketKeyFor(r.date_of_sale.slice(0, 10), granularity);
@@ -1280,40 +1327,34 @@ export async function getCarteraPorSegmento(): Promise<Record<TimeGranularity, C
     const buckets = Array.from(new Set([...radarByBucket.keys(), ...factByBucket.keys()])).sort();
     if (buckets.length === 0) return [];
 
-    const activos = new Map<string, Set<string>>();
-    const facturados = new Map<string, Set<string>>();
-    for (const k of segKeys) {
-      activos.set(k, new Set());
-      facturados.set(k, new Set());
-    }
-
+    const radarCum = new Set<string>();
+    const factCum = new Set<string>();
     const out: CarteraSegmentoBucket[] = [];
     for (const b of buckets) {
-      const radarKgBucket = new Map<string, number>();
+      const radarKgSeg = new Map<string, number>();
       for (const r of radarByBucket.get(b) ?? []) {
-        const seg = segByLocation.get(r.locId)!;
-        radarKgBucket.set(seg.key, (radarKgBucket.get(seg.key) ?? 0) + r.kg);
-        activos.get(seg.key)!.add(r.locId);
+        radarKgSeg.set(segByLoc.get(r.locId)!, (radarKgSeg.get(segByLoc.get(r.locId)!) ?? 0) + r.kg);
+        radarCum.add(r.locId);
       }
-      for (const locId of factByBucket.get(b) ?? []) {
-        const seg = segByLocation.get(locId)!;
-        facturados.get(seg.key)!.add(locId);
-      }
+      for (const locId of factByBucket.get(b) ?? []) factCum.add(locId);
+      // día → solo ese día de la semana; semana/mes → cualquier día programado.
+      const covered = granularity === "day" ? new Set([isoWeekday(b)]) : TODOS_LOS_DIAS;
       const puntos: CarteraSegmentoPunto[] = segKeys.map((key) => {
         const meta = segMeta.get(key)!;
-        const cartera = carteraCount.get(key) ?? 0;
-        const act = activos.get(key)!.size;
-        const fac = facturados.get(key)!.size;
+        const prog = programadosEn(clientesBySeg.get(key) ?? [], covered);
+        const activos = prog.filter((c) => radarCum.has(c.locId)).length;
+        const facturados = prog.filter((c) => factCum.has(c.locId)).length;
         return {
           segmento: `${meta.ciudad} ${meta.modelo}`,
           ciudad: meta.ciudad,
           modelo: meta.modelo,
-          radarKg: Math.round((radarKgBucket.get(key) ?? 0) * 10) / 10,
-          cartera,
-          activos: act,
-          facturados: fac,
-          efectividadActivos: cartera > 0 ? Math.round((act / cartera) * 1000) / 10 : 0,
-          efectividadFacturados: cartera > 0 ? Math.round((fac / cartera) * 1000) / 10 : 0,
+          radarKg: Math.round((radarKgSeg.get(key) ?? 0) * 10) / 10,
+          cartera: carteraCount.get(key) ?? 0,
+          programados: prog.length,
+          activos,
+          facturados,
+          efectividadActivos: pct(activos, prog.length),
+          efectividadFacturados: pct(facturados, prog.length),
         };
       });
       out.push({ bucket: b, label: bucketLabelFor(b, granularity), puntos });
@@ -1321,7 +1362,50 @@ export async function getCarteraPorSegmento(): Promise<Record<TimeGranularity, C
     return out;
   }
 
-  return { day: build("day"), week: build("week"), month: build("month") };
+  // ── Total por día (ambas ciudades y modelos): kg acumulado + efectividad del día ──
+  function buildTotalPorDia(): CarteraTotalDiaPunto[] {
+    const radarByDia = new Map<string, { locId: string; kg: number }[]>();
+    for (const r of radar) {
+      const d = r.date_of_sale.slice(0, 10);
+      if (!radarByDia.has(d)) radarByDia.set(d, []);
+      radarByDia.get(d)!.push({ locId: r.location_id, kg: r.quantity_kg });
+    }
+    const factByDia = new Map<string, string[]>();
+    for (const r of fact) {
+      const d = r.fecha.slice(0, 10);
+      if (!factByDia.has(d)) factByDia.set(d, []);
+      factByDia.get(d)!.push(r.location_id);
+    }
+    const dias = Array.from(new Set([...radarByDia.keys(), ...factByDia.keys()])).sort();
+    const radarCum = new Set<string>();
+    const factCum = new Set<string>();
+    let kgAcum = 0;
+    return dias.map((d) => {
+      for (const r of radarByDia.get(d) ?? []) {
+        kgAcum += r.kg;
+        radarCum.add(r.locId);
+      }
+      for (const locId of factByDia.get(d) ?? []) factCum.add(locId);
+      const prog = programadosEn(clientes, new Set([isoWeekday(d)]));
+      const activos = prog.filter((c) => radarCum.has(c.locId)).length;
+      const facturados = prog.filter((c) => factCum.has(c.locId)).length;
+      return {
+        dia: d,
+        label: bucketLabelFor(d, "day"),
+        radarKgAcum: Math.round(kgAcum * 10) / 10,
+        programados: prog.length,
+        activos,
+        facturados,
+        efectividadActivos: pct(activos, prog.length),
+        efectividadFacturados: pct(facturados, prog.length),
+      };
+    });
+  }
+
+  return {
+    segmentos: { day: buildSegmentos("day"), week: buildSegmentos("week"), month: buildSegmentos("month") },
+    totalPorDia: buildTotalPorDia(),
+  };
 }
 
 export { PILOT_SECTORS, SECTOR_LABELS };

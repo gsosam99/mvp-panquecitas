@@ -409,10 +409,22 @@ export async function parseSellOutReportadoExcel(buffer: ArrayBuffer): Promise<S
 }
 
 // ════════════════════════════════════════════════════════════════
-// Modelo de Atención (indirectos) — maestro xlsx de la distribuidora, con
-// "Deudor" (código SAP) y "Esquema" (Directo/Indirecto). Se detectan las dos
-// columnas por nombre de encabezado y se asigna el esquema por código SAP.
+// Modelo de Atención (indirectos) — maestro xlsx de la distribuidora. TODO el
+// archivo es el canal INDIRECTO: el modelo es "Indirecto" por estar aquí (la
+// columna "Esquema" del archivo es el esquema de precios, ej. "Estándar", NO
+// el modelo). Se detecta "Deudor" (código SAP) y las columnas de día de la
+// semana (Lunes..Domingo, "X" = programado) para el plan de visita.
 // ════════════════════════════════════════════════════════════════
+
+const MODELO_WEEKDAYS: [string, number][] = [
+  ["lunes", 1],
+  ["martes", 2],
+  ["miercoles", 3],
+  ["jueves", 4],
+  ["viernes", 5],
+  ["sabado", 6],
+  ["domingo", 7],
+];
 
 export async function parseModeloIndirectoExcel(buffer: ArrayBuffer): Promise<ModeloParseResult> {
   const ExcelJS = (await import("exceljs")).default;
@@ -424,30 +436,30 @@ export async function parseModeloIndirectoExcel(buffer: ArrayBuffer): Promise<Mo
     return { valid: [], errors: [{ row: 0, field: "file", message: "El archivo no contiene hojas." }] };
   }
 
-  // La fila de encabezados es la que trae "Deudor" y "Esquema".
+  // La fila de encabezados es la que trae "Deudor" (+ los días de visita).
   let headerRowNum = -1;
   let deudorCol = -1;
-  let esquemaCol = -1;
+  const diaCols: [number, number][] = [];
   ws.eachRow((row, rowNum) => {
     if (headerRowNum > 0) return;
     let dCol = -1;
-    let eCol = -1;
+    const dias: [number, number][] = [];
     row.eachCell((cell, colNum) => {
       const h = normalizeHeader(String(cell.value ?? ""));
       if (h === "deudor") dCol = colNum;
-      if (h === "esquema") eCol = colNum;
+      for (const [kw, iso] of MODELO_WEEKDAYS) if (h === kw) dias.push([colNum, iso]);
     });
-    if (dCol > 0 && eCol > 0) {
+    if (dCol > 0) {
       headerRowNum = rowNum;
       deudorCol = dCol;
-      esquemaCol = eCol;
+      diaCols.push(...dias);
     }
   });
 
   if (headerRowNum < 0) {
     return {
       valid: [],
-      errors: [{ row: 0, field: "formato", message: 'No se encontraron las columnas "Deudor" y "Esquema" en el archivo.' }],
+      errors: [{ row: 0, field: "formato", message: 'No se encontró la columna "Deudor" en el archivo.' }],
     };
   }
 
@@ -460,15 +472,17 @@ export async function parseModeloIndirectoExcel(buffer: ArrayBuffer): Promise<Mo
     if (rawCode === null || rawCode === undefined) return;
     const sap_code = String(rawCode).trim();
     if (!sap_code) return;
-    const esquema = String(row.getCell(esquemaCol).value ?? "").trim();
-    if (!esquema) return;
     if (seen.has(sap_code)) return;
     seen.add(sap_code);
-    valid.push({ sap_code, esquema_atencion: esquema });
+    const dias: number[] = [];
+    for (const [col, iso] of diaCols) {
+      if (String(row.getCell(col).value ?? "").trim().toUpperCase() === "X") dias.push(iso);
+    }
+    valid.push({ sap_code, esquema_atencion: "Indirecto", dias_visita: dias.sort((a, b) => a - b).join(",") });
   });
 
   if (valid.length === 0 && errors.length === 0) {
-    errors.push({ row: 0, field: "datos", message: "No se encontraron filas con Deudor y Esquema." });
+    errors.push({ row: 0, field: "datos", message: "No se encontraron filas con Deudor." });
   }
 
   return { valid, errors };

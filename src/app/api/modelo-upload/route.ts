@@ -31,13 +31,13 @@ export async function POST(req: Request) {
     }
 
     // Última asignación gana si un código se repite en el archivo.
-    const esquemaByCode = new Map<string, string>();
+    const dataByCode = new Map<string, { esquema: string; dias: string }>();
     for (const r of rows) {
       const code = r.sap_code?.trim();
       const esquema = r.esquema_atencion?.trim();
-      if (code && esquema) esquemaByCode.set(code, esquema);
+      if (code && esquema) dataByCode.set(code, { esquema, dias: (r.dias_visita ?? "").trim() });
     }
-    const codes = [...esquemaByCode.keys()];
+    const codes = [...dataByCode.keys()];
 
     // Solo se tocan clientes existentes en la cartera.
     const { data: existing, error: fetchError } = await supabase
@@ -48,26 +48,26 @@ export async function POST(req: Request) {
     const existingCodes = new Set(((existing ?? []) as { sap_code: string }[]).map((l) => l.sap_code));
     const sinCartera = codes.filter((c) => !existingCodes.has(c)).length;
 
-    // Agrupar por valor de esquema → una actualización por grupo (pocos
-    // valores: Directo / Indirecto / Mixto / …).
-    const codesByEsquema = new Map<string, string[]>();
-    for (const [code, esquema] of esquemaByCode) {
+    // Agrupar por combo (esquema + plan de visita) → un update por combo.
+    const combos = new Map<string, { esquema: string; dias: string; codes: string[] }>();
+    for (const [code, d] of dataByCode) {
       if (!existingCodes.has(code)) continue;
-      if (!codesByEsquema.has(esquema)) codesByEsquema.set(esquema, []);
-      codesByEsquema.get(esquema)!.push(code);
+      const key = `${d.esquema}||${d.dias}`;
+      if (!combos.has(key)) combos.set(key, { esquema: d.esquema, dias: d.dias, codes: [] });
+      combos.get(key)!.codes.push(code);
     }
 
-    // Troceado: un update por (esquema, lote de ≤100 códigos) para no exceder
-    // el largo de la URL del filtro .in cuando hay cientos de clientes.
+    // Troceado: un update por (combo, lote de ≤100 códigos) para no exceder el
+    // largo de la URL del filtro .in cuando hay cientos de clientes.
     const CHUNK = 100;
     let updated = 0;
-    for (const [esquema, groupCodes] of codesByEsquema) {
-      for (let i = 0; i < groupCodes.length; i += CHUNK) {
-        const chunk = groupCodes.slice(i, i + CHUNK);
+    for (const combo of combos.values()) {
+      for (let i = 0; i < combo.codes.length; i += CHUNK) {
+        const chunk = combo.codes.slice(i, i + CHUNK);
         if (chunk.length === 0) continue;
         const { data, error } = await supabase
           .from("locations")
-          .update({ esquema_atencion: esquema })
+          .update({ esquema_atencion: combo.esquema, dias_visita: combo.dias || null })
           .in("sap_code", chunk)
           .select("id");
         if (error) throw error;
@@ -75,7 +75,8 @@ export async function POST(req: Request) {
       }
     }
 
-    return Response.json({ updated, clientes_sin_cartera: sinCartera, esquemas: [...codesByEsquema.keys()] });
+    const esquemas = [...new Set([...combos.values()].map((c) => c.esquema))];
+    return Response.json({ updated, clientes_sin_cartera: sinCartera, esquemas });
   } catch (error) {
     console.error("[POST /api/modelo-upload]", error);
     return Response.json({ error: "Error interno del servidor", detail: errorDetail(error) }, { status: 500 });

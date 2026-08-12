@@ -424,14 +424,38 @@ export function parseSapEfectividadMhtml(buffer: ArrayBuffer): SapEfectividadPar
 // SAP). Se usa para asignar el modelo a cada cliente de la cartera.
 // ════════════════════════════════════════════════════════════════
 
-function findModeloColumns(headerRow: string[]): { esquema: number; clienteCodigo: number } | null {
+// Días de la semana (ISO: 1=Lunes … 7=Domingo) para detectar las columnas de
+// plan de visita ("Ind. visita Lunes...", etc.).
+const WEEKDAY_KEYWORDS: [string, number][] = [
+  ["lunes", 1],
+  ["martes", 2],
+  ["miercoles", 3],
+  ["jueves", 4],
+  ["viernes", 5],
+  ["sabado", 6],
+  ["domingo", 7],
+];
+
+interface ModeloColumnMap {
+  esquema: number;
+  clienteCodigo: number;
+  diaCols: [number, number][]; // [columnaGrid, díaISO]
+}
+
+function findModeloColumns(headerRow: string[]): ModeloColumnMap | null {
   const norm = headerRow.map(normalizeHeader);
   // "Esquema de Atención Área Ventas (N)" → contiene "esquemadeatencion".
   const esquema = norm.findIndex((h) => h.includes("esquemadeatencion"));
   // "Cliente (T)" aparece 2 veces (código + nombre); la 1ª es el código SAP.
   const cliente = indicesOf(norm, "clientet");
   if (esquema < 0 || cliente.length < 1) return null;
-  return { esquema, clienteCodigo: cliente[0] };
+  // Columnas de plan de visita: "Ind. visita Lunes..." → contiene "visita" + el día.
+  const diaCols: [number, number][] = [];
+  for (const [kw, iso] of WEEKDAY_KEYWORDS) {
+    const idx = norm.findIndex((h) => h.includes("visita") && h.includes(kw));
+    if (idx >= 0) diaCols.push([idx, iso]);
+  }
+  return { esquema, clienteCodigo: cliente[0], diaCols };
 }
 
 export function parseSapClientesModeloMhtml(buffer: ArrayBuffer): ModeloParseResult {
@@ -453,7 +477,7 @@ export function parseSapClientesModeloMhtml(buffer: ArrayBuffer): ModeloParseRes
   }
 
   let headerRowIdx = -1;
-  let cols: { esquema: number; clienteCodigo: number } | null = null;
+  let cols: ModeloColumnMap | null = null;
   for (let r = 0; r < grid.length; r++) {
     const found = findModeloColumns(grid[r]);
     if (found) {
@@ -477,20 +501,39 @@ export function parseSapClientesModeloMhtml(buffer: ArrayBuffer): ModeloParseRes
     };
   }
 
-  const seen = new Set<string>();
-  const valid: ParsedModeloRow[] = [];
+  // Un cliente aparece en VARIAS filas (una por Función de Interlocutor) y el
+  // plan de visita ("X") puede estar repartido entre ellas — se agregan (unión)
+  // los días de todas las filas del mismo código SAP. El esquema es el de la
+  // primera fila del cliente.
+  const acc = new Map<string, { esquema: string; dias: Set<number> }>();
+  const order: string[] = [];
   for (let r = headerRowIdx + 1; r < grid.length; r++) {
     const row = grid[r];
     const sapCode = (row[cols.clienteCodigo] ?? "").trim();
     if (!sapCode) continue;
     if (normalizeHeader(sapCode) === "resultadototal") break; // fila de totales
 
-    const esquema = (row[cols.esquema] ?? "").trim();
-    if (!esquema) continue;
-    if (seen.has(sapCode)) continue; // un cliente puede repetirse (varias filas); basta el primero
-    seen.add(sapCode);
-    valid.push({ sap_code: sapCode, esquema_atencion: esquema });
+    let entry = acc.get(sapCode);
+    if (!entry) {
+      const esquema = (row[cols.esquema] ?? "").trim();
+      if (!esquema) continue; // primera fila del cliente sin esquema → se ignora
+      entry = { esquema, dias: new Set<number>() };
+      acc.set(sapCode, entry);
+      order.push(sapCode);
+    }
+    for (const [col, iso] of cols.diaCols) {
+      if ((row[col] ?? "").trim().toUpperCase() === "X") entry.dias.add(iso);
+    }
   }
+
+  const valid: ParsedModeloRow[] = order.map((code) => {
+    const e = acc.get(code)!;
+    return {
+      sap_code: code,
+      esquema_atencion: e.esquema,
+      dias_visita: [...e.dias].sort((a, b) => a - b).join(","),
+    };
+  });
 
   if (valid.length === 0 && errors.length === 0) {
     errors.push({ row: 0, field: "datos", message: "No se encontraron filas de datos en el reporte." });

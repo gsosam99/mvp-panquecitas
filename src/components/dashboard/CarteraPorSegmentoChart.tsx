@@ -5,7 +5,7 @@ import dynamic from "next/dynamic";
 export interface CarteraSegmentoChartPoint {
   segmento: string;
   radarKg: number;
-  cartera: number;
+  programados: number; // clientes que tocaba visitar (denominador de la efectividad)
   efectividad: number; // %
 }
 
@@ -20,23 +20,25 @@ const Inner = dynamic(
 
     function CarteraPorSegmentoInner({ data }: { data: CarteraSegmentoChartPoint[] }) {
       return (
-        <ResponsiveContainer width="100%" height={340}>
-          <ComposedChart data={data} margin={{ top: 28, right: 16, left: 0, bottom: 5 }}>
+        <ResponsiveContainer width="100%" height={360}>
+          <ComposedChart data={data} margin={{ top: 28, right: 20, left: 10, bottom: 5 }}>
             <CartesianGrid strokeDasharray="3 3" stroke="#f1f5f9" vertical={false} />
             <XAxis dataKey="segmento" tick={{ fontSize: 11, fill: "#94a3b8" }} />
             <YAxis
               yAxisId="kg"
               tick={{ fontSize: 11, fill: "#94a3b8" }}
-              width={64}
+              width={70}
               tickFormatter={(v) => Number(v).toLocaleString("es-VE", { maximumFractionDigits: 0 })}
+              label={{ value: "Volumen Radar (kg)", angle: -90, position: "insideLeft", style: { fontSize: 11, fill: "#1a65bd" } }}
             />
             <YAxis
               yAxisId="pct"
               orientation="right"
               domain={[0, 100]}
-              width={40}
+              width={48}
               tick={{ fontSize: 11, fill: "#dc2626" }}
               tickFormatter={(v) => `${v}%`}
+              label={{ value: "Efectividad (%)", angle: 90, position: "insideRight", style: { fontSize: 11, fill: "#dc2626" } }}
             />
             <Tooltip
               contentStyle={{ fontSize: 12, borderRadius: 8, border: "1px solid #e2e8f0" }}
@@ -47,14 +49,14 @@ const Inner = dynamic(
               }}
             />
             <Bar yAxisId="kg" dataKey="radarKg" fill="#1a65bd" radius={[4, 4, 0, 0]} maxBarSize={90}>
-              {/* Cartera de clientes del segmento, como comparativa arriba de la barra. */}
+              {/* Clientes que tocaba visitar en el segmento (denominador). */}
               <LabelList
-                dataKey="cartera"
+                dataKey="programados"
                 position="top"
                 offset={18}
                 fill="#334155"
                 fontSize={11}
-                formatter={(v) => `Cartera: ${Number(v ?? 0)}`}
+                formatter={(v) => `A visitar: ${Number(v ?? 0)}`}
               />
             </Bar>
             <Line
@@ -83,7 +85,7 @@ const Inner = dynamic(
   },
   {
     ssr: false,
-    loading: () => <div className="h-[340px] bg-slate-50 rounded-lg animate-pulse" />,
+    loading: () => <div className="h-[360px] bg-slate-50 rounded-lg animate-pulse" />,
   }
 );
 

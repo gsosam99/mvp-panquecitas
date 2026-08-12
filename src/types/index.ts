@@ -54,6 +54,8 @@ export interface Location {
   grupo_vendedor: string | null;
   /** Esquema de Atención de SAP (Directo / Mixto / Indirecto). */
   esquema_atencion: string | null;
+  /** Plan de visita: días ISO programados separados por coma (1=Lun..7=Dom), ej "1,3,5". */
+  dias_visita: string | null;
   /** Zona de Ventas de SAP (ej. V07N01, V44N02). */
   zona_venta: string | null;
   asesor_encargado: string | null;
@@ -274,6 +276,8 @@ export interface SapEfectividadParseResult {
 export interface ParsedModeloRow {
   sap_code: string;
   esquema_atencion: string; // "Directo" / "Indirecto" / "Mixto" / …
+  /** Días ISO programados de visita separados por coma (1=Lun..7=Dom), ej "1,3,5". "" si no hay plan. */
+  dias_visita: string;
 }
 
 export interface ModeloParseResult {

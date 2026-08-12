@@ -1,0 +1,82 @@
+"use client";
+
+import dynamic from "next/dynamic";
+
+export interface CarteraTotalDiaChartPoint {
+  label: string;
+  radarKgAcum: number;
+  programados: number;
+  efectividad: number; // %
+}
+
+function formatKg(value: number): string {
+  return `${value.toLocaleString("es-VE", { maximumFractionDigits: 1 })} kg`;
+}
+
+const Inner = dynamic(
+  async () => {
+    const { ResponsiveContainer, ComposedChart, Bar, Line, XAxis, YAxis, CartesianGrid, Tooltip, Legend } =
+      await import("recharts");
+
+    function CarteraTotalDiaInner({ data }: { data: CarteraTotalDiaChartPoint[] }) {
+      return (
+        <ResponsiveContainer width="100%" height={340}>
+          <ComposedChart data={data} margin={{ top: 10, right: 20, left: 10, bottom: 5 }}>
+            <CartesianGrid strokeDasharray="3 3" stroke="#f1f5f9" vertical={false} />
+            <XAxis dataKey="label" tick={{ fontSize: 10, fill: "#94a3b8" }} minTickGap={16} />
+            <YAxis
+              yAxisId="kg"
+              tick={{ fontSize: 11, fill: "#94a3b8" }}
+              width={70}
+              tickFormatter={(v) => Number(v).toLocaleString("es-VE", { maximumFractionDigits: 0 })}
+              label={{ value: "Radar acumulado (kg)", angle: -90, position: "insideLeft", style: { fontSize: 11, fill: "#1a65bd" } }}
+            />
+            <YAxis
+              yAxisId="pct"
+              orientation="right"
+              domain={[0, 100]}
+              width={48}
+              tick={{ fontSize: 11, fill: "#dc2626" }}
+              tickFormatter={(v) => `${v}%`}
+              label={{ value: "Efectividad (%)", angle: 90, position: "insideRight", style: { fontSize: 11, fill: "#dc2626" } }}
+            />
+            <Tooltip
+              contentStyle={{ fontSize: 12, borderRadius: 8, border: "1px solid #e2e8f0" }}
+              formatter={(value, name) => {
+                if (name === "efectividad") return [`${Number(value ?? 0)}%`, "Efectividad"];
+                if (name === "radarKgAcum") return [formatKg(Number(value ?? 0)), "Radar acumulado"];
+                if (name === "programados") return [String(Number(value ?? 0)), "Cartera del día (a visitar)"];
+                return [String(value ?? ""), String(name ?? "")];
+              }}
+            />
+            <Legend
+              formatter={(value: string) =>
+                value === "radarKgAcum" ? "Radar acumulado" : value === "efectividad" ? "Efectividad" : "Cartera del día"
+              }
+              wrapperStyle={{ fontSize: 12 }}
+            />
+            <Bar yAxisId="kg" dataKey="radarKgAcum" fill="#bfdbfe" radius={[3, 3, 0, 0]} />
+            <Line
+              yAxisId="pct"
+              dataKey="efectividad"
+              stroke="#dc2626"
+              strokeWidth={2}
+              dot={false}
+              isAnimationActive={false}
+            />
+          </ComposedChart>
+        </ResponsiveContainer>
+      );
+    }
+
+    return CarteraTotalDiaInner;
+  },
+  {
+    ssr: false,
+    loading: () => <div className="h-[340px] bg-slate-50 rounded-lg animate-pulse" />,
+  }
+);
+
+export function CarteraTotalDiaChart({ data }: { data: CarteraTotalDiaChartPoint[] }) {
+  return <Inner data={data} />;
+}
