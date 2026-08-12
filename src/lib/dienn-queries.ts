@@ -1269,9 +1269,9 @@ export async function getCarteraPorSegmento(): Promise<CarteraSegmentoResult> {
   for (const l of universo) {
     const sector = sectorGroup(l.oficina_venta);
     if (!sector) continue;
-    // Modelo tal cual la cartera (columna "Directo o Indirecto"): Directo /
-    // Indirecto / Mixto. Sin clasificar → "Sin modelo".
-    const modelo = (l.esquema_atencion ?? "").trim() || "Sin modelo";
+    // Modelo de la cartera (columna "Directo o Indirecto"). Los Mixto cuentan
+    // como Directo (decisión con Alejandro): solo Indirecto vs Directo.
+    const modelo = esModeloIndirecto(l) ? "Indirecto" : "Directo";
     const segKey = `${sector}|${modelo}`;
     const cli: Cli = { locId: l.id, segKey, plan: planSet(l.dias_visita) };
     clientes.push(cli);
