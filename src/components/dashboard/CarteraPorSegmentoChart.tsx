@@ -58,6 +58,15 @@ const Inner = dynamic(
                 fontSize={11}
                 formatter={(v) => `A visitar: ${Number(v ?? 0)}`}
               />
+              {/* Kg de la barra, visibles dentro de ella. */}
+              <LabelList
+                dataKey="radarKg"
+                position="insideTop"
+                offset={10}
+                fill="#ffffff"
+                fontSize={10}
+                formatter={(v) => `${Number(v ?? 0).toLocaleString("es-VE", { maximumFractionDigits: 0 })} kg`}
+              />
             </Bar>
             <Line
               yAxisId="pct"

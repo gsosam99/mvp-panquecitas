@@ -57,7 +57,17 @@ const Inner = dynamic(
               }
               wrapperStyle={{ fontSize: 12 }}
             />
-            <Bar yAxisId="kg" dataKey="radarKgAcum" fill="#bfdbfe" radius={[3, 3, 0, 0]} />
+            <Bar yAxisId="kg" dataKey="radarKgAcum" fill="#bfdbfe" radius={[3, 3, 0, 0]}>
+              {/* Kg acumulados, visibles sobre cada barra. */}
+              <LabelList
+                dataKey="radarKgAcum"
+                position="top"
+                offset={4}
+                fill="#1e40af"
+                fontSize={9}
+                formatter={(v) => Number(v ?? 0).toLocaleString("es-VE", { maximumFractionDigits: 0 })}
+              />
+            </Bar>
             <Line
               yAxisId="count"
               dataKey="programados"
@@ -74,9 +84,19 @@ const Inner = dynamic(
               dataKey="efectividad"
               stroke="#dc2626"
               strokeWidth={2}
-              dot={false}
+              dot={{ r: 3, fill: "#dc2626" }}
               isAnimationActive={false}
-            />
+            >
+              {/* Efectividad del día, visible sobre cada punto. */}
+              <LabelList
+                dataKey="efectividad"
+                position="top"
+                offset={6}
+                fill="#dc2626"
+                fontSize={9}
+                formatter={(v) => `${Number(v ?? 0)}%`}
+              />
+            </Line>
           </ComposedChart>
         </ResponsiveContainer>
       );
