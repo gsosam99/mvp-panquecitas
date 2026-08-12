@@ -1266,12 +1266,16 @@ export interface CarteraSegmentoResult {
   totalPorSector: Record<Sector, Record<TimeGranularity, CarteraTotalDiaPunto[]>>;
 }
 
+// Claves de Sector (no las etiquetas de PILOT_SECTORS: "Cumaná" / "Barquisimeto Este").
+// segKey y totalPorSector usan "cumana" | "barquisimeto_este".
+const SECTOR_KEYS: Sector[] = ["cumana", "barquisimeto_este"];
+
 export async function getCarteraPorSegmento(): Promise<CarteraSegmentoResult> {
   const emptyGran = (): Record<TimeGranularity, CarteraTotalDiaPunto[]> => ({ day: [], week: [], month: [] });
   const empty: CarteraSegmentoResult = {
     segmentos: { day: [], week: [], month: [] },
     totalPorDia: emptyGran(),
-    totalPorSector: PILOT_SECTORS.reduce(
+    totalPorSector: SECTOR_KEYS.reduce(
       (acc, s) => ({ ...acc, [s]: emptyGran() }),
       {} as Record<Sector, Record<TimeGranularity, CarteraTotalDiaPunto[]>>
     ),
@@ -1475,7 +1479,7 @@ export async function getCarteraPorSegmento(): Promise<CarteraSegmentoResult> {
     });
   }
 
-  const totalPorSector = PILOT_SECTORS.reduce(
+  const totalPorSector = SECTOR_KEYS.reduce(
     (acc, s) => ({
       ...acc,
       [s]: {
