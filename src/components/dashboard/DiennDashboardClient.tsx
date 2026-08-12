@@ -10,6 +10,7 @@ import { DemandaInsatisfechaChart } from "@/components/dashboard/DemandaInsatisf
 import { VentaRecompraActivacionChart } from "@/components/dashboard/VentaRecompraActivacionChart";
 import { PosicionPdvChart } from "@/components/dashboard/PosicionPdvChart";
 import { SellOutPorPosicionChart } from "@/components/dashboard/SellOutPorPosicionChart";
+import { CarteraPorSegmentoChart } from "@/components/dashboard/CarteraPorSegmentoChart";
 import { PanVsHarinaPanChart } from "@/components/dashboard/PanVsHarinaPanChart";
 import { RoundLegend } from "@/components/dashboard/RoundLegend";
 import { SellOutResumenChart } from "@/components/dashboard/SellOutResumenChart";
@@ -42,6 +43,7 @@ import type {
   PenetracionRadarVsHpm,
   PosicionPdvPoint,
   PosicionClienteRow,
+  CarteraSegmentoBucket,
   MaterialPopPreciadorResult,
   RunningVentasResult,
   StockOutClientePoint,
@@ -121,6 +123,8 @@ interface Props {
   motivosNoVenta: MotivoNoVentaRow[];
   /** Posición en PDV por cliente (última visita), para cruzar con el Sell-Out. Global; se acota vía el Sell-Out filtrado. */
   posicionPorCliente: PosicionClienteRow[];
+  /** Cartera por ciudad × modelo con volumen Radar y efectividad, por bucket de tiempo (día/semana/mes). Global. */
+  carteraPorSegmento: Record<TimeGranularity, CarteraSegmentoBucket[]>;
 }
 
 export function DiennDashboardClient({
@@ -136,6 +140,7 @@ export function DiennDashboardClient({
   asesores,
   motivosNoVenta,
   posicionPorCliente,
+  carteraPorSegmento,
 }: Props) {
   const [filter, setFilter] = useState<FilterKey>("TOTAL");
   const [zonaFilter, setZonaFilter] = useState("");
@@ -144,6 +149,9 @@ export function DiennDashboardClient({
   const [granularity, setGranularity] = useState<TimeGranularity>("week");
   const [comboGranularity, setComboGranularity] = useState<TimeGranularity>("week");
   const [stockOutOpen, setStockOutOpen] = useState(false);
+  // Cartera por segmento (ciudad×modelo): granularidad + bucket seleccionado.
+  const [segGranularity, setSegGranularity] = useState<TimeGranularity>("month");
+  const [segBucketIdx, setSegBucketIdx] = useState<number | null>(null); // null = último bucket disponible
 
   // Motivos de no venta: son globales (todo el reporte SAP, sin corte por
   // sector), solo se separan por tipo para las dos listas.
@@ -220,6 +228,35 @@ export function DiennDashboardClient({
       .map(([categoria, v]) => ({ categoria, sellOutKg: Math.round(v.sellOutKg * 10) / 10, clientes: v.clientes }))
       .sort((a, b) => b.sellOutKg - a.sellOutKg);
   }, [sellOutPorCliente, posicionPorCliente]);
+
+  // Cartera por ciudad×modelo: se muestra un bucket (por defecto el último)
+  // de la granularidad elegida. Cada gráfico usa una efectividad distinta.
+  const segBuckets = carteraPorSegmento[segGranularity];
+  const segIdx =
+    segBucketIdx !== null && segBucketIdx >= 0 && segBucketIdx < segBuckets.length
+      ? segBucketIdx
+      : Math.max(0, segBuckets.length - 1);
+  const segBucket = segBuckets[segIdx] ?? null;
+  const carteraActivosData = useMemo(
+    () =>
+      (segBucket?.puntos ?? []).map((p) => ({
+        segmento: p.segmento,
+        radarKg: p.radarKg,
+        cartera: p.cartera,
+        efectividad: p.efectividadActivos,
+      })),
+    [segBucket]
+  );
+  const carteraFacturadosData = useMemo(
+    () =>
+      (segBucket?.puntos ?? []).map((p) => ({
+        segmento: p.segmento,
+        radarKg: p.radarKg,
+        cartera: p.cartera,
+        efectividad: p.efectividadFacturados,
+      })),
+    [segBucket]
+  );
   const rotacion = useMemo(() => computeRotacion(filteredSellOut), [filteredSellOut]);
   const mixProducto = bundle.mixProducto;
 
@@ -594,6 +631,112 @@ export function DiennDashboardClient({
           )}
         </CardContent>
       </Card>
+
+      <Separator className="mb-6 print:hidden" />
+
+      {/* ── Cartera actual por ciudad y modelo (Radar + efectividad) ─────── */}
+      <div className="mb-2 flex flex-wrap items-center justify-between gap-3">
+        <div>
+          <h2 className="text-lg font-bold text-slate-900">Cartera actual por ciudad y modelo</h2>
+          <p className="text-sm text-slate-400">
+            Volumen Radar (kg) por sector (Cumaná / Cabudare) y modelo (Directo / Indirecto), con la cartera de
+            clientes y la tasa de efectividad de cada segmento. El kg es el Radar registrado en el período; la
+            efectividad es acumulada hasta ese período.
+          </p>
+        </div>
+        <div className="flex flex-wrap items-center gap-2 print:hidden">
+          <div className="flex rounded-lg border border-slate-200 overflow-hidden text-xs font-medium">
+            {GRANULARITY_OPTIONS.map((opt) => (
+              <button
+                key={opt.key}
+                onClick={() => {
+                  setSegGranularity(opt.key);
+                  setSegBucketIdx(null);
+                }}
+                className={`px-3 py-1.5 transition-colors ${
+                  segGranularity === opt.key ? "bg-slate-900 text-white" : "bg-white text-slate-500 hover:bg-slate-50"
+                }`}
+              >
+                {opt.label}
+              </button>
+            ))}
+          </div>
+          {segBuckets.length > 0 && (
+            <select
+              value={segIdx}
+              onChange={(e) => setSegBucketIdx(Number(e.target.value))}
+              className="text-sm border border-slate-200 rounded-lg px-3 py-1.5 bg-white text-slate-700"
+            >
+              {segBuckets.map((b, i) => (
+                <option key={b.bucket} value={i}>
+                  {b.label}
+                </option>
+              ))}
+            </select>
+          )}
+        </div>
+      </div>
+
+      {segBucket ? (
+        <div className="grid grid-cols-1 xl:grid-cols-2 gap-6 mb-6">
+          <Card className="print-avoid-break">
+            <CardHeader className="flex flex-row items-start justify-between gap-3 space-y-0">
+              <div>
+                <CardTitle>Efectividad = Activos / Cartera</CardTitle>
+                <p className="text-xs text-slate-400 mt-1">
+                  Barras: volumen Radar (kg). Punto rojo: % de la cartera con ventas en Radar. Etiqueta: cartera del
+                  segmento.
+                </p>
+              </div>
+              <ExportExcelButton
+                filename={`Cartera x segmento (activos) — ${segBucket.label}`}
+                rows={segBucket.puntos}
+                columns={[
+                  { header: "Segmento", value: (r) => r.segmento, width: 22 },
+                  { header: "Volumen Radar (kg)", value: (r) => r.radarKg, width: 18 },
+                  { header: "Cartera", value: (r) => r.cartera, width: 12 },
+                  { header: "Activos", value: (r) => r.activos, width: 12 },
+                  { header: "% Efectividad (activos)", value: (r) => r.efectividadActivos, width: 20 },
+                ]}
+              />
+            </CardHeader>
+            <CardContent>
+              <CarteraPorSegmentoChart data={carteraActivosData} />
+            </CardContent>
+          </Card>
+
+          <Card className="print-avoid-break">
+            <CardHeader className="flex flex-row items-start justify-between gap-3 space-y-0">
+              <div>
+                <CardTitle>Efectividad = Facturados / Cartera</CardTitle>
+                <p className="text-xs text-slate-400 mt-1">
+                  Mismo volumen Radar; el punto rojo es el % de la cartera con facturado (Pedidos y Facturado).
+                </p>
+              </div>
+              <ExportExcelButton
+                filename={`Cartera x segmento (facturados) — ${segBucket.label}`}
+                rows={segBucket.puntos}
+                columns={[
+                  { header: "Segmento", value: (r) => r.segmento, width: 22 },
+                  { header: "Volumen Radar (kg)", value: (r) => r.radarKg, width: 18 },
+                  { header: "Cartera", value: (r) => r.cartera, width: 12 },
+                  { header: "Facturados", value: (r) => r.facturados, width: 12 },
+                  { header: "% Efectividad (facturados)", value: (r) => r.efectividadFacturados, width: 22 },
+                ]}
+              />
+            </CardHeader>
+            <CardContent>
+              <CarteraPorSegmentoChart data={carteraFacturadosData} />
+            </CardContent>
+          </Card>
+        </div>
+      ) : (
+        <Card className="mb-6">
+          <CardContent className="py-10 text-center text-slate-400">
+            Sin datos de cartera por segmento todavía. Carga el Modelo de Atención y el Radar.
+          </CardContent>
+        </Card>
+      )}
 
       <Separator className="mb-6 print:hidden" />
 

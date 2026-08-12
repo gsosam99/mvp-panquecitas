@@ -1183,5 +1183,146 @@ export async function getPosicionPorCliente(): Promise<PosicionClienteRow[]> {
   return rows;
 }
 
+// ── 12. Cartera por ciudad × modelo (volumen Radar + efectividad) ───
+// Para los gráficos de "cartera de clientes actuales por Radar, separada por
+// modelo y ciudad". Ciudad = sector piloto (Cumaná / Cabudare = Barquisimeto
+// Este). Modelo = esquema_atencion (Directo / Indirecto). Por cada bucket de
+// tiempo (día/semana/mes):
+//   - radarKg  → volumen Radar de Panquecitas REGISTRADO en ese bucket
+//     (date_of_sale), por segmento.
+//   - activos / facturados → clientes ACUMULADOS hasta ese bucket con Radar >
+//     0 (activos) o con facturado > 0 (facturados). La efectividad es
+//     activos/cartera y facturados/cartera (un cliente activado lo sigue
+//     estando, por eso es acumulado).
+//   - cartera → total de clientes del segmento (estático).
+
+const CIUDAD_POR_SECTOR: Record<Sector, string> = {
+  cumana: "Cumaná",
+  barquisimeto_este: "Cabudare",
+};
+
+export interface CarteraSegmentoPunto {
+  segmento: string; // "Cumaná Directo"
+  ciudad: string;
+  modelo: "Directo" | "Indirecto";
+  radarKg: number;
+  cartera: number;
+  activos: number;
+  facturados: number;
+  efectividadActivos: number; // activos / cartera (%)
+  efectividadFacturados: number; // facturados / cartera (%)
+}
+
+export interface CarteraSegmentoBucket {
+  bucket: string;
+  label: string;
+  puntos: CarteraSegmentoPunto[];
+}
+
+export async function getCarteraPorSegmento(): Promise<Record<TimeGranularity, CarteraSegmentoBucket[]>> {
+  const empty = { day: [], week: [], month: [] };
+  const universo = await getUniverseLocations();
+  if (universo.length === 0) return empty;
+
+  type Seg = { key: string; ciudad: string; modelo: "Directo" | "Indirecto" };
+  const segByLocation = new Map<string, Seg>();
+  const segMeta = new Map<string, Seg>();
+  const carteraCount = new Map<string, number>();
+  for (const l of universo) {
+    const sector = sectorGroup(l.oficina_venta);
+    if (!sector) continue;
+    const modelo: "Directo" | "Indirecto" = esModeloIndirecto(l) ? "Indirecto" : "Directo";
+    const seg: Seg = { key: `${sector}|${modelo}`, ciudad: CIUDAD_POR_SECTOR[sector], modelo };
+    segByLocation.set(l.id, seg);
+    segMeta.set(seg.key, seg);
+    carteraCount.set(seg.key, (carteraCount.get(seg.key) ?? 0) + 1);
+  }
+  if (segByLocation.size === 0) return empty;
+
+  const supabase = createSupabaseServiceClient();
+  const { data: radarData } = await supabase
+    .from("sap_sell_in_records")
+    .select("location_id, quantity_kg, date_of_sale")
+    .eq("product_id", PRODUCT_IDS.PANQUECITAS);
+  const { data: factData } = await supabase
+    .from("sap_pedidos_facturados")
+    .select("location_id, fecha")
+    .eq("product_id", PRODUCT_IDS.PANQUECITAS)
+    .gt("cantidad_facturada_kg", 0);
+
+  const radar = ((radarData ?? []) as { location_id: string; quantity_kg: number; date_of_sale: string }[]).filter(
+    (r) => segByLocation.has(r.location_id)
+  );
+  const fact = ((factData ?? []) as { location_id: string; fecha: string }[]).filter((r) =>
+    segByLocation.has(r.location_id)
+  );
+
+  // Segmentos ordenados: por ciudad y luego Directo antes que Indirecto.
+  const segKeys = [...carteraCount.keys()].sort((a, b) => {
+    const sa = segMeta.get(a)!;
+    const sb = segMeta.get(b)!;
+    return sa.ciudad === sb.ciudad ? sa.modelo.localeCompare(sb.modelo) : sa.ciudad.localeCompare(sb.ciudad);
+  });
+
+  function build(granularity: TimeGranularity): CarteraSegmentoBucket[] {
+    const radarByBucket = new Map<string, { locId: string; kg: number }[]>();
+    for (const r of radar) {
+      const b = bucketKeyFor(r.date_of_sale.slice(0, 10), granularity);
+      if (!radarByBucket.has(b)) radarByBucket.set(b, []);
+      radarByBucket.get(b)!.push({ locId: r.location_id, kg: r.quantity_kg });
+    }
+    const factByBucket = new Map<string, string[]>();
+    for (const r of fact) {
+      const b = bucketKeyFor(r.fecha.slice(0, 10), granularity);
+      if (!factByBucket.has(b)) factByBucket.set(b, []);
+      factByBucket.get(b)!.push(r.location_id);
+    }
+    const buckets = Array.from(new Set([...radarByBucket.keys(), ...factByBucket.keys()])).sort();
+    if (buckets.length === 0) return [];
+
+    const activos = new Map<string, Set<string>>();
+    const facturados = new Map<string, Set<string>>();
+    for (const k of segKeys) {
+      activos.set(k, new Set());
+      facturados.set(k, new Set());
+    }
+
+    const out: CarteraSegmentoBucket[] = [];
+    for (const b of buckets) {
+      const radarKgBucket = new Map<string, number>();
+      for (const r of radarByBucket.get(b) ?? []) {
+        const seg = segByLocation.get(r.locId)!;
+        radarKgBucket.set(seg.key, (radarKgBucket.get(seg.key) ?? 0) + r.kg);
+        activos.get(seg.key)!.add(r.locId);
+      }
+      for (const locId of factByBucket.get(b) ?? []) {
+        const seg = segByLocation.get(locId)!;
+        facturados.get(seg.key)!.add(locId);
+      }
+      const puntos: CarteraSegmentoPunto[] = segKeys.map((key) => {
+        const meta = segMeta.get(key)!;
+        const cartera = carteraCount.get(key) ?? 0;
+        const act = activos.get(key)!.size;
+        const fac = facturados.get(key)!.size;
+        return {
+          segmento: `${meta.ciudad} ${meta.modelo}`,
+          ciudad: meta.ciudad,
+          modelo: meta.modelo,
+          radarKg: Math.round((radarKgBucket.get(key) ?? 0) * 10) / 10,
+          cartera,
+          activos: act,
+          facturados: fac,
+          efectividadActivos: cartera > 0 ? Math.round((act / cartera) * 1000) / 10 : 0,
+          efectividadFacturados: cartera > 0 ? Math.round((fac / cartera) * 1000) / 10 : 0,
+        };
+      });
+      out.push({ bucket: b, label: bucketLabelFor(b, granularity), puntos });
+    }
+    return out;
+  }
+
+  return { day: build("day"), week: build("week"), month: build("month") };
+}
+
 export { PILOT_SECTORS, SECTOR_LABELS };
 export type { LocationType };

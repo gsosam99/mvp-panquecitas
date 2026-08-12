@@ -1,4 +1,6 @@
 import type {
+  ModeloParseResult,
+  ParsedModeloRow,
   ParsedSapEfectividadRow,
   ParsedSapFacturacionRow,
   ParsedSapRadarRow,
@@ -405,6 +407,89 @@ export function parseSapEfectividadMhtml(buffer: ArrayBuffer): SapEfectividadPar
       efectividad_pedidos: parseLatinNumber(row[cols.efPedidos]),
       efectividad_ventas: parseLatinNumber(row[cols.efVentas]),
     });
+  }
+
+  if (valid.length === 0 && errors.length === 0) {
+    errors.push({ row: 0, field: "datos", message: "No se encontraron filas de datos en el reporte." });
+  }
+
+  return { valid, errors };
+}
+
+// ════════════════════════════════════════════════════════════════
+// Reporte SAP N7_V_SD56_WEB_001 — maestro de clientes con Esquema de
+// Atención (Directo / Indirecto / Sin asignar). Mismo mecanismo MHTML.
+// Columnas relevantes: "Esquema de Atención Área Ventas (N)" y "Cliente (T)"
+// (código + nombre, celda combinada — la primera ocurrencia es el código
+// SAP). Se usa para asignar el modelo a cada cliente de la cartera.
+// ════════════════════════════════════════════════════════════════
+
+function findModeloColumns(headerRow: string[]): { esquema: number; clienteCodigo: number } | null {
+  const norm = headerRow.map(normalizeHeader);
+  // "Esquema de Atención Área Ventas (N)" → contiene "esquemadeatencion".
+  const esquema = norm.findIndex((h) => h.includes("esquemadeatencion"));
+  // "Cliente (T)" aparece 2 veces (código + nombre); la 1ª es el código SAP.
+  const cliente = indicesOf(norm, "clientet");
+  if (esquema < 0 || cliente.length < 1) return null;
+  return { esquema, clienteCodigo: cliente[0] };
+}
+
+export function parseSapClientesModeloMhtml(buffer: ArrayBuffer): ModeloParseResult {
+  const errors: ParseError[] = [];
+
+  let html: string;
+  try {
+    html = extractHtmlFromMhtml(buffer);
+  } catch (e) {
+    return {
+      valid: [],
+      errors: [{ row: 0, field: "file", message: `No se pudo leer el archivo SAP: ${e instanceof Error ? e.message : String(e)}` }],
+    };
+  }
+
+  const grid = parseHtmlTableGrid(html);
+  if (grid.length === 0) {
+    return { valid: [], errors: [{ row: 0, field: "file", message: "No se encontró ninguna tabla en el archivo." }] };
+  }
+
+  let headerRowIdx = -1;
+  let cols: { esquema: number; clienteCodigo: number } | null = null;
+  for (let r = 0; r < grid.length; r++) {
+    const found = findModeloColumns(grid[r]);
+    if (found) {
+      headerRowIdx = r;
+      cols = found;
+      break;
+    }
+  }
+
+  if (headerRowIdx < 0 || !cols) {
+    return {
+      valid: [],
+      errors: [
+        {
+          row: 0,
+          field: "formato",
+          message:
+            'No se encontraron las columnas esperadas ("Esquema de Atención" y "Cliente (T)"). Verifica que sea el reporte SAP N7_V_SD56 (maestro de clientes).',
+        },
+      ],
+    };
+  }
+
+  const seen = new Set<string>();
+  const valid: ParsedModeloRow[] = [];
+  for (let r = headerRowIdx + 1; r < grid.length; r++) {
+    const row = grid[r];
+    const sapCode = (row[cols.clienteCodigo] ?? "").trim();
+    if (!sapCode) continue;
+    if (normalizeHeader(sapCode) === "resultadototal") break; // fila de totales
+
+    const esquema = (row[cols.esquema] ?? "").trim();
+    if (!esquema) continue;
+    if (seen.has(sapCode)) continue; // un cliente puede repetirse (varias filas); basta el primero
+    seen.add(sapCode);
+    valid.push({ sap_code: sapCode, esquema_atencion: esquema });
   }
 
   if (valid.length === 0 && errors.length === 0) {

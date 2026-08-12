@@ -263,6 +263,24 @@ export interface SapEfectividadParseResult {
   errors: ParseError[];
 }
 
+// ════════════════════════════════════════════════════════════════
+// Modelo de Atención (Esquema): asigna Directo/Indirecto a cada cliente de la
+// cartera por código SAP. Dos fuentes: el maestro SAP N7_V_SD56_WEB_001
+// (MHTML, columna "Esquema de Atención") y el maestro de indirectos de la
+// distribuidora (xlsx, columnas "Deudor" + "Esquema"). Ambos actualizan
+// locations.esquema_atencion. Ver src/lib/sap-mhtml-parser.ts, excel-parser.ts.
+// ════════════════════════════════════════════════════════════════
+
+export interface ParsedModeloRow {
+  sap_code: string;
+  esquema_atencion: string; // "Directo" / "Indirecto" / "Mixto" / …
+}
+
+export interface ModeloParseResult {
+  valid: ParsedModeloRow[];
+  errors: ParseError[];
+}
+
 export interface SapDispatch {
   id: string;
   created_at: string;

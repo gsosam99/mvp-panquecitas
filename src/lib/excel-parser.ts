@@ -6,6 +6,8 @@ import type {
   DispatchesParseResult,
   ParsedSellOutReportadoRow,
   SellOutReportadoParseResult,
+  ParsedModeloRow,
+  ModeloParseResult,
 } from "@/types";
 
 type LocationType = "SUPERMERCADO" | "ABASTO" | "BODEGA" | "OTRO";
@@ -401,6 +403,72 @@ export async function parseSellOutReportadoExcel(buffer: ArrayBuffer): Promise<S
 
   if (valid.length === 0 && errors.length === 0) {
     errors.push({ row: 0, field: "datos", message: "No se encontraron filas de Sell-Out reportado." });
+  }
+
+  return { valid, errors };
+}
+
+// ════════════════════════════════════════════════════════════════
+// Modelo de Atención (indirectos) — maestro xlsx de la distribuidora, con
+// "Deudor" (código SAP) y "Esquema" (Directo/Indirecto). Se detectan las dos
+// columnas por nombre de encabezado y se asigna el esquema por código SAP.
+// ════════════════════════════════════════════════════════════════
+
+export async function parseModeloIndirectoExcel(buffer: ArrayBuffer): Promise<ModeloParseResult> {
+  const ExcelJS = (await import("exceljs")).default;
+  const workbook = new ExcelJS.Workbook();
+  await workbook.xlsx.load(buffer);
+
+  const ws = workbook.worksheets[0];
+  if (!ws) {
+    return { valid: [], errors: [{ row: 0, field: "file", message: "El archivo no contiene hojas." }] };
+  }
+
+  // La fila de encabezados es la que trae "Deudor" y "Esquema".
+  let headerRowNum = -1;
+  let deudorCol = -1;
+  let esquemaCol = -1;
+  ws.eachRow((row, rowNum) => {
+    if (headerRowNum > 0) return;
+    let dCol = -1;
+    let eCol = -1;
+    row.eachCell((cell, colNum) => {
+      const h = normalizeHeader(String(cell.value ?? ""));
+      if (h === "deudor") dCol = colNum;
+      if (h === "esquema") eCol = colNum;
+    });
+    if (dCol > 0 && eCol > 0) {
+      headerRowNum = rowNum;
+      deudorCol = dCol;
+      esquemaCol = eCol;
+    }
+  });
+
+  if (headerRowNum < 0) {
+    return {
+      valid: [],
+      errors: [{ row: 0, field: "formato", message: 'No se encontraron las columnas "Deudor" y "Esquema" en el archivo.' }],
+    };
+  }
+
+  const errors: ParseError[] = [];
+  const seen = new Set<string>();
+  const valid: ParsedModeloRow[] = [];
+  ws.eachRow((row, rowNum) => {
+    if (rowNum <= headerRowNum) return;
+    const rawCode = row.getCell(deudorCol).value;
+    if (rawCode === null || rawCode === undefined) return;
+    const sap_code = String(rawCode).trim();
+    if (!sap_code) return;
+    const esquema = String(row.getCell(esquemaCol).value ?? "").trim();
+    if (!esquema) return;
+    if (seen.has(sap_code)) return;
+    seen.add(sap_code);
+    valid.push({ sap_code, esquema_atencion: esquema });
+  });
+
+  if (valid.length === 0 && errors.length === 0) {
+    errors.push({ row: 0, field: "datos", message: "No se encontraron filas con Deudor y Esquema." });
   }
 
   return { valid, errors };
