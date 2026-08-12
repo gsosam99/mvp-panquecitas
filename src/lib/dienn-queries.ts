@@ -1261,12 +1261,20 @@ export interface CarteraTotalDiaPunto {
 export interface CarteraSegmentoResult {
   segmentos: Record<TimeGranularity, CarteraSegmentoBucket[]>;
   totalPorDia: Record<TimeGranularity, CarteraTotalDiaPunto[]>;
+  // Mismo total acumulado pero acotado a cada sector (Cumaná / Cabudare), para
+  // comparar ciudad contra ciudad con las mismas funcionalidades.
+  totalPorSector: Record<Sector, Record<TimeGranularity, CarteraTotalDiaPunto[]>>;
 }
 
 export async function getCarteraPorSegmento(): Promise<CarteraSegmentoResult> {
+  const emptyGran = (): Record<TimeGranularity, CarteraTotalDiaPunto[]> => ({ day: [], week: [], month: [] });
   const empty: CarteraSegmentoResult = {
     segmentos: { day: [], week: [], month: [] },
-    totalPorDia: { day: [], week: [], month: [] },
+    totalPorDia: emptyGran(),
+    totalPorSector: PILOT_SECTORS.reduce(
+      (acc, s) => ({ ...acc, [s]: emptyGran() }),
+      {} as Record<Sector, Record<TimeGranularity, CarteraTotalDiaPunto[]>>
+    ),
   };
   const universo = await getUniverseLocations();
   if (universo.length === 0) return empty;
@@ -1399,21 +1407,28 @@ export async function getCarteraPorSegmento(): Promise<CarteraSegmentoResult> {
   // Un punto por bucket de la granularidad elegida (día/semana/mes). Las
   // efectividades son acumuladas hasta el bucket; las series por modelo usan
   // activación por Radar (activos) separada Directo / Indirecto.
-  function buildTotalAcumulado(granularity: TimeGranularity): CarteraTotalDiaPunto[] {
+  function buildTotalAcumulado(granularity: TimeGranularity, sector?: Sector): CarteraTotalDiaPunto[] {
+    // Acota a un sector (o al universo completo si no se pasa sector).
+    const clientesScope = sector ? clientes.filter((c) => c.segKey.startsWith(`${sector}|`)) : clientes;
+    const locScope = new Set(clientesScope.map((c) => c.locId));
+    const radarScope = sector ? radar.filter((r) => locScope.has(r.location_id)) : radar;
+    const factScope = sector ? fact.filter((r) => locScope.has(r.location_id)) : fact;
+    const pedidoScope = sector ? pedido.filter((r) => locScope.has(r.location_id)) : pedido;
+
     const radarByBucket = new Map<string, { locId: string; kg: number }[]>();
-    for (const r of radar) {
+    for (const r of radarScope) {
       const b = bucketKeyFor(r.date_of_sale.slice(0, 10), granularity);
       if (!radarByBucket.has(b)) radarByBucket.set(b, []);
       radarByBucket.get(b)!.push({ locId: r.location_id, kg: r.quantity_kg });
     }
     const factByBucket = new Map<string, string[]>();
-    for (const r of fact) {
+    for (const r of factScope) {
       const b = bucketKeyFor(r.fecha.slice(0, 10), granularity);
       if (!factByBucket.has(b)) factByBucket.set(b, []);
       factByBucket.get(b)!.push(r.location_id);
     }
     const pedidoByBucket = new Map<string, string[]>();
-    for (const r of pedido) {
+    for (const r of pedidoScope) {
       const b = bucketKeyFor(r.fecha.slice(0, 10), granularity);
       if (!pedidoByBucket.has(b)) pedidoByBucket.set(b, []);
       pedidoByBucket.get(b)!.push(r.location_id);
@@ -1434,7 +1449,7 @@ export async function getCarteraPorSegmento(): Promise<CarteraSegmentoResult> {
       for (const locId of pedidoByBucket.get(b) ?? []) pedidoCum.add(locId);
       // día → solo ese día de la semana; semana/mes → cualquier día programado.
       const covered = granularity === "day" ? new Set([isoWeekday(b)]) : TODOS_LOS_DIAS;
-      const prog = programadosEn(clientes, covered);
+      const prog = programadosEn(clientesScope, covered);
       const activos = prog.filter((c) => radarCum.has(c.locId)).length;
       const facturados = prog.filter((c) => factCum.has(c.locId)).length;
       const pedidos = prog.filter((c) => pedidoCum.has(c.locId)).length;
@@ -1460,6 +1475,18 @@ export async function getCarteraPorSegmento(): Promise<CarteraSegmentoResult> {
     });
   }
 
+  const totalPorSector = PILOT_SECTORS.reduce(
+    (acc, s) => ({
+      ...acc,
+      [s]: {
+        day: buildTotalAcumulado("day", s),
+        week: buildTotalAcumulado("week", s),
+        month: buildTotalAcumulado("month", s),
+      },
+    }),
+    {} as Record<Sector, Record<TimeGranularity, CarteraTotalDiaPunto[]>>
+  );
+
   return {
     segmentos: { day: buildSegmentos("day"), week: buildSegmentos("week"), month: buildSegmentos("month") },
     totalPorDia: {
@@ -1467,6 +1494,7 @@ export async function getCarteraPorSegmento(): Promise<CarteraSegmentoResult> {
       week: buildTotalAcumulado("week"),
       month: buildTotalAcumulado("month"),
     },
+    totalPorSector,
   };
 }
 
