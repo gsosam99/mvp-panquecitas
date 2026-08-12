@@ -31,6 +31,7 @@ const Inner = dynamic(
             <XAxis dataKey="label" tick={{ fontSize: 11, fill: "#94a3b8" }} />
             {/* Eje izquierdo: kg (barras de venta acumulada) */}
             <YAxis
+              hide
               yAxisId="left"
               tick={{ fontSize: 11, fill: "#94a3b8" }}
               unit=" kg"
@@ -39,6 +40,7 @@ const Inner = dynamic(
             />
             {/* Eje derecho: % (líneas de recompra y activación) */}
             <YAxis
+              hide
               yAxisId="right"
               orientation="right"
               tick={{ fontSize: 11, fill: "#94a3b8" }}

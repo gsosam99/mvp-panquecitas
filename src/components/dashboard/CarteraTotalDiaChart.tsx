@@ -7,6 +7,8 @@ export interface CarteraTotalDiaChartPoint {
   radarKgAcum: number;
   programados: number;
   efectividad: number; // %
+  efectividadDirecto: number; // % activación Radar modelo Directo
+  efectividadIndirecto: number; // % activación Radar modelo Indirecto
 }
 
 function formatKg(value: number): string {
@@ -18,38 +20,43 @@ const Inner = dynamic(
     const { ResponsiveContainer, ComposedChart, Bar, Line, XAxis, YAxis, CartesianGrid, Tooltip, Legend, LabelList } =
       await import("recharts");
 
-    function CarteraTotalDiaInner({ data }: { data: CarteraTotalDiaChartPoint[] }) {
+    function CarteraTotalDiaInner({
+      data,
+      showDirecto,
+      showIndirecto,
+    }: {
+      data: CarteraTotalDiaChartPoint[];
+      showDirecto: boolean;
+      showIndirecto: boolean;
+    }) {
       return (
         <ResponsiveContainer width="100%" height={340}>
-          <ComposedChart data={data} margin={{ top: 10, right: 20, left: 10, bottom: 5 }}>
+          <ComposedChart data={data} margin={{ top: 24, right: 12, left: 10, bottom: 5 }}>
             <CartesianGrid strokeDasharray="3 3" stroke="#f1f5f9" vertical={false} />
             <XAxis dataKey="label" tick={{ fontSize: 10, fill: "#94a3b8" }} minTickGap={16} />
-            <YAxis
-              yAxisId="kg"
-              tick={{ fontSize: 11, fill: "#94a3b8" }}
-              width={70}
-              tickFormatter={(v) => Number(v).toLocaleString("es-VE", { maximumFractionDigits: 0 })}
-              label={{ value: "Radar acumulado (kg)", angle: -90, position: "insideLeft", style: { fontSize: 11, fill: "#1a65bd" } }}
-            />
-            <YAxis
-              yAxisId="pct"
-              orientation="right"
-              domain={[0, 100]}
-              width={48}
-              tick={{ fontSize: 11, fill: "#dc2626" }}
-              tickFormatter={(v) => `${v}%`}
-              label={{ value: "Efectividad (%)", angle: 90, position: "insideRight", style: { fontSize: 11, fill: "#dc2626" } }}
-            />
+            {/* Ejes ocultos: escalan las series pero no muestran números. */}
+            <YAxis yAxisId="kg" hide />
+            <YAxis yAxisId="pct" hide domain={[0, 100]} />
             <Tooltip
               contentStyle={{ fontSize: 12, borderRadius: 8, border: "1px solid #e2e8f0" }}
               formatter={(value, name) => {
                 if (name === "efectividad") return [`${Number(value ?? 0)}%`, "Efectividad"];
+                if (name === "efectividadDirecto") return [`${Number(value ?? 0)}%`, "Activación Radar — Directo"];
+                if (name === "efectividadIndirecto") return [`${Number(value ?? 0)}%`, "Activación Radar — Indirecto"];
                 if (name === "radarKgAcum") return [formatKg(Number(value ?? 0)), "Radar acumulado"];
                 return [String(value ?? ""), String(name ?? "")];
               }}
             />
             <Legend
-              formatter={(value: string) => (value === "radarKgAcum" ? "Radar acumulado" : "Efectividad")}
+              formatter={(value: string) =>
+                value === "radarKgAcum"
+                  ? "Radar acumulado"
+                  : value === "efectividad"
+                  ? "Efectividad"
+                  : value === "efectividadDirecto"
+                  ? "Activación Radar — Directo"
+                  : "Activación Radar — Indirecto"
+              }
               wrapperStyle={{ fontSize: 12 }}
             />
             <Bar yAxisId="kg" dataKey="radarKgAcum" fill="#bfdbfe" radius={[3, 3, 0, 0]}>
@@ -63,6 +70,7 @@ const Inner = dynamic(
                 formatter={(v) => `${Number(v ?? 0).toLocaleString("es-VE", { maximumFractionDigits: 0 })} kg`}
               />
             </Bar>
+            {/* Efectividad principal (fija). */}
             <Line
               yAxisId="pct"
               dataKey="efectividad"
@@ -71,7 +79,6 @@ const Inner = dynamic(
               dot={{ r: 3, fill: "#dc2626" }}
               isAnimationActive={false}
             >
-              {/* Efectividad del día, visible sobre cada punto. */}
               <LabelList
                 dataKey="efectividad"
                 position="top"
@@ -81,6 +88,50 @@ const Inner = dynamic(
                 formatter={(v) => `${Number(v ?? 0)}%`}
               />
             </Line>
+            {/* Activación Radar — Directo (serie opcional). */}
+            {showDirecto && (
+              <Line
+                yAxisId="pct"
+                dataKey="efectividadDirecto"
+                stroke="#16a34a"
+                strokeWidth={2}
+                strokeDasharray="5 3"
+                dot={{ r: 3, fill: "#16a34a" }}
+                isAnimationActive={false}
+              >
+                {/* Etiqueta debajo del punto para no solaparse con la efectividad. */}
+                <LabelList
+                  dataKey="efectividadDirecto"
+                  position="bottom"
+                  offset={8}
+                  fill="#16a34a"
+                  fontSize={9}
+                  formatter={(v) => `${Number(v ?? 0)}%`}
+                />
+              </Line>
+            )}
+            {/* Activación Radar — Indirecto (serie opcional). */}
+            {showIndirecto && (
+              <Line
+                yAxisId="pct"
+                dataKey="efectividadIndirecto"
+                stroke="#7c3aed"
+                strokeWidth={2}
+                strokeDasharray="2 3"
+                dot={{ r: 3, fill: "#7c3aed" }}
+                isAnimationActive={false}
+              >
+                {/* Etiqueta más arriba para separarla de las otras dos series. */}
+                <LabelList
+                  dataKey="efectividadIndirecto"
+                  position="top"
+                  offset={20}
+                  fill="#7c3aed"
+                  fontSize={9}
+                  formatter={(v) => `${Number(v ?? 0)}%`}
+                />
+              </Line>
+            )}
           </ComposedChart>
         </ResponsiveContainer>
       );
@@ -94,6 +145,14 @@ const Inner = dynamic(
   }
 );
 
-export function CarteraTotalDiaChart({ data }: { data: CarteraTotalDiaChartPoint[] }) {
-  return <Inner data={data} />;
+export function CarteraTotalDiaChart({
+  data,
+  showDirecto = false,
+  showIndirecto = false,
+}: {
+  data: CarteraTotalDiaChartPoint[];
+  showDirecto?: boolean;
+  showIndirecto?: boolean;
+}) {
+  return <Inner data={data} showDirecto={showDirecto} showIndirecto={showIndirecto} />;
 }

@@ -28,6 +28,7 @@ const Inner = dynamic(
             <CartesianGrid strokeDasharray="3 3" stroke="#f1f5f9" vertical={false} />
             <XAxis dataKey="label" tick={{ fontSize: 11, fill: "#94a3b8" }} />
             <YAxis
+              hide
               tick={{ fontSize: 11, fill: "#94a3b8" }}
               width={70}
               tickFormatter={(v) => Number(v).toLocaleString("es-VE", { maximumFractionDigits: 0 })}

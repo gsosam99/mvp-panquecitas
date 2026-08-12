@@ -154,6 +154,10 @@ export function DiennDashboardClient({
   const [segGranularity, setSegGranularity] = useState<TimeGranularity>("month");
   const [segBucketIdx, setSegBucketIdx] = useState<number | null>(null); // null = último bucket disponible
   const [carteraMetrica, setCarteraMetrica] = useState<"activos" | "facturados" | "pedidos">("activos");
+  // Total acumulado: granularidad propia + series opcionales de activación por modelo.
+  const [totalGranularity, setTotalGranularity] = useState<TimeGranularity>("day");
+  const [showDirectoTotal, setShowDirectoTotal] = useState(false);
+  const [showIndirectoTotal, setShowIndirectoTotal] = useState(false);
 
   // Motivos de no venta: son globales (todo el reporte SAP, sin corte por
   // sector), solo se separan por tipo para las dos listas.
@@ -257,7 +261,7 @@ export function DiennDashboardClient({
   );
   const carteraTotalDiaData = useMemo(
     () =>
-      carteraPorSegmento.totalPorDia.map((p) => ({
+      carteraPorSegmento.totalPorDia[totalGranularity].map((p) => ({
         label: p.label,
         radarKgAcum: p.radarKgAcum,
         programados: p.programados,
@@ -267,8 +271,10 @@ export function DiennDashboardClient({
             : carteraMetrica === "facturados"
             ? p.efectividadFacturados
             : p.efectividadPedidos,
+        efectividadDirecto: p.efectividadDirecto,
+        efectividadIndirecto: p.efectividadIndirecto,
       })),
-    [carteraPorSegmento.totalPorDia, carteraMetrica]
+    [carteraPorSegmento.totalPorDia, totalGranularity, carteraMetrica]
   );
   const rotacion = useMemo(() => computeRotacion(filteredSellOut), [filteredSellOut]);
   const mixProducto = bundle.mixProducto;
@@ -754,36 +760,85 @@ export function DiennDashboardClient({
         </Card>
       )}
 
-      {/* ── Total acumulado por día (ambas ciudades y modelos) ──────────── */}
+      {/* ── Total acumulado (día/semana/mes, ambas ciudades y modelos) ───── */}
       {carteraTotalDiaData.length > 0 && (
         <Card className="mb-6 print-avoid-break">
           <CardHeader className="flex flex-row items-start justify-between gap-3 space-y-0">
             <div>
-              <CardTitle>Total acumulado por día (ambas ciudades y modelos)</CardTitle>
+              <CardTitle>Total acumulado (ambas ciudades y modelos)</CardTitle>
               <p className="text-xs text-slate-400 mt-1">
-                Barras: Radar acumulado (kg). Línea: efectividad del día (
+                Barras: Radar acumulado (kg). Línea roja: efectividad (
                 {carteraMetrica === "activos" ? "activos" : carteraMetrica === "facturados" ? "facturados" : "pedidos"} ÷
-                a visitar). Usa el mismo filtro de arriba.
+                a visitar), con el filtro de arriba. Series opcionales: activación acumulada por Radar del modelo{" "}
+                <span className="font-medium text-green-600">Directo</span> y{" "}
+                <span className="font-medium text-violet-600">Indirecto</span>.
               </p>
             </div>
-            <ExportExcelButton
-              filename="Cartera total por día"
-              rows={carteraPorSegmento.totalPorDia}
-              columns={[
-                { header: "Día", value: (r) => r.dia, width: 14 },
-                { header: "Radar acumulado (kg)", value: (r) => r.radarKgAcum, width: 20 },
-                { header: "A visitar", value: (r) => r.programados, width: 12 },
-                { header: "Activos", value: (r) => r.activos, width: 12 },
-                { header: "% Efect. activos", value: (r) => r.efectividadActivos, width: 16 },
-                { header: "Facturados", value: (r) => r.facturados, width: 12 },
-                { header: "% Efect. facturados", value: (r) => r.efectividadFacturados, width: 18 },
-                { header: "Pedidos", value: (r) => r.pedidos, width: 12 },
-                { header: "% Efect. pedidos", value: (r) => r.efectividadPedidos, width: 16 },
-              ]}
-            />
+            <div className="flex flex-col items-end gap-2 print:hidden">
+              <div className="flex flex-wrap items-center justify-end gap-2">
+                {/* Granularidad propia de este gráfico (día / semana / mes). */}
+                <div className="flex rounded-lg border border-slate-200 overflow-hidden text-xs font-medium">
+                  {GRANULARITY_OPTIONS.map((opt) => (
+                    <button
+                      key={opt.key}
+                      onClick={() => setTotalGranularity(opt.key)}
+                      className={`px-3 py-1.5 transition-colors ${
+                        totalGranularity === opt.key
+                          ? "bg-slate-900 text-white"
+                          : "bg-white text-slate-500 hover:bg-slate-50"
+                      }`}
+                    >
+                      {opt.label}
+                    </button>
+                  ))}
+                </div>
+                {/* Toggles de activación por modelo (independientes, prenden/apagan). */}
+                <button
+                  onClick={() => setShowDirectoTotal((v) => !v)}
+                  className={`px-3 py-1.5 rounded-lg border text-xs font-medium transition-colors ${
+                    showDirectoTotal
+                      ? "border-green-600 bg-green-600 text-white"
+                      : "border-slate-200 bg-white text-slate-500 hover:bg-slate-50"
+                  }`}
+                >
+                  Activación Directo
+                </button>
+                <button
+                  onClick={() => setShowIndirectoTotal((v) => !v)}
+                  className={`px-3 py-1.5 rounded-lg border text-xs font-medium transition-colors ${
+                    showIndirectoTotal
+                      ? "border-violet-600 bg-violet-600 text-white"
+                      : "border-slate-200 bg-white text-slate-500 hover:bg-slate-50"
+                  }`}
+                >
+                  Activación Indirecto
+                </button>
+              </div>
+              <ExportExcelButton
+                filename="Cartera total acumulado"
+                rows={carteraPorSegmento.totalPorDia[totalGranularity]}
+                columns={[
+                  { header: "Período", value: (r) => r.dia, width: 16 },
+                  { header: "Radar acumulado (kg)", value: (r) => r.radarKgAcum, width: 20 },
+                  { header: "A visitar", value: (r) => r.programados, width: 12 },
+                  { header: "Activos", value: (r) => r.activos, width: 12 },
+                  { header: "% Efect. activos", value: (r) => r.efectividadActivos, width: 16 },
+                  { header: "Facturados", value: (r) => r.facturados, width: 12 },
+                  { header: "% Efect. facturados", value: (r) => r.efectividadFacturados, width: 18 },
+                  { header: "Pedidos", value: (r) => r.pedidos, width: 12 },
+                  { header: "% Efect. pedidos", value: (r) => r.efectividadPedidos, width: 16 },
+                  { header: "% Activación Directo", value: (r) => r.efectividadDirecto, width: 18 },
+                  { header: "% Activación Indirecto", value: (r) => r.efectividadIndirecto, width: 20 },
+                ]}
+              />
+            </div>
           </CardHeader>
           <CardContent>
-            <CarteraTotalDiaChart data={carteraTotalDiaData} />
+            <CarteraTotalDiaChart
+              data={carteraTotalDiaData}
+              showDirecto={showDirectoTotal}
+              showIndirecto={showIndirectoTotal}
+            />
           </CardContent>
         </Card>
       )}

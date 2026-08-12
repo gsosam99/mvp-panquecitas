@@ -1243,25 +1243,31 @@ export interface CarteraSegmentoBucket {
 }
 
 export interface CarteraTotalDiaPunto {
-  dia: string; // "YYYY-MM-DD"
+  dia: string; // "YYYY-MM-DD" (día) o clave del bucket (semana/mes)
   label: string;
-  radarKgAcum: number; // volumen Radar acumulado hasta ese día (total ambas ciudades y modelos)
-  programados: number; // clientes que tocaba visitar ese día (denominador)
+  radarKgAcum: number; // volumen Radar acumulado hasta ese punto (total ambas ciudades y modelos)
+  programados: number; // clientes que tocaba visitar ese período (denominador)
   activos: number;
   facturados: number;
   pedidos: number;
   efectividadActivos: number;
   efectividadFacturados: number;
   efectividadPedidos: number;
+  // Activación acumulada por Radar, separada por modelo (series opcionales del gráfico).
+  efectividadDirecto: number; // activos Radar Directo / a visitar Directo (%)
+  efectividadIndirecto: number; // activos Radar Indirecto / a visitar Indirecto (%)
 }
 
 export interface CarteraSegmentoResult {
   segmentos: Record<TimeGranularity, CarteraSegmentoBucket[]>;
-  totalPorDia: CarteraTotalDiaPunto[];
+  totalPorDia: Record<TimeGranularity, CarteraTotalDiaPunto[]>;
 }
 
 export async function getCarteraPorSegmento(): Promise<CarteraSegmentoResult> {
-  const empty: CarteraSegmentoResult = { segmentos: { day: [], week: [], month: [] }, totalPorDia: [] };
+  const empty: CarteraSegmentoResult = {
+    segmentos: { day: [], week: [], month: [] },
+    totalPorDia: { day: [], week: [], month: [] },
+  };
   const universo = await getUniverseLocations();
   if (universo.length === 0) return empty;
 
@@ -1389,45 +1395,57 @@ export async function getCarteraPorSegmento(): Promise<CarteraSegmentoResult> {
     return out;
   }
 
-  // ── Total por día (ambas ciudades y modelos): kg acumulado + efectividad del día ──
-  function buildTotalPorDia(): CarteraTotalDiaPunto[] {
-    const radarByDia = new Map<string, { locId: string; kg: number }[]>();
+  // ── Total acumulado (ambas ciudades y modelos): kg acumulado + efectividad ──
+  // Un punto por bucket de la granularidad elegida (día/semana/mes). Las
+  // efectividades son acumuladas hasta el bucket; las series por modelo usan
+  // activación por Radar (activos) separada Directo / Indirecto.
+  function buildTotalAcumulado(granularity: TimeGranularity): CarteraTotalDiaPunto[] {
+    const radarByBucket = new Map<string, { locId: string; kg: number }[]>();
     for (const r of radar) {
-      const d = r.date_of_sale.slice(0, 10);
-      if (!radarByDia.has(d)) radarByDia.set(d, []);
-      radarByDia.get(d)!.push({ locId: r.location_id, kg: r.quantity_kg });
+      const b = bucketKeyFor(r.date_of_sale.slice(0, 10), granularity);
+      if (!radarByBucket.has(b)) radarByBucket.set(b, []);
+      radarByBucket.get(b)!.push({ locId: r.location_id, kg: r.quantity_kg });
     }
-    const factByDia = new Map<string, string[]>();
+    const factByBucket = new Map<string, string[]>();
     for (const r of fact) {
-      const d = r.fecha.slice(0, 10);
-      if (!factByDia.has(d)) factByDia.set(d, []);
-      factByDia.get(d)!.push(r.location_id);
+      const b = bucketKeyFor(r.fecha.slice(0, 10), granularity);
+      if (!factByBucket.has(b)) factByBucket.set(b, []);
+      factByBucket.get(b)!.push(r.location_id);
     }
-    const pedidoByDia = new Map<string, string[]>();
+    const pedidoByBucket = new Map<string, string[]>();
     for (const r of pedido) {
-      const d = r.fecha.slice(0, 10);
-      if (!pedidoByDia.has(d)) pedidoByDia.set(d, []);
-      pedidoByDia.get(d)!.push(r.location_id);
+      const b = bucketKeyFor(r.fecha.slice(0, 10), granularity);
+      if (!pedidoByBucket.has(b)) pedidoByBucket.set(b, []);
+      pedidoByBucket.get(b)!.push(r.location_id);
     }
-    const dias = Array.from(new Set([...radarByDia.keys(), ...factByDia.keys(), ...pedidoByDia.keys()])).sort();
+    const buckets = Array.from(
+      new Set([...radarByBucket.keys(), ...factByBucket.keys(), ...pedidoByBucket.keys()])
+    ).sort();
     const radarCum = new Set<string>();
     const factCum = new Set<string>();
     const pedidoCum = new Set<string>();
     let kgAcum = 0;
-    return dias.map((d) => {
-      for (const r of radarByDia.get(d) ?? []) {
+    return buckets.map((b) => {
+      for (const r of radarByBucket.get(b) ?? []) {
         kgAcum += r.kg;
         radarCum.add(r.locId);
       }
-      for (const locId of factByDia.get(d) ?? []) factCum.add(locId);
-      for (const locId of pedidoByDia.get(d) ?? []) pedidoCum.add(locId);
-      const prog = programadosEn(clientes, new Set([isoWeekday(d)]));
+      for (const locId of factByBucket.get(b) ?? []) factCum.add(locId);
+      for (const locId of pedidoByBucket.get(b) ?? []) pedidoCum.add(locId);
+      // día → solo ese día de la semana; semana/mes → cualquier día programado.
+      const covered = granularity === "day" ? new Set([isoWeekday(b)]) : TODOS_LOS_DIAS;
+      const prog = programadosEn(clientes, covered);
       const activos = prog.filter((c) => radarCum.has(c.locId)).length;
       const facturados = prog.filter((c) => factCum.has(c.locId)).length;
       const pedidos = prog.filter((c) => pedidoCum.has(c.locId)).length;
+      // Activación por Radar separada por modelo (segKey = `${sector}|${modelo}`).
+      const progDir = prog.filter((c) => c.segKey.endsWith("|Directo"));
+      const progInd = prog.filter((c) => c.segKey.endsWith("|Indirecto"));
+      const activosDir = progDir.filter((c) => radarCum.has(c.locId)).length;
+      const activosInd = progInd.filter((c) => radarCum.has(c.locId)).length;
       return {
-        dia: d,
-        label: bucketLabelFor(d, "day"),
+        dia: b,
+        label: bucketLabelFor(b, granularity),
         radarKgAcum: Math.round(kgAcum * 10) / 10,
         programados: prog.length,
         activos,
@@ -1436,13 +1454,19 @@ export async function getCarteraPorSegmento(): Promise<CarteraSegmentoResult> {
         efectividadActivos: pct(activos, prog.length),
         efectividadFacturados: pct(facturados, prog.length),
         efectividadPedidos: pct(pedidos, prog.length),
+        efectividadDirecto: pct(activosDir, progDir.length),
+        efectividadIndirecto: pct(activosInd, progInd.length),
       };
     });
   }
 
   return {
     segmentos: { day: buildSegmentos("day"), week: buildSegmentos("week"), month: buildSegmentos("month") },
-    totalPorDia: buildTotalPorDia(),
+    totalPorDia: {
+      day: buildTotalAcumulado("day"),
+      week: buildTotalAcumulado("week"),
+      month: buildTotalAcumulado("month"),
+    },
   };
 }
 

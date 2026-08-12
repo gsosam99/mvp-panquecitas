@@ -24,22 +24,8 @@ const Inner = dynamic(
           <ComposedChart data={data} margin={{ top: 28, right: 20, left: 10, bottom: 5 }}>
             <CartesianGrid strokeDasharray="3 3" stroke="#f1f5f9" vertical={false} />
             <XAxis dataKey="segmento" tick={{ fontSize: 11, fill: "#94a3b8" }} />
-            <YAxis
-              yAxisId="kg"
-              tick={{ fontSize: 11, fill: "#94a3b8" }}
-              width={70}
-              tickFormatter={(v) => Number(v).toLocaleString("es-VE", { maximumFractionDigits: 0 })}
-              label={{ value: "Volumen Radar (kg)", angle: -90, position: "insideLeft", style: { fontSize: 11, fill: "#1a65bd" } }}
-            />
-            <YAxis
-              yAxisId="pct"
-              orientation="right"
-              domain={[0, 100]}
-              width={48}
-              tick={{ fontSize: 11, fill: "#dc2626" }}
-              tickFormatter={(v) => `${v}%`}
-              label={{ value: "Efectividad (%)", angle: 90, position: "insideRight", style: { fontSize: 11, fill: "#dc2626" } }}
-            />
+            <YAxis yAxisId="kg" hide />
+            <YAxis yAxisId="pct" hide domain={[0, 100]} />
             <Tooltip
               contentStyle={{ fontSize: 12, borderRadius: 8, border: "1px solid #e2e8f0" }}
               formatter={(value, name) => {

@@ -35,7 +35,7 @@ const Inner = dynamic(
             <CartesianGrid strokeDasharray="3 3" stroke="#f1f5f9" vertical={false} />
             {/* eslint-disable-next-line @typescript-eslint/no-explicit-any */}
             <XAxis dataKey="label" tick={RoundTick as any} height={32} />
-            <YAxis tick={{ fontSize: 11, fill: "#94a3b8" }} unit="%" width={44} />
+            <YAxis hide tick={{ fontSize: 11, fill: "#94a3b8" }} unit="%" width={44} />
             <Tooltip
               contentStyle={{ fontSize: 12, borderRadius: 8, border: "1px solid #e2e8f0" }}
               formatter={(value, name) => [

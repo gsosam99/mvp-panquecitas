@@ -79,7 +79,7 @@ const Inner = dynamic(
               />
             ))}
             <XAxis dataKey="label" tick={{ fontSize: 11, fill: "#94a3b8" }} />
-            <YAxis tick={{ fontSize: 11, fill: "#94a3b8" }} unit="%" width={44} />
+            <YAxis hide tick={{ fontSize: 11, fill: "#94a3b8" }} unit="%" width={44} />
             <Tooltip
               content={(props: { active?: boolean; label?: unknown; payload?: readonly unknown[] }) => {
                 if (!props.active || !props.payload || props.payload.length === 0) return null;
