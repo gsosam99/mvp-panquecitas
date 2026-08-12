@@ -15,7 +15,7 @@ function formatKg(value: number): string {
 
 const Inner = dynamic(
   async () => {
-    const { ResponsiveContainer, ComposedChart, Bar, Line, XAxis, YAxis, CartesianGrid, Tooltip, Legend } =
+    const { ResponsiveContainer, ComposedChart, Bar, Line, XAxis, YAxis, CartesianGrid, Tooltip, Legend, LabelList } =
       await import("recharts");
 
     function CarteraTotalDiaInner({ data }: { data: CarteraTotalDiaChartPoint[] }) {
@@ -61,12 +61,14 @@ const Inner = dynamic(
             <Line
               yAxisId="count"
               dataKey="programados"
-              stroke="#334155"
-              strokeWidth={1.5}
-              strokeDasharray="4 3"
-              dot={false}
+              stroke="transparent"
+              dot={{ r: 4, fill: "#334155" }}
+              activeDot={{ r: 5 }}
               isAnimationActive={false}
-            />
+            >
+              {/* Cartera del día a visitar: número visible sobre cada barra, sin hover. */}
+              <LabelList dataKey="programados" position="top" offset={8} fill="#334155" fontSize={10} />
+            </Line>
             <Line
               yAxisId="pct"
               dataKey="efectividad"
