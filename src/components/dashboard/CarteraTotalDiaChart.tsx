@@ -40,21 +40,16 @@ const Inner = dynamic(
               tickFormatter={(v) => `${v}%`}
               label={{ value: "Efectividad (%)", angle: 90, position: "insideRight", style: { fontSize: 11, fill: "#dc2626" } }}
             />
-            {/* Eje oculto para escalar la "cartera del día" (conteo), distinta escala que kg y %. */}
-            <YAxis yAxisId="count" hide domain={[0, "auto"]} />
             <Tooltip
               contentStyle={{ fontSize: 12, borderRadius: 8, border: "1px solid #e2e8f0" }}
               formatter={(value, name) => {
                 if (name === "efectividad") return [`${Number(value ?? 0)}%`, "Efectividad"];
                 if (name === "radarKgAcum") return [formatKg(Number(value ?? 0)), "Radar acumulado"];
-                if (name === "programados") return [String(Number(value ?? 0)), "Cartera del día (a visitar)"];
                 return [String(value ?? ""), String(name ?? "")];
               }}
             />
             <Legend
-              formatter={(value: string) =>
-                value === "radarKgAcum" ? "Radar acumulado" : value === "efectividad" ? "Efectividad" : "Cartera del día"
-              }
+              formatter={(value: string) => (value === "radarKgAcum" ? "Radar acumulado" : "Efectividad")}
               wrapperStyle={{ fontSize: 12 }}
             />
             <Bar yAxisId="kg" dataKey="radarKgAcum" fill="#bfdbfe" radius={[3, 3, 0, 0]}>
@@ -68,17 +63,6 @@ const Inner = dynamic(
                 formatter={(v) => `${Number(v ?? 0).toLocaleString("es-VE", { maximumFractionDigits: 0 })} kg`}
               />
             </Bar>
-            <Line
-              yAxisId="count"
-              dataKey="programados"
-              stroke="transparent"
-              dot={false}
-              activeDot={false}
-              isAnimationActive={false}
-            >
-              {/* Cartera del día a visitar: número visible sobre cada barra, sin hover. */}
-              <LabelList dataKey="programados" position="top" offset={8} fill="#334155" fontSize={10} />
-            </Line>
             <Line
               yAxisId="pct"
               dataKey="efectividad"
