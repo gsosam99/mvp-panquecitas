@@ -234,6 +234,8 @@ export interface ParsedCarteraRow {
   grupo_vendedor: string;
   asesor_encargado: string;
   fuente_sell_out?: FuenteSellOut;
+  /** Modelo de atención de la columna "Directo o Indirecto" (Directo/Indirecto/Mixto). "" si la columna no está. */
+  esquema_atencion: string;
 }
 
 export interface CarteraParseResult {

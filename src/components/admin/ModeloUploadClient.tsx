@@ -75,7 +75,6 @@ export function ModeloUploadClient() {
       const data = (await res.json()) as {
         updated?: number;
         clientes_sin_cartera?: number;
-        esquemas?: string[];
         error?: string;
         detail?: string;
       };
@@ -87,10 +86,9 @@ export function ModeloUploadClient() {
       const sinCartera = data.clientes_sin_cartera
         ? ` · ${data.clientes_sin_cartera} códigos sin cartera (ignorados)`
         : "";
-      const esquemas = data.esquemas?.length ? ` · Esquemas: ${data.esquemas.join(", ")}` : "";
-      setDoneSummary(`${data.updated ?? 0} clientes actualizados${esquemas}${sinCartera}`);
+      setDoneSummary(`${data.updated ?? 0} clientes con plan de visita actualizado${sinCartera}`);
       setState("done");
-      toast.success("Modelo de atención actualizado");
+      toast.success("Plan de visita actualizado");
     } catch {
       toast.error("Error de conexión. Intenta de nuevo.");
       setState("previewing");
@@ -109,7 +107,7 @@ export function ModeloUploadClient() {
       <div className="lg:col-span-2">
         <Card>
           <CardHeader>
-            <CardTitle>Importar modelo de atención</CardTitle>
+            <CardTitle>Importar plan de visita</CardTitle>
           </CardHeader>
           <CardContent>
             {(state === "idle" || state === "parsing") && (
@@ -172,14 +170,14 @@ export function ModeloUploadClient() {
                         <TableHeader>
                           <TableRow>
                             <TableHead>Código SAP</TableHead>
-                            <TableHead>Esquema de Atención</TableHead>
+                            <TableHead>Días de visita (ISO 1=Lun…7=Dom)</TableHead>
                           </TableRow>
                         </TableHeader>
                         <TableBody>
                           {parsed.valid.slice(0, 100).map((row, i) => (
                             <TableRow key={i}>
                               <TableCell className="font-mono text-xs">{row.sap_code}</TableCell>
-                              <TableCell className="text-xs">{row.esquema_atencion}</TableCell>
+                              <TableCell className="text-xs">{row.dias_visita || "—"}</TableCell>
                             </TableRow>
                           ))}
                         </TableBody>
@@ -223,12 +221,15 @@ export function ModeloUploadClient() {
           </CardHeader>
           <CardContent className="text-sm text-slate-600 space-y-2">
             <p>
-              Asigna el <span className="font-medium">modelo de atención</span> (Directo / Indirecto) a cada cliente de
-              la cartera, cruzando por código SAP. Alimenta los gráficos de cartera por ciudad y modelo en DIENN.
+              Carga el <span className="font-medium">plan de visita</span> (qué días de la semana toca visitar cada
+              cliente), cruzando por código SAP contra la cartera. Es el denominador de la tasa de efectividad en los
+              gráficos de cartera por ciudad y modelo.
             </p>
             <p className="text-xs text-slate-400">
-              El <span className="font-mono">N7_V_SD56</span> trae el maestro completo (mayormente Directo); el maestro
-              de la distribuidora (.xlsx) trae los Indirectos. Se pueden cargar ambos, uno tras otro.
+              El <span className="font-medium">modelo</span> (Directo / Indirecto / Mixto) ya no se carga aquí: viene de
+              la columna &quot;Directo o Indirecto&quot; de la <span className="font-medium">Cartera de Clientes</span>.
+              Este upload solo trae los días. Sube el <span className="font-mono">N7_V_SD56</span> y/o el maestro de la
+              distribuidora (.xlsx).
             </p>
           </CardContent>
         </Card>

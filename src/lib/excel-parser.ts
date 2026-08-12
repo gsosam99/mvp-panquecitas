@@ -76,6 +76,9 @@ const CARTERA_HEADER_ALIASES: Record<keyof CarteraColumnMap, string[]> = {
   grupo_vendedor: ["grupovendedor", "grupovendedores", "grupodevendedores", "gruponvendedor"],
   asesor_encargado: ["asesorencargado", "asesor"],
   fuente_sell_out: ["fuentesellout", "fuentedesellout"],
+  // Modelo de atención — columna "Directo o Indirecto" de la cartera (valores
+  // Directo / Indirecto / Mixto). Es la fuente autoritativa del modelo.
+  esquema_atencion: ["directooindirect", "directooindirecto", "directoindirecto", "modelo", "esquema", "esquemadeatencion"],
 };
 
 interface CarteraColumnMap {
@@ -89,6 +92,7 @@ interface CarteraColumnMap {
   grupo_vendedor: number;
   asesor_encargado: number;
   fuente_sell_out: number;
+  esquema_atencion: number;
 }
 
 export async function parseCarteraExcel(buffer: ArrayBuffer): Promise<CarteraParseResult> {
@@ -182,6 +186,7 @@ export async function parseCarteraExcel(buffer: ArrayBuffer): Promise<CarteraPar
         .toUpperCase(),
       asesor_encargado: String(col.asesor_encargado ? row.getCell(col.asesor_encargado).value ?? "" : "").trim(),
       fuente_sell_out: fuenteRaw.includes("B2B") || fuenteRaw.includes("REPORTADO") ? "Reportado_B2B" : undefined,
+      esquema_atencion: String(col.esquema_atencion ? row.getCell(col.esquema_atencion).value ?? "" : "").trim(),
     });
   });
 

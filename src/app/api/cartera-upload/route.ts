@@ -39,6 +39,7 @@ export async function POST(req: Request) {
       grupo_vendedor: row.grupo_vendedor || null,
       asesor_encargado: row.asesor_encargado || null,
       fuente_sell_out: row.fuente_sell_out ?? "Calculado",
+      esquema_atencion: row.esquema_atencion || null,
     }));
 
     const { data: upserted, error } = await supabase

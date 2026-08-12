@@ -30,14 +30,16 @@ export async function POST(req: Request) {
       return Response.json({ error: "Datos inválidos" }, { status: 400 });
     }
 
+    // Este upload ahora solo escribe el PLAN DE VISITA (dias_visita). El modelo
+    // (Directo/Indirecto/Mixto) es autoritativo desde la Cartera de Clientes
+    // (columna "Directo o Indirecto"), así que aquí NO se toca esquema_atencion.
     // Última asignación gana si un código se repite en el archivo.
-    const dataByCode = new Map<string, { esquema: string; dias: string }>();
+    const diasByCode = new Map<string, string>();
     for (const r of rows) {
       const code = r.sap_code?.trim();
-      const esquema = r.esquema_atencion?.trim();
-      if (code && esquema) dataByCode.set(code, { esquema, dias: (r.dias_visita ?? "").trim() });
+      if (code) diasByCode.set(code, (r.dias_visita ?? "").trim());
     }
-    const codes = [...dataByCode.keys()];
+    const codes = [...diasByCode.keys()];
 
     // Solo se tocan clientes existentes en la cartera.
     const { data: existing, error: fetchError } = await supabase
@@ -48,26 +50,25 @@ export async function POST(req: Request) {
     const existingCodes = new Set(((existing ?? []) as { sap_code: string }[]).map((l) => l.sap_code));
     const sinCartera = codes.filter((c) => !existingCodes.has(c)).length;
 
-    // Agrupar por combo (esquema + plan de visita) → un update por combo.
-    const combos = new Map<string, { esquema: string; dias: string; codes: string[] }>();
-    for (const [code, d] of dataByCode) {
+    // Agrupar por plan de visita → un update por grupo.
+    const combos = new Map<string, string[]>();
+    for (const [code, dias] of diasByCode) {
       if (!existingCodes.has(code)) continue;
-      const key = `${d.esquema}||${d.dias}`;
-      if (!combos.has(key)) combos.set(key, { esquema: d.esquema, dias: d.dias, codes: [] });
-      combos.get(key)!.codes.push(code);
+      if (!combos.has(dias)) combos.set(dias, []);
+      combos.get(dias)!.push(code);
     }
 
-    // Troceado: un update por (combo, lote de ≤100 códigos) para no exceder el
+    // Troceado: un update por (plan, lote de ≤100 códigos) para no exceder el
     // largo de la URL del filtro .in cuando hay cientos de clientes.
     const CHUNK = 100;
     let updated = 0;
-    for (const combo of combos.values()) {
-      for (let i = 0; i < combo.codes.length; i += CHUNK) {
-        const chunk = combo.codes.slice(i, i + CHUNK);
+    for (const [dias, groupCodes] of combos) {
+      for (let i = 0; i < groupCodes.length; i += CHUNK) {
+        const chunk = groupCodes.slice(i, i + CHUNK);
         if (chunk.length === 0) continue;
         const { data, error } = await supabase
           .from("locations")
-          .update({ esquema_atencion: combo.esquema, dias_visita: combo.dias || null })
+          .update({ dias_visita: dias || null })
           .in("sap_code", chunk)
           .select("id");
         if (error) throw error;
@@ -75,8 +76,7 @@ export async function POST(req: Request) {
       }
     }
 
-    const esquemas = [...new Set([...combos.values()].map((c) => c.esquema))];
-    return Response.json({ updated, clientes_sin_cartera: sinCartera, esquemas });
+    return Response.json({ updated, clientes_sin_cartera: sinCartera });
   } catch (error) {
     console.error("[POST /api/modelo-upload]", error);
     return Response.json({ error: "Error interno del servidor", detail: errorDetail(error) }, { status: 500 });

@@ -1224,7 +1224,7 @@ const TODOS_LOS_DIAS = new Set([1, 2, 3, 4, 5, 6, 7]);
 export interface CarteraSegmentoPunto {
   segmento: string; // "Cumaná Directo"
   ciudad: string;
-  modelo: "Directo" | "Indirecto";
+  modelo: string; // Directo / Indirecto / Mixto (columna "Directo o Indirecto" de la cartera)
   radarKg: number;
   cartera: number; // total de clientes del segmento (estático)
   programados: number; // clientes que tocaba visitar en el bucket (denominador)
@@ -1263,13 +1263,15 @@ export async function getCarteraPorSegmento(): Promise<CarteraSegmentoResult> {
 
   type Cli = { locId: string; segKey: string; plan: Set<number> };
   const clientes: Cli[] = [];
-  const segMeta = new Map<string, { ciudad: string; modelo: "Directo" | "Indirecto" }>();
+  const segMeta = new Map<string, { ciudad: string; modelo: string }>();
   const carteraCount = new Map<string, number>();
   const clientesBySeg = new Map<string, Cli[]>();
   for (const l of universo) {
     const sector = sectorGroup(l.oficina_venta);
     if (!sector) continue;
-    const modelo: "Directo" | "Indirecto" = esModeloIndirecto(l) ? "Indirecto" : "Directo";
+    // Modelo tal cual la cartera (columna "Directo o Indirecto"): Directo /
+    // Indirecto / Mixto. Sin clasificar → "Sin modelo".
+    const modelo = (l.esquema_atencion ?? "").trim() || "Sin modelo";
     const segKey = `${sector}|${modelo}`;
     const cli: Cli = { locId: l.id, segKey, plan: planSet(l.dias_visita) };
     clientes.push(cli);
