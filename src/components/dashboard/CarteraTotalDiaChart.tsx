@@ -40,6 +40,8 @@ const Inner = dynamic(
               tickFormatter={(v) => `${v}%`}
               label={{ value: "Efectividad (%)", angle: 90, position: "insideRight", style: { fontSize: 11, fill: "#dc2626" } }}
             />
+            {/* Eje oculto para escalar la "cartera del día" (conteo), distinta escala que kg y %. */}
+            <YAxis yAxisId="count" hide domain={[0, "auto"]} />
             <Tooltip
               contentStyle={{ fontSize: 12, borderRadius: 8, border: "1px solid #e2e8f0" }}
               formatter={(value, name) => {
@@ -56,6 +58,15 @@ const Inner = dynamic(
               wrapperStyle={{ fontSize: 12 }}
             />
             <Bar yAxisId="kg" dataKey="radarKgAcum" fill="#bfdbfe" radius={[3, 3, 0, 0]} />
+            <Line
+              yAxisId="count"
+              dataKey="programados"
+              stroke="#334155"
+              strokeWidth={1.5}
+              strokeDasharray="4 3"
+              dot={false}
+              isAnimationActive={false}
+            />
             <Line
               yAxisId="pct"
               dataKey="efectividad"
