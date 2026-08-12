@@ -1230,8 +1230,10 @@ export interface CarteraSegmentoPunto {
   programados: number; // clientes que tocaba visitar en el bucket (denominador)
   activos: number;
   facturados: number;
+  pedidos: number;
   efectividadActivos: number; // activos / programados (%)
   efectividadFacturados: number; // facturados / programados (%)
+  efectividadPedidos: number; // pedidos / programados (%)
 }
 
 export interface CarteraSegmentoBucket {
@@ -1247,8 +1249,10 @@ export interface CarteraTotalDiaPunto {
   programados: number; // clientes que tocaba visitar ese día (denominador)
   activos: number;
   facturados: number;
+  pedidos: number;
   efectividadActivos: number;
   efectividadFacturados: number;
+  efectividadPedidos: number;
 }
 
 export interface CarteraSegmentoResult {
@@ -1295,11 +1299,19 @@ export async function getCarteraPorSegmento(): Promise<CarteraSegmentoResult> {
     .select("location_id, fecha")
     .eq("product_id", PRODUCT_IDS.PANQUECITAS)
     .gt("cantidad_facturada_kg", 0);
+  const { data: pedidoData } = await supabase
+    .from("sap_pedidos_facturados")
+    .select("location_id, fecha")
+    .eq("product_id", PRODUCT_IDS.PANQUECITAS)
+    .gt("cantidad_pedido_kg", 0);
 
   const radar = ((radarData ?? []) as { location_id: string; quantity_kg: number; date_of_sale: string }[]).filter(
     (r) => locSet.has(r.location_id)
   );
   const fact = ((factData ?? []) as { location_id: string; fecha: string }[]).filter((r) => locSet.has(r.location_id));
+  const pedido = ((pedidoData ?? []) as { location_id: string; fecha: string }[]).filter((r) =>
+    locSet.has(r.location_id)
+  );
 
   // Segmentos ordenados: por ciudad y luego Directo antes que Indirecto.
   const segKeys = [...carteraCount.keys()].sort((a, b) => {
@@ -1326,11 +1338,20 @@ export async function getCarteraPorSegmento(): Promise<CarteraSegmentoResult> {
       if (!factByBucket.has(b)) factByBucket.set(b, []);
       factByBucket.get(b)!.push(r.location_id);
     }
-    const buckets = Array.from(new Set([...radarByBucket.keys(), ...factByBucket.keys()])).sort();
+    const pedidoByBucket = new Map<string, string[]>();
+    for (const r of pedido) {
+      const b = bucketKeyFor(r.fecha.slice(0, 10), granularity);
+      if (!pedidoByBucket.has(b)) pedidoByBucket.set(b, []);
+      pedidoByBucket.get(b)!.push(r.location_id);
+    }
+    const buckets = Array.from(
+      new Set([...radarByBucket.keys(), ...factByBucket.keys(), ...pedidoByBucket.keys()])
+    ).sort();
     if (buckets.length === 0) return [];
 
     const radarCum = new Set<string>();
     const factCum = new Set<string>();
+    const pedidoCum = new Set<string>();
     const out: CarteraSegmentoBucket[] = [];
     for (const b of buckets) {
       const radarKgSeg = new Map<string, number>();
@@ -1339,6 +1360,7 @@ export async function getCarteraPorSegmento(): Promise<CarteraSegmentoResult> {
         radarCum.add(r.locId);
       }
       for (const locId of factByBucket.get(b) ?? []) factCum.add(locId);
+      for (const locId of pedidoByBucket.get(b) ?? []) pedidoCum.add(locId);
       // día → solo ese día de la semana; semana/mes → cualquier día programado.
       const covered = granularity === "day" ? new Set([isoWeekday(b)]) : TODOS_LOS_DIAS;
       const puntos: CarteraSegmentoPunto[] = segKeys.map((key) => {
@@ -1346,6 +1368,7 @@ export async function getCarteraPorSegmento(): Promise<CarteraSegmentoResult> {
         const prog = programadosEn(clientesBySeg.get(key) ?? [], covered);
         const activos = prog.filter((c) => radarCum.has(c.locId)).length;
         const facturados = prog.filter((c) => factCum.has(c.locId)).length;
+        const pedidos = prog.filter((c) => pedidoCum.has(c.locId)).length;
         return {
           segmento: `${meta.ciudad} ${meta.modelo}`,
           ciudad: meta.ciudad,
@@ -1355,8 +1378,10 @@ export async function getCarteraPorSegmento(): Promise<CarteraSegmentoResult> {
           programados: prog.length,
           activos,
           facturados,
+          pedidos,
           efectividadActivos: pct(activos, prog.length),
           efectividadFacturados: pct(facturados, prog.length),
+          efectividadPedidos: pct(pedidos, prog.length),
         };
       });
       out.push({ bucket: b, label: bucketLabelFor(b, granularity), puntos });
@@ -1378,9 +1403,16 @@ export async function getCarteraPorSegmento(): Promise<CarteraSegmentoResult> {
       if (!factByDia.has(d)) factByDia.set(d, []);
       factByDia.get(d)!.push(r.location_id);
     }
-    const dias = Array.from(new Set([...radarByDia.keys(), ...factByDia.keys()])).sort();
+    const pedidoByDia = new Map<string, string[]>();
+    for (const r of pedido) {
+      const d = r.fecha.slice(0, 10);
+      if (!pedidoByDia.has(d)) pedidoByDia.set(d, []);
+      pedidoByDia.get(d)!.push(r.location_id);
+    }
+    const dias = Array.from(new Set([...radarByDia.keys(), ...factByDia.keys(), ...pedidoByDia.keys()])).sort();
     const radarCum = new Set<string>();
     const factCum = new Set<string>();
+    const pedidoCum = new Set<string>();
     let kgAcum = 0;
     return dias.map((d) => {
       for (const r of radarByDia.get(d) ?? []) {
@@ -1388,9 +1420,11 @@ export async function getCarteraPorSegmento(): Promise<CarteraSegmentoResult> {
         radarCum.add(r.locId);
       }
       for (const locId of factByDia.get(d) ?? []) factCum.add(locId);
+      for (const locId of pedidoByDia.get(d) ?? []) pedidoCum.add(locId);
       const prog = programadosEn(clientes, new Set([isoWeekday(d)]));
       const activos = prog.filter((c) => radarCum.has(c.locId)).length;
       const facturados = prog.filter((c) => factCum.has(c.locId)).length;
+      const pedidos = prog.filter((c) => pedidoCum.has(c.locId)).length;
       return {
         dia: d,
         label: bucketLabelFor(d, "day"),
@@ -1398,8 +1432,10 @@ export async function getCarteraPorSegmento(): Promise<CarteraSegmentoResult> {
         programados: prog.length,
         activos,
         facturados,
+        pedidos,
         efectividadActivos: pct(activos, prog.length),
         efectividadFacturados: pct(facturados, prog.length),
+        efectividadPedidos: pct(pedidos, prog.length),
       };
     });
   }

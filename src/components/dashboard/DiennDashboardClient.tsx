@@ -153,7 +153,7 @@ export function DiennDashboardClient({
   // Cartera por segmento (ciudad×modelo): granularidad + bucket + qué efectividad mostrar.
   const [segGranularity, setSegGranularity] = useState<TimeGranularity>("month");
   const [segBucketIdx, setSegBucketIdx] = useState<number | null>(null); // null = último bucket disponible
-  const [carteraMetrica, setCarteraMetrica] = useState<"activos" | "facturados">("activos");
+  const [carteraMetrica, setCarteraMetrica] = useState<"activos" | "facturados" | "pedidos">("activos");
 
   // Motivos de no venta: son globales (todo el reporte SAP, sin corte por
   // sector), solo se separan por tipo para las dos listas.
@@ -246,7 +246,12 @@ export function DiennDashboardClient({
         segmento: p.segmento,
         radarKg: p.radarKg,
         programados: p.programados,
-        efectividad: carteraMetrica === "activos" ? p.efectividadActivos : p.efectividadFacturados,
+        efectividad:
+          carteraMetrica === "activos"
+            ? p.efectividadActivos
+            : carteraMetrica === "facturados"
+            ? p.efectividadFacturados
+            : p.efectividadPedidos,
       })),
     [segBucket, carteraMetrica]
   );
@@ -256,7 +261,12 @@ export function DiennDashboardClient({
         label: p.label,
         radarKgAcum: p.radarKgAcum,
         programados: p.programados,
-        efectividad: carteraMetrica === "activos" ? p.efectividadActivos : p.efectividadFacturados,
+        efectividad:
+          carteraMetrica === "activos"
+            ? p.efectividadActivos
+            : carteraMetrica === "facturados"
+            ? p.efectividadFacturados
+            : p.efectividadPedidos,
       })),
     [carteraPorSegmento.totalPorDia, carteraMetrica]
   );
@@ -654,6 +664,7 @@ export function DiennDashboardClient({
               [
                 ["activos", "Activos (Radar)"],
                 ["facturados", "Facturados"],
+                ["pedidos", "Pedidos"],
               ] as const
             ).map(([key, label]) => (
               <button
@@ -705,8 +716,13 @@ export function DiennDashboardClient({
             <div>
               <CardTitle>Volumen Radar y efectividad por segmento — {segBucket.label}</CardTitle>
               <p className="text-xs text-slate-400 mt-1">
-                Efectividad = {carteraMetrica === "activos" ? "clientes con ventas Radar" : "clientes facturados"} ÷
-                clientes a visitar del período. Etiqueta &quot;A visitar&quot; = denominador.
+                Efectividad ={" "}
+                {carteraMetrica === "activos"
+                  ? "clientes con ventas Radar"
+                  : carteraMetrica === "facturados"
+                  ? "clientes facturados"
+                  : "clientes con pedidos"}{" "}
+                ÷ clientes a visitar del período. Etiqueta &quot;A visitar&quot; = denominador.
               </p>
             </div>
             <ExportExcelButton
@@ -721,6 +737,8 @@ export function DiennDashboardClient({
                 { header: "% Efect. activos", value: (r) => r.efectividadActivos, width: 16 },
                 { header: "Facturados", value: (r) => r.facturados, width: 12 },
                 { header: "% Efect. facturados", value: (r) => r.efectividadFacturados, width: 18 },
+                { header: "Pedidos", value: (r) => r.pedidos, width: 12 },
+                { header: "% Efect. pedidos", value: (r) => r.efectividadPedidos, width: 16 },
               ]}
             />
           </CardHeader>
@@ -744,7 +762,8 @@ export function DiennDashboardClient({
               <CardTitle>Total acumulado por día (ambas ciudades y modelos)</CardTitle>
               <p className="text-xs text-slate-400 mt-1">
                 Barras: Radar acumulado (kg). Línea: efectividad del día (
-                {carteraMetrica === "activos" ? "activos" : "facturados"} ÷ a visitar). Usa el mismo filtro de arriba.
+                {carteraMetrica === "activos" ? "activos" : carteraMetrica === "facturados" ? "facturados" : "pedidos"} ÷
+                a visitar). Usa el mismo filtro de arriba.
               </p>
             </div>
             <ExportExcelButton
@@ -758,6 +777,8 @@ export function DiennDashboardClient({
                 { header: "% Efect. activos", value: (r) => r.efectividadActivos, width: 16 },
                 { header: "Facturados", value: (r) => r.facturados, width: 12 },
                 { header: "% Efect. facturados", value: (r) => r.efectividadFacturados, width: 18 },
+                { header: "Pedidos", value: (r) => r.pedidos, width: 12 },
+                { header: "% Efect. pedidos", value: (r) => r.efectividadPedidos, width: 16 },
               ]}
             />
           </CardHeader>
