@@ -1079,9 +1079,25 @@ function stripAccents(s: string): string {
 function agruparCategoriaAnaquel(raw: string): string {
   const t = stripAccents(raw.toLowerCase());
   const has = (...kws: string[]) => kws.some((k) => t.includes(k));
-  // "Caja" es una ubicación (cerca de la caja / mostrador), no una categoría
-  // vecina — tiene prioridad sobre el resto.
+  // Coincidencia por palabra completa: para tokens cortos (ej. "pan") que si
+  // no, aparecerían como subcadena dentro de otras palabras ("acompaña" →
+  // "acompana" contiene "pan") y ensuciarían la categoría.
+  const hasWord = (...kws: string[]) => kws.some((k) => new RegExp(`\\b${k}\\b`).test(t));
+  //
+  // ── Cómo categorizar (leer antes de agregar palabras nuevas) ─────────────
+  // El mercaderista escribe el texto a mano; se normaliza a minúsculas y sin
+  // acentos y se busca por palabra clave. El ORDEN importa: gana la primera
+  // categoría que calce. Al entrar una palabra nueva, métela en el grupo que
+  // corresponda de abajo (o crea uno nuevo manteniendo el orden de prioridad).
+  //
+  // 1) Ubicaciones físicas (no son categorías de producto): máxima prioridad.
   if (has("mostrador", "caja")) return "Caja";
+  if (has("entrada")) return "Entrada"; // "entrada", "frente a la entrada", "en la entrada"…
+  // 2) Categorías de producto vecinas.
+  if (has("harina pan", "harina de maiz") || hasWord("pan")) return "Harina PAN";
+  if (has("crema de arroz", "leche", "avena", "cereal") || hasWord("arroz"))
+    return "Leche, Crema de arroz y Cereales";
+  if (has("chocolate", "nucita", "chucheria", "galleta", "dulce")) return "Dulces/ Chucherías";
   if (has("margarita", "enlatados", "rikesa", "endiablado", "atun")) return "Enlatados";
   if (has("jugos")) return "Jugos";
   if (has("margarina", "mantequilla", "mavesa")) return "Mavesa";
