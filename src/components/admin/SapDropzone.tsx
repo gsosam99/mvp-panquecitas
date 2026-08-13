@@ -25,7 +25,12 @@ interface SapDropzoneProps {
 type UploadState = "idle" | "parsing" | "previewing" | "uploading" | "done";
 
 type ParsedData =
-  | { format: "radar"; valid: ParsedSapRadarRow[]; errors: ParseError[] }
+  | {
+      format: "radar";
+      valid: ParsedSapRadarRow[];
+      errors: ParseError[];
+      fechas: { sap_code: string; material_code: string; fecha: string }[];
+    }
   | { format: "facturacion"; valid: ParsedSapFacturacionRow[]; errors: ParseError[] };
 
 const MODE_LABEL: Record<SapDropzoneMode, string> = {
@@ -64,7 +69,7 @@ export function SapDropzone({ mode, onCommitSuccess }: SapDropzoneProps) {
 
       if (mode === "radar") {
         const result = parseSapRadarMhtml(buffer);
-        setParsed({ format: "radar", valid: result.valid, errors: result.errors });
+        setParsed({ format: "radar", valid: result.valid, errors: result.errors, fechas: result.fechas });
       } else {
         const result = parseSapFacturacionMhtml(buffer);
         setParsed({ format: "facturacion", valid: result.valid, errors: result.errors });
@@ -96,7 +101,12 @@ export function SapDropzone({ mode, onCommitSuccess }: SapDropzoneProps) {
       const res = await fetch("/api/sap-upload", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ format: parsed.format, rows: parsed.valid, batchId }),
+        body: JSON.stringify({
+          format: parsed.format,
+          rows: parsed.valid,
+          batchId,
+          ...(parsed.format === "radar" ? { fechas: parsed.fechas } : {}),
+        }),
       });
       const data = (await res.json()) as {
         inserted?: number;

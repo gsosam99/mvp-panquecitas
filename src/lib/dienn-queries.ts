@@ -522,9 +522,10 @@ export async function getPenetracionRadarVsHpm(sector?: Sector): Promise<Penetra
 // Todo desde Carga Radar (sap_sell_in_records) de Panquecitas, acumulado
 // en el tiempo (running total), para Día / Semana / Mes:
 //   - ventaAcumuladaKg (barras, eje kg): Σ Radar hasta el bucket.
-//   - recompraPct (línea): repetidores (≥2 meses con Radar>0) / clientes
-//     activados. Ver misma nota de "meses, no fecha exacta" que en el
-//     Detalle por Segmento.
+//   - recompraPct (línea): ventas repetidas / total de ventas. Cada FECHA
+//     distinta con venta Radar por cliente (tabla radar_ventas_fechas) es una
+//     "venta radar"; las que exceden la primera de cada cliente son recompra.
+//     Necesita el migration 013 y re-cargar los reportes de Radar.
 //   - activacionPct (línea): clientes activados (Radar>0) / cartera fija
 //     (358 en TOTAL, o el universo del sector con filtro).
 
@@ -538,6 +539,7 @@ export interface VentaRecompraActivacionPoint {
 
 function computeVentaRecompraActivacionPoints(
   rows: { location_id: string; date_of_sale: string; quantity_kg: number }[],
+  fechasRows: { location_id: string; fecha: string }[],
   universoSize: number,
   granularity: TimeGranularity
 ): VentaRecompraActivacionPoint[] {
@@ -550,20 +552,30 @@ function computeVentaRecompraActivacionPoints(
 
     const ventaAcumuladaKg = rowsUpToBucket.reduce((s, r) => s + r.quantity_kg, 0);
 
-    // Recompra = ≥2 meses distintos con Radar > 0 por cliente (acumulado).
-    const monthsByLocation = new Map<string, Set<string>>();
-    for (const r of rowsUpToBucket) {
-      if (!monthsByLocation.has(r.location_id)) monthsByLocation.set(r.location_id, new Set());
-      monthsByLocation.get(r.location_id)!.add(r.date_of_sale.slice(0, 7));
+    // Activación: clientes con al menos una venta Radar hasta el bucket.
+    const activados = new Set(rowsUpToBucket.map((r) => r.location_id)).size;
+
+    // Recompra (por FECHAS de radar_ventas_fechas): cada fecha distinta con
+    // venta Radar por cliente es una "venta radar". Numerador = ventas repetidas
+    // (las que exceden la primera de cada cliente); denominador = total ventas.
+    const fechasByLoc = new Map<string, Set<string>>();
+    for (const f of fechasRows) {
+      if (bucketKeyFor(f.fecha, granularity) > bucket) continue;
+      if (!fechasByLoc.has(f.location_id)) fechasByLoc.set(f.location_id, new Set());
+      fechasByLoc.get(f.location_id)!.add(f.fecha);
     }
-    const activados = monthsByLocation.size;
-    const conRecompra = Array.from(monthsByLocation.values()).filter((m) => m.size >= 2).length;
+    let totalVentas = 0;
+    let ventasRepetidas = 0;
+    for (const set of fechasByLoc.values()) {
+      totalVentas += set.size;
+      ventasRepetidas += Math.max(set.size - 1, 0);
+    }
 
     points.push({
       bucket,
       label: bucketLabelFor(bucket, granularity),
       ventaAcumuladaKg: Math.round(ventaAcumuladaKg * 10) / 10,
-      recompraPct: activados > 0 ? Math.round((conRecompra / activados) * 1000) / 10 : 0,
+      recompraPct: totalVentas > 0 ? Math.round((ventasRepetidas / totalVentas) * 1000) / 10 : 0,
       activacionPct: Math.round((activados / universoSize) * 1000) / 10,
     });
   }
@@ -594,10 +606,21 @@ export async function getVentaRecompraActivacion(
   );
   if (rows.length === 0) return empty;
 
+  // Fechas de venta Radar (para la recompra por fechas distintas). Si la tabla
+  // no existe todavía (falta el migration 013) o la consulta falla, `data` es
+  // null → sin fechas → recompra 0 hasta re-cargar los reportes.
+  const { data: fechasData } = await supabase
+    .from("radar_ventas_fechas")
+    .select("location_id, fecha")
+    .eq("product_id", PRODUCT_IDS.PANQUECITAS);
+  const fechasRows = ((fechasData ?? []) as { location_id: string; fecha: string }[]).filter((r) =>
+    ids.has(r.location_id)
+  );
+
   return {
-    day: computeVentaRecompraActivacionPoints(rows, universoSize, "day"),
-    week: computeVentaRecompraActivacionPoints(rows, universoSize, "week"),
-    month: computeVentaRecompraActivacionPoints(rows, universoSize, "month"),
+    day: computeVentaRecompraActivacionPoints(rows, fechasRows, universoSize, "day"),
+    week: computeVentaRecompraActivacionPoints(rows, fechasRows, universoSize, "week"),
+    month: computeVentaRecompraActivacionPoints(rows, fechasRows, universoSize, "month"),
   };
 }
 
@@ -733,11 +756,11 @@ export async function getDetalleClientesPorSegmento(sector?: Sector): Promise<De
     .gt("quantity_kg", 0);
 
   const salesRows = (data ?? []) as { location_id: string; date_of_sale: string }[];
-  // Recompra = ≥2 meses distintos con Radar > 0 (no fecha exacta —
-  // misma lógica que computeVentaRecompraActivacionPoints: Radar
-  // reemplaza el acumulado por cliente+material+mes, así que dos
-  // presentaciones del mismo cliente pueden traer "Día" distinto dentro
-  // del mismo mes sin ser una recompra real).
+  // Recompra de esta tabla (Detalle por segmento) = clientes con Radar en ≥2
+  // MESES distintos ÷ clientes con ≥1 compra. Es un rate por CLIENTE y sigue
+  // usando meses (sap_sell_in_records ya está colapsado por mes). Es distinto
+  // de la recompra del gráfico combinado (esa es por fechas, ver
+  // radar_ventas_fechas / computeVentaRecompraActivacionPoints).
   const monthsByLocation = new Map<string, Set<string>>();
   for (const r of salesRows) {
     if (!monthsByLocation.has(r.location_id)) monthsByLocation.set(r.location_id, new Set());

@@ -262,6 +262,9 @@ export function parseSapRadarMhtml(buffer: ArrayBuffer): SapRadarParseResult {
 
   // Última fila por cliente+material (mayor "Día") — descarta snapshots intermedios del mismo archivo.
   const latestByKey = new Map<string, ParsedSapRadarRow>();
+  // TODAS las fechas distintas por cliente+material (para la recompra): a
+  // diferencia de `latestByKey`, aquí NO se descartan los cortes intermedios.
+  const fechasSet = new Map<string, { sap_code: string; material_code: string; fecha: string }>();
   for (let r = headerRowIdx + 1; r < grid.length; r++) {
     const row = grid[r];
     const sapCode = (row[cols.clienteCodigo] ?? "").trim();
@@ -276,6 +279,8 @@ export function parseSapRadarMhtml(buffer: ArrayBuffer): SapRadarParseResult {
     }
 
     const materialCode = (row[cols.materialCodigo] ?? "").trim();
+    // Registra la fecha (distinta por cliente+material+fecha) antes de colapsar.
+    fechasSet.set(`${sapCode}|${materialCode}|${fecha}`, { sap_code: sapCode, material_code: materialCode, fecha });
     const key = `${sapCode}|${materialCode}`;
     const existing = latestByKey.get(key);
     if (existing && existing.fecha >= fecha) continue; // ya hay una fila más reciente para esta llave
@@ -301,7 +306,7 @@ export function parseSapRadarMhtml(buffer: ArrayBuffer): SapRadarParseResult {
     errors.push({ row: 0, field: "datos", message: "No se encontraron filas de datos en el reporte." });
   }
 
-  return { valid, errors };
+  return { valid, errors, fechas: Array.from(fechasSet.values()) };
 }
 
 // ════════════════════════════════════════════════════════════════

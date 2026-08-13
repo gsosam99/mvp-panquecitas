@@ -11,10 +11,14 @@ import { mapLocationType } from "@/lib/excel-parser";
 import { isExcludedDistribuidor } from "@/lib/sectors";
 import type { ParsedSapRadarRow, ParsedSapFacturacionRow } from "@/types";
 
+type RadarFecha = { sap_code: string; material_code: string; fecha: string };
+
 type SapUploadBody =
   // Reporte "Radar" (Harina PAN + Panquecitas) — acumulado del mes, un
   // archivo MHTML por producto ("Radar HPM.xls" / "Radar panquecitas.xls").
-  | { format: "radar"; rows: ParsedSapRadarRow[]; batchId: string }
+  // `fechas` = todas las fechas distintas con venta (para la recompra), aparte
+  // del acumulado que va en `rows`.
+  | { format: "radar"; rows: ParsedSapRadarRow[]; batchId: string; fechas?: RadarFecha[] }
   // Reporte "Pedidos y Facturado" (Panquecitas, Cantidad Pedido/Facturada por día).
   | { format: "facturacion"; rows: ParsedSapFacturacionRow[]; batchId: string };
 
@@ -98,7 +102,7 @@ export async function POST(req: Request) {
       return await handleFacturacionUpload(supabase, body.rows, body.batchId);
     }
     if (body.format === "radar") {
-      return await handleRadarUpload(supabase, body.rows, body.batchId);
+      return await handleRadarUpload(supabase, body.rows, body.batchId, body.fechas ?? []);
     }
     return Response.json({ error: "Formato de reporte desconocido" }, { status: 400 });
   } catch (error) {
@@ -118,7 +122,7 @@ export async function POST(req: Request) {
 // presentación+MES se REEMPLAZA con el nuevo acumulado (y su fecha), nunca
 // se suma ni se descarta. Un mes nuevo simplemente crea una fila nueva.
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
-async function handleRadarUpload(supabase: any, rows: ParsedSapRadarRow[], batchId: string) {
+async function handleRadarUpload(supabase: any, rows: ParsedSapRadarRow[], batchId: string, fechas: RadarFecha[]) {
   // ── 1. Resolver clientes contra la cartera ya cargada (no se crean nuevos) ──
   const uniqueByCode = new Map<string, ParsedSapRadarRow>();
   for (const row of rows) uniqueByCode.set(row.sap_code, row);
@@ -258,9 +262,39 @@ async function handleRadarUpload(supabase: any, rows: ParsedSapRadarRow[], batch
     if (deleteError) throw deleteError;
   }
 
+  // ── 5. Fechas de venta Radar (para la recompra) → radar_ventas_fechas ──
+  // Distintas por (cliente, producto, fecha). Solo clientes de la cartera y
+  // materiales mapeados. NO es crítico: si la tabla no existe todavía (falta
+  // correr el migration 013) o falla el insert, se registra y se sigue — la
+  // carga del acumulado no se rompe.
+  let fechasInserted = 0;
+  try {
+    const seen = new Set<string>();
+    const fechaRows: { location_id: string; product_id: string; fecha: string }[] = [];
+    for (const f of fechas) {
+      const location_id = knownLocationIds.get(f.sap_code);
+      const product_id = SAP_RADAR_MATERIAL_PRODUCT_MAP[f.material_code];
+      if (!location_id || !product_id) continue; // cliente fuera de cartera o material no mapeado
+      const key = `${location_id}|${product_id}|${f.fecha}`;
+      if (seen.has(key)) continue;
+      seen.add(key);
+      fechaRows.push({ location_id, product_id, fecha: f.fecha });
+    }
+    if (fechaRows.length > 0) {
+      const { error: fechasError } = await supabase
+        .from("radar_ventas_fechas")
+        .upsert(fechaRows, { onConflict: "location_id,product_id,fecha", ignoreDuplicates: true });
+      if (fechasError) throw fechasError;
+      fechasInserted = fechaRows.length;
+    }
+  } catch (fechasErr) {
+    console.error("[handleRadarUpload] no se pudieron guardar las fechas de recompra (no crítico):", fechasErr);
+  }
+
   return Response.json({
     format: "radar",
     inserted: toInsert.length,
+    fechas_registradas: fechasInserted,
     updated: toUpdate.length,
     deleted: toDelete.length,
     stale_skipped: staleSkipped,
