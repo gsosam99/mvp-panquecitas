@@ -1272,6 +1272,13 @@ export interface CarteraTotalDiaPunto {
   // Activación acumulada por Radar, separada por modelo (series opcionales del gráfico).
   efectividadDirecto: number; // activos Radar Directo / a visitar Directo (%)
   efectividadIndirecto: number; // activos Radar Indirecto / a visitar Indirecto (%)
+  // Modo "acumulado": clientes activos acumulados / cartera total del scope
+  // (como la tarjeta de activación de cliente). Denominador = cartera total.
+  efectividadActivosAcum: number;
+  efectividadFacturadosAcum: number;
+  efectividadPedidosAcum: number;
+  efectividadDirectoAcum: number;
+  efectividadIndirectoAcum: number;
 }
 
 export interface CarteraSegmentoResult {
@@ -1456,6 +1463,13 @@ export async function getCarteraPorSegmento(): Promise<CarteraSegmentoResult> {
     const buckets = Array.from(
       new Set([...radarByBucket.keys(), ...factByBucket.keys(), ...pedidoByBucket.keys()])
     ).sort();
+    // Cartera total del scope (denominador del modo "acumulado": clientes
+    // activos ÷ cartera total, como la tarjeta de activación de cliente).
+    const clientesScopeDir = clientesScope.filter((c) => c.segKey.endsWith("|Directo"));
+    const clientesScopeInd = clientesScope.filter((c) => c.segKey.endsWith("|Indirecto"));
+    const carteraTotal = clientesScope.length;
+    const carteraDir = clientesScopeDir.length;
+    const carteraInd = clientesScopeInd.length;
     const radarCum = new Set<string>();
     const factCum = new Set<string>();
     const pedidoCum = new Set<string>();
@@ -1478,6 +1492,13 @@ export async function getCarteraPorSegmento(): Promise<CarteraSegmentoResult> {
       const progInd = prog.filter((c) => c.segKey.endsWith("|Indirecto"));
       const activosDir = progDir.filter((c) => radarCum.has(c.locId)).length;
       const activosInd = progInd.filter((c) => radarCum.has(c.locId)).length;
+      // Modo "acumulado": clientes activos acumulados ÷ cartera total del scope
+      // (todos los clientes, no solo los programados). Numerador acumulado.
+      const activosAcum = clientesScope.filter((c) => radarCum.has(c.locId)).length;
+      const facturadosAcum = clientesScope.filter((c) => factCum.has(c.locId)).length;
+      const pedidosAcum = clientesScope.filter((c) => pedidoCum.has(c.locId)).length;
+      const activosDirAcum = clientesScopeDir.filter((c) => radarCum.has(c.locId)).length;
+      const activosIndAcum = clientesScopeInd.filter((c) => radarCum.has(c.locId)).length;
       return {
         dia: b,
         label: bucketLabelFor(b, granularity),
@@ -1491,6 +1512,12 @@ export async function getCarteraPorSegmento(): Promise<CarteraSegmentoResult> {
         efectividadPedidos: pct(pedidos, prog.length),
         efectividadDirecto: pct(activosDir, progDir.length),
         efectividadIndirecto: pct(activosInd, progInd.length),
+        // Modo acumulado (activos acumulados ÷ cartera total del scope).
+        efectividadActivosAcum: pct(activosAcum, carteraTotal),
+        efectividadFacturadosAcum: pct(facturadosAcum, carteraTotal),
+        efectividadPedidosAcum: pct(pedidosAcum, carteraTotal),
+        efectividadDirectoAcum: pct(activosDirAcum, carteraDir),
+        efectividadIndirectoAcum: pct(activosIndAcum, carteraInd),
       };
     });
   }

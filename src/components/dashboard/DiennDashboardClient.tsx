@@ -153,6 +153,10 @@ export function DiennDashboardClient({
   const [totalGranularity, setTotalGranularity] = useState<TimeGranularity>("day");
   const [showDirectoTotal, setShowDirectoTotal] = useState(false);
   const [showIndirectoTotal, setShowIndirectoTotal] = useState(false);
+  // Vista de las líneas: por período ("día") o acumulada (activos ÷ cartera total).
+  // Dos toggles separados: uno para la línea principal, otro para los modelos.
+  const [efectividadAcum, setEfectividadAcum] = useState(false);
+  const [modeloAcum, setModeloAcum] = useState(false);
 
   const [sellOutClienteOpen, setSellOutClienteOpen] = useState(false);
   const [panPoblacion, setPanPoblacion] = useState<PanComparisonPoblacion>("clientes");
@@ -228,19 +232,26 @@ export function DiennDashboardClient({
       label: p.label,
       radarKgAcum: p.radarKgAcum,
       programados: p.programados,
-      efectividad:
-        carteraMetrica === "activos"
-          ? p.efectividadActivos
+      // Línea principal: por período (día) o acumulada (activos ÷ cartera total).
+      efectividad: efectividadAcum
+        ? carteraMetrica === "activos"
+          ? p.efectividadActivosAcum
           : carteraMetrica === "facturados"
-          ? p.efectividadFacturados
-          : p.efectividadPedidos,
-      efectividadDirecto: p.efectividadDirecto,
-      efectividadIndirecto: p.efectividadIndirecto,
+          ? p.efectividadFacturadosAcum
+          : p.efectividadPedidosAcum
+        : carteraMetrica === "activos"
+        ? p.efectividadActivos
+        : carteraMetrica === "facturados"
+        ? p.efectividadFacturados
+        : p.efectividadPedidos,
+      // Líneas por modelo: mismo toggle, independiente del de la línea principal.
+      efectividadDirecto: modeloAcum ? p.efectividadDirectoAcum : p.efectividadDirecto,
+      efectividadIndirecto: modeloAcum ? p.efectividadIndirectoAcum : p.efectividadIndirecto,
     }));
   const carteraTotalDiaData = useMemo(
     () => mapTotal(carteraPorSegmento.totalPorDia[totalGranularity]),
     // eslint-disable-next-line react-hooks/exhaustive-deps
-    [carteraPorSegmento.totalPorDia, totalGranularity, carteraMetrica]
+    [carteraPorSegmento.totalPorDia, totalGranularity, carteraMetrica, efectividadAcum, modeloAcum]
   );
   const carteraTotalPorSectorData = useMemo(
     () =>
@@ -250,7 +261,15 @@ export function DiennDashboardClient({
         data: mapTotal(carteraPorSegmento.totalPorSector[s][totalGranularity]),
       })),
     // eslint-disable-next-line react-hooks/exhaustive-deps
-    [carteraPorSegmento.totalPorSector, totalGranularity, carteraMetrica, pilotSectors, sectorLabels]
+    [
+      carteraPorSegmento.totalPorSector,
+      totalGranularity,
+      carteraMetrica,
+      efectividadAcum,
+      modeloAcum,
+      pilotSectors,
+      sectorLabels,
+    ]
   );
   const rotacion = useMemo(() => computeRotacion(filteredSellOut), [filteredSellOut]);
   const mixProducto = bundle.mixProducto;
@@ -637,10 +656,13 @@ export function DiennDashboardClient({
               <CardTitle>Total acumulado (ambas ciudades y modelos)</CardTitle>
               <p className="text-xs text-slate-400 mt-1">
                 Barras: Radar acumulado (kg). Línea roja: efectividad (
-                {carteraMetrica === "activos" ? "activos" : carteraMetrica === "facturados" ? "facturados" : "pedidos"} ÷
-                a visitar), según la métrica seleccionada. Series opcionales: activación acumulada por Radar del modelo{" "}
+                {carteraMetrica === "activos" ? "activos" : carteraMetrica === "facturados" ? "facturados" : "pedidos"}),
+                según la métrica seleccionada. Series opcionales: activación por Radar del modelo{" "}
                 <span className="font-medium text-green-600">Directo</span> y{" "}
-                <span className="font-medium text-violet-600">Indirecto</span>. Los filtros aplican también a los dos
+                <span className="font-medium text-violet-600">Indirecto</span>. Con los botones{" "}
+                <span className="font-medium">Efectividad</span> y <span className="font-medium">Modelos</span> alternas
+                cada línea entre el valor del período (Día) y el{" "}
+                <span className="font-medium">acumulado</span> (activos ÷ cartera total). Todo aplica también a los
                 gráficos comparativos (Cumaná / Cabudare).
               </p>
             </div>
@@ -703,6 +725,29 @@ export function DiennDashboardClient({
                 >
                   Activación Indirecto
                 </button>
+                {/* Vista día ↔ acumulado, separada: línea principal vs líneas por modelo. */}
+                <button
+                  onClick={() => setEfectividadAcum((v) => !v)}
+                  title="Cambia la línea principal entre el valor del período y el acumulado (activos ÷ cartera total)"
+                  className={`px-3 py-1.5 rounded-lg border text-xs font-medium transition-colors ${
+                    efectividadAcum
+                      ? "border-red-600 bg-red-600 text-white"
+                      : "border-slate-200 bg-white text-slate-500 hover:bg-slate-50"
+                  }`}
+                >
+                  Efectividad: {efectividadAcum ? "Acumulado" : "Día"}
+                </button>
+                <button
+                  onClick={() => setModeloAcum((v) => !v)}
+                  title="Cambia las líneas de modelo (Directo/Indirecto) entre el valor del período y el acumulado"
+                  className={`px-3 py-1.5 rounded-lg border text-xs font-medium transition-colors ${
+                    modeloAcum
+                      ? "border-slate-900 bg-slate-900 text-white"
+                      : "border-slate-200 bg-white text-slate-500 hover:bg-slate-50"
+                  }`}
+                >
+                  Modelos: {modeloAcum ? "Acumulado" : "Día"}
+                </button>
               </div>
               <ExportExcelButton
                 filename="Cartera total acumulado"
@@ -719,6 +764,11 @@ export function DiennDashboardClient({
                   { header: "% Efect. pedidos", value: (r) => r.efectividadPedidos, width: 16 },
                   { header: "% Activación Directo", value: (r) => r.efectividadDirecto, width: 18 },
                   { header: "% Activación Indirecto", value: (r) => r.efectividadIndirecto, width: 20 },
+                  { header: "% Acum. activos", value: (r) => r.efectividadActivosAcum, width: 16 },
+                  { header: "% Acum. facturados", value: (r) => r.efectividadFacturadosAcum, width: 18 },
+                  { header: "% Acum. pedidos", value: (r) => r.efectividadPedidosAcum, width: 16 },
+                  { header: "% Acum. Directo", value: (r) => r.efectividadDirectoAcum, width: 16 },
+                  { header: "% Acum. Indirecto", value: (r) => r.efectividadIndirectoAcum, width: 18 },
                 ]}
               />
             </div>
@@ -758,6 +808,11 @@ export function DiennDashboardClient({
                     { header: "% Efect. pedidos", value: (r) => r.efectividadPedidos, width: 16 },
                     { header: "% Activación Directo", value: (r) => r.efectividadDirecto, width: 18 },
                     { header: "% Activación Indirecto", value: (r) => r.efectividadIndirecto, width: 20 },
+                    { header: "% Acum. activos", value: (r) => r.efectividadActivosAcum, width: 16 },
+                    { header: "% Acum. facturados", value: (r) => r.efectividadFacturadosAcum, width: 18 },
+                    { header: "% Acum. pedidos", value: (r) => r.efectividadPedidosAcum, width: 16 },
+                    { header: "% Acum. Directo", value: (r) => r.efectividadDirectoAcum, width: 16 },
+                    { header: "% Acum. Indirecto", value: (r) => r.efectividadIndirectoAcum, width: 18 },
                   ]}
                 />
               </CardHeader>
