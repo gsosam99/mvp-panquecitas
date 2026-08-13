@@ -1261,7 +1261,7 @@ export interface CarteraSegmentoBucket {
 export interface CarteraTotalDiaPunto {
   dia: string; // "YYYY-MM-DD" (día) o clave del bucket (semana/mes)
   label: string;
-  radarKgAcum: number; // volumen Radar acumulado hasta ese punto (total ambas ciudades y modelos)
+  radarKgDia: number; // volumen Radar del período (kg del bucket, NO acumulado)
   programados: number; // clientes que tocaba visitar ese período (denominador)
   activos: number;
   facturados: number;
@@ -1476,10 +1476,12 @@ export async function getCarteraPorSegmento(): Promise<CarteraSegmentoResult> {
     const radarCum = new Set<string>();
     const factCum = new Set<string>();
     const pedidoCum = new Set<string>();
-    let kgAcum = 0;
     return buckets.map((b) => {
+      // Volumen Radar del período (kg del bucket, NO acumulado). El set radarCum
+      // sí se acumula porque alimenta la efectividad/activación acumulada.
+      let kgBucket = 0;
       for (const r of radarByBucket.get(b) ?? []) {
-        kgAcum += r.kg;
+        kgBucket += r.kg;
         radarCum.add(r.locId);
       }
       for (const locId of factByBucket.get(b) ?? []) factCum.add(locId);
@@ -1505,7 +1507,7 @@ export async function getCarteraPorSegmento(): Promise<CarteraSegmentoResult> {
       return {
         dia: b,
         label: bucketLabelFor(b, granularity),
-        radarKgAcum: Math.round(kgAcum * 10) / 10,
+        radarKgDia: Math.round(kgBucket * 10) / 10,
         programados: prog.length,
         activos,
         facturados,

@@ -4,7 +4,7 @@ import dynamic from "next/dynamic";
 
 export interface CarteraTotalDiaChartPoint {
   label: string;
-  radarKgAcum: number;
+  radarKgDia: number;
   programados: number;
   efectividad: number; // %
   efectividadDirecto: number; // % activación Radar modelo Directo
@@ -24,10 +24,12 @@ const Inner = dynamic(
       data,
       showDirecto,
       showIndirecto,
+      efectividadColor,
     }: {
       data: CarteraTotalDiaChartPoint[];
       showDirecto: boolean;
       showIndirecto: boolean;
+      efectividadColor: string;
     }) {
       return (
         <ResponsiveContainer width="100%" height={340}>
@@ -43,14 +45,14 @@ const Inner = dynamic(
                 if (name === "efectividad") return [`${Number(value ?? 0)}%`, "Efectividad"];
                 if (name === "efectividadDirecto") return [`${Number(value ?? 0)}%`, "Activación Radar — Directo"];
                 if (name === "efectividadIndirecto") return [`${Number(value ?? 0)}%`, "Activación Radar — Indirecto"];
-                if (name === "radarKgAcum") return [formatKg(Number(value ?? 0)), "Radar acumulado"];
+                if (name === "radarKgDia") return [formatKg(Number(value ?? 0)), "Volumen Radar"];
                 return [String(value ?? ""), String(name ?? "")];
               }}
             />
             <Legend
               formatter={(value: string) =>
-                value === "radarKgAcum"
-                  ? "Radar acumulado"
+                value === "radarKgDia"
+                  ? "Volumen Radar (por período)"
                   : value === "efectividad"
                   ? "Efectividad"
                   : value === "efectividadDirecto"
@@ -59,10 +61,10 @@ const Inner = dynamic(
               }
               wrapperStyle={{ fontSize: 12 }}
             />
-            <Bar yAxisId="kg" dataKey="radarKgAcum" fill="#bfdbfe" radius={[3, 3, 0, 0]}>
-              {/* Kg acumulados, visibles sobre cada barra. */}
+            <Bar yAxisId="kg" dataKey="radarKgDia" fill="#bfdbfe" radius={[3, 3, 0, 0]}>
+              {/* Kg del período, visibles sobre cada barra. */}
               <LabelList
-                dataKey="radarKgAcum"
+                dataKey="radarKgDia"
                 position="top"
                 offset={4}
                 fill="#1e40af"
@@ -70,20 +72,20 @@ const Inner = dynamic(
                 formatter={(v) => `${Number(v ?? 0).toLocaleString("es-VE", { maximumFractionDigits: 0 })} kg`}
               />
             </Bar>
-            {/* Efectividad principal (fija). */}
+            {/* Efectividad principal (color según la métrica elegida). */}
             <Line
               yAxisId="pct"
               dataKey="efectividad"
-              stroke="#dc2626"
+              stroke={efectividadColor}
               strokeWidth={2}
-              dot={{ r: 3, fill: "#dc2626" }}
+              dot={{ r: 3, fill: efectividadColor }}
               isAnimationActive={false}
             >
               <LabelList
                 dataKey="efectividad"
                 position="top"
                 offset={6}
-                fill="#dc2626"
+                fill={efectividadColor}
                 fontSize={9}
                 formatter={(v) => `${Number(v ?? 0)}%`}
               />
@@ -149,10 +151,14 @@ export function CarteraTotalDiaChart({
   data,
   showDirecto = false,
   showIndirecto = false,
+  efectividadColor = "#dc2626",
 }: {
   data: CarteraTotalDiaChartPoint[];
   showDirecto?: boolean;
   showIndirecto?: boolean;
+  efectividadColor?: string;
 }) {
-  return <Inner data={data} showDirecto={showDirecto} showIndirecto={showIndirecto} />;
+  return (
+    <Inner data={data} showDirecto={showDirecto} showIndirecto={showIndirecto} efectividadColor={efectividadColor} />
+  );
 }

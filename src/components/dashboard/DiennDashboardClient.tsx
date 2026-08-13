@@ -110,7 +110,7 @@ const GRANULARITY_OPTIONS: { key: TimeGranularity; label: string }[] = [
 // los de sector omiten, por eso los índices de series difieren.
 const TOTAL_ACUM_COLUMNS: ExcelColumn<CarteraTotalDiaPunto>[] = [
   { header: "Período", value: (r) => r.dia, width: 16 },
-  { header: "Radar acumulado (kg)", value: (r) => r.radarKgAcum, width: 20 },
+  { header: "Radar por período (kg)", value: (r) => r.radarKgDia, width: 20 },
   { header: "A visitar", value: (r) => r.programados, width: 12 },
   { header: "Activos", value: (r) => r.activos, width: 12 },
   { header: "% Efect. activos", value: (r) => r.efectividadActivos, width: 16 },
@@ -138,7 +138,7 @@ const TOTAL_ACUM_CHART: ExcelChartConfig = {
 };
 const SECTOR_ACUM_COLUMNS: ExcelColumn<CarteraTotalDiaPunto>[] = [
   { header: "Período", value: (r) => r.dia, width: 16 },
-  { header: "Radar acumulado (kg)", value: (r) => r.radarKgAcum, width: 20 },
+  { header: "Radar por período (kg)", value: (r) => r.radarKgDia, width: 20 },
   { header: "A visitar", value: (r) => r.programados, width: 12 },
   { header: "% Efect. activos", value: (r) => r.efectividadActivos, width: 16 },
   { header: "% Efect. facturados", value: (r) => r.efectividadFacturados, width: 18 },
@@ -292,7 +292,7 @@ export function DiennDashboardClient({
   const mapTotal = (puntos: CarteraTotalDiaPunto[]): CarteraTotalDiaChartPoint[] =>
     puntos.map((p) => ({
       label: p.label,
-      radarKgAcum: p.radarKgAcum,
+      radarKgDia: p.radarKgDia,
       programados: p.programados,
       // Línea principal: por período (día) o acumulada (activos ÷ cartera total).
       efectividad: efectividadAcum
@@ -310,6 +310,10 @@ export function DiennDashboardClient({
       efectividadDirecto: modeloAcum ? p.efectividadDirectoAcum : p.efectividadDirecto,
       efectividadIndirecto: modeloAcum ? p.efectividadIndirectoAcum : p.efectividadIndirecto,
     }));
+  // Color de la línea de efectividad según la métrica: Radar rojo, Facturado
+  // azul marino, Pedidos naranja.
+  const efectividadColor =
+    carteraMetrica === "activos" ? "#dc2626" : carteraMetrica === "facturados" ? "#1e3a8a" : "#ea580c";
   const carteraTotalDiaData = useMemo(
     () => mapTotal(carteraPorSegmento.totalPorDia[totalGranularity]),
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -763,9 +767,11 @@ export function DiennDashboardClient({
             <div>
               <CardTitle>Total acumulado (ambas ciudades y modelos)</CardTitle>
               <p className="text-xs text-slate-400 mt-1">
-                Barras: Radar acumulado (kg). Línea roja: efectividad (
+                Barras: Radar por período (kg). Línea de efectividad (
                 {carteraMetrica === "activos" ? "activos" : carteraMetrica === "facturados" ? "facturados" : "pedidos"}),
-                según la métrica seleccionada. Series opcionales: activación por Radar del modelo{" "}
+                según la métrica seleccionada — <span style={{ color: efectividadColor }} className="font-medium">
+                {carteraMetrica === "activos" ? "Radar (rojo)" : carteraMetrica === "facturados" ? "Facturado (azul marino)" : "Pedidos (naranja)"}
+                </span>. Series opcionales: activación por Radar del modelo{" "}
                 <span className="font-medium text-green-600">Directo</span> y{" "}
                 <span className="font-medium text-violet-600">Indirecto</span>. Con los botones{" "}
                 <span className="font-medium">Efectividad</span> y <span className="font-medium">Modelos</span> alternas
@@ -870,6 +876,7 @@ export function DiennDashboardClient({
               data={carteraTotalDiaData}
               showDirecto={showDirectoTotal}
               showIndirecto={showIndirectoTotal}
+              efectividadColor={efectividadColor}
             />
           </CardContent>
         </Card>
@@ -896,7 +903,12 @@ export function DiennDashboardClient({
                 />
               </CardHeader>
               <CardContent>
-                <CarteraTotalDiaChart data={s.data} showDirecto={showDirectoTotal} showIndirecto={showIndirectoTotal} />
+                <CarteraTotalDiaChart
+                  data={s.data}
+                  showDirecto={showDirectoTotal}
+                  showIndirecto={showIndirectoTotal}
+                  efectividadColor={efectividadColor}
+                />
               </CardContent>
             </Card>
           ))}
