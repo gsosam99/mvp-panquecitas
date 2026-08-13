@@ -2,7 +2,7 @@
 
 import { useState } from "react";
 import { toast } from "sonner";
-import { downloadExcel, type ExcelColumn } from "@/lib/export-excel";
+import { downloadExcel, type ExcelColumn, type ExcelChartConfig } from "@/lib/export-excel";
 
 interface ExportExcelButtonProps<T> {
   /** Nombre del archivo, sin extensión ni fecha. */
@@ -12,15 +12,17 @@ interface ExportExcelButtonProps<T> {
   /** Por defecto muestra "Exportar a Excel (n)". */
   label?: string;
   className?: string;
+  /** Si se pasa, el .xlsx incluye además un gráfico nativo editable. */
+  chart?: ExcelChartConfig;
 }
 
-export function ExportExcelButton<T>({ filename, columns, rows, label, className }: ExportExcelButtonProps<T>) {
+export function ExportExcelButton<T>({ filename, columns, rows, label, className, chart }: ExportExcelButtonProps<T>) {
   const [exporting, setExporting] = useState(false);
 
   async function handleExport() {
     setExporting(true);
     try {
-      await downloadExcel({ filename, sheetName: filename, columns, rows });
+      await downloadExcel({ filename, sheetName: filename, columns, rows, chart });
     } catch (error) {
       console.error("[ExportExcelButton]", filename, error);
       toast.error("No se pudo generar el archivo de Excel.");

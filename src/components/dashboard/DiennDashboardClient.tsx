@@ -752,6 +752,16 @@ export function DiennDashboardClient({
               <ExportExcelButton
                 filename="Cartera total acumulado"
                 rows={carteraPorSegmento.totalPorDia[totalGranularity]}
+                chart={{
+                  categoryCol: 0,
+                  title: "Total acumulado — Radar (kg) y efectividad (%)",
+                  series: [
+                    { col: 1, type: "bar" },
+                    { col: 4, type: "line" },
+                    { col: 9, type: "line" },
+                    { col: 10, type: "line" },
+                  ],
+                }}
                 columns={[
                   { header: "Período", value: (r) => r.dia, width: 16 },
                   { header: "Radar acumulado (kg)", value: (r) => r.radarKgAcum, width: 20 },
@@ -799,6 +809,16 @@ export function DiennDashboardClient({
                 <ExportExcelButton
                   filename={`Total acumulado — ${s.label}`}
                   rows={carteraPorSegmento.totalPorSector[s.sector][totalGranularity]}
+                  chart={{
+                    categoryCol: 0,
+                    title: `Total acumulado ${s.label} — Radar (kg) y efectividad (%)`,
+                    series: [
+                      { col: 1, type: "bar" },
+                      { col: 3, type: "line" },
+                      { col: 6, type: "line" },
+                      { col: 7, type: "line" },
+                    ],
+                  }}
                   columns={[
                     { header: "Período", value: (r) => r.dia, width: 16 },
                     { header: "Radar acumulado (kg)", value: (r) => r.radarKgAcum, width: 20 },
