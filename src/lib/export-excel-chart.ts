@@ -169,6 +169,119 @@ function buildDrawingXml(anchorRow: number, nCols: number): string {
   );
 }
 
+// Mapea el NOMBRE de cada hoja a su archivo xl/worksheets/sheetN.xml, leyendo
+// xl/workbook.xml (orden + r:id) y xl/_rels/workbook.xml.rels (r:id → target).
+// Necesario para un libro con varias hojas: el nombre de hoja no coincide con
+// el número de archivo.
+function mapSheetFiles(workbookXml: string, relsXml: string): Map<string, string> {
+  const relTarget = new Map<string, string>(); // rId → target relativo a xl/
+  for (const m of relsXml.matchAll(/<Relationship\b[^>]*>/g)) {
+    const tag = m[0];
+    const id = /Id="([^"]+)"/.exec(tag)?.[1];
+    const type = /Type="([^"]+)"/.exec(tag)?.[1];
+    const target = /Target="([^"]+)"/.exec(tag)?.[1];
+    if (id && target && type && /worksheet$/.test(type)) relTarget.set(id, target);
+  }
+  const nameToFile = new Map<string, string>();
+  for (const m of workbookXml.matchAll(/<sheet\b[^>]*>/g)) {
+    const tag = m[0];
+    const name = /name="([^"]+)"/.exec(tag)?.[1];
+    const rid = /r:id="([^"]+)"/.exec(tag)?.[1];
+    if (name && rid && relTarget.has(rid)) {
+      const target = relTarget.get(rid)!;
+      const path = target.startsWith("/") ? target.slice(1) : `xl/${target}`;
+      // El nombre en workbook.xml viene escapado (&amp; etc.); se desescapa para
+      // comparar contra el sheetName que nos pasan.
+      const clean = name
+        .replace(/&amp;/g, "&")
+        .replace(/&lt;/g, "<")
+        .replace(/&gt;/g, ">")
+        .replace(/&quot;/g, '"')
+        .replace(/&apos;/g, "'");
+      nameToFile.set(clean, path);
+    }
+  }
+  return nameToFile;
+}
+
+/**
+ * Inyecta VARIOS gráficos nativos (uno por hoja) en un .xlsx multi-hoja de
+ * ExcelJS. Cada gráfico apunta a su hoja por nombre. Devuelve un nuevo buffer;
+ * si algo falla, relanza para que el llamador descargue solo-datos como
+ * respaldo. Los gráficos cuya hoja no se encuentre se omiten en silencio.
+ */
+export async function injectChartsIntoXlsx(
+  buffer: ArrayBuffer | Uint8Array,
+  charts: InjectChartOptions[]
+): Promise<ArrayBuffer> {
+  const JSZip = (await import("jszip")).default;
+  const zip = await JSZip.loadAsync(buffer);
+
+  const workbookXml = await zip.file("xl/workbook.xml")!.async("string");
+  const wbRelsXml = await zip.file("xl/_rels/workbook.xml.rels")!.async("string");
+  const nameToFile = mapSheetFiles(workbookXml, wbRelsXml);
+
+  const overrides: string[] = [];
+  let k = 0;
+  for (const opts of charts) {
+    const sheetFile = nameToFile.get(opts.sheetName);
+    if (!sheetFile) continue; // hoja no encontrada: se omite ese gráfico
+    k++;
+    const chartName = `chart${k}.xml`;
+    const drawingName = `drawing${k}.xml`;
+    const nCols = 1 + opts.series.length;
+    const anchorRow = opts.nDataRows + 3;
+    zip.file(`xl/charts/${chartName}`, buildChartXml(opts));
+    zip.file(`xl/drawings/${drawingName}`, buildDrawingXml(anchorRow, Math.max(nCols, 8)));
+    zip.file(
+      `xl/drawings/_rels/${drawingName}.rels`,
+      `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>` +
+        `<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">` +
+        `<Relationship Id="rId1" Type="${NS_R}/chart" Target="../charts/${chartName}"/>` +
+        `</Relationships>`
+    );
+
+    const sheetBase = sheetFile.split("/").pop()!;
+    const sheetRelsPath = `xl/worksheets/_rels/${sheetBase}.rels`;
+    const relsExisting = zip.file(sheetRelsPath);
+    let drawingRelId = "rId1";
+    if (relsExisting) {
+      const relsXml = await relsExisting.async("string");
+      const ids = [...relsXml.matchAll(/Id="rId(\d+)"/g)].map((m) => Number(m[1]));
+      const next = (ids.length ? Math.max(...ids) : 0) + 1;
+      drawingRelId = `rId${next}`;
+      const rel = `<Relationship Id="${drawingRelId}" Type="${NS_R}/drawing" Target="../drawings/${drawingName}"/>`;
+      zip.file(sheetRelsPath, relsXml.replace("</Relationships>", `${rel}</Relationships>`));
+    } else {
+      zip.file(
+        sheetRelsPath,
+        `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>` +
+          `<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">` +
+          `<Relationship Id="rId1" Type="${NS_R}/drawing" Target="../drawings/${drawingName}"/>` +
+          `</Relationships>`
+      );
+    }
+
+    const sheetXml = await zip.file(sheetFile)!.async("string");
+    if (!sheetXml.includes("<drawing ")) {
+      zip.file(sheetFile, sheetXml.replace("</worksheet>", `<drawing r:id="${drawingRelId}"/></worksheet>`));
+    }
+
+    overrides.push(
+      `<Override PartName="/xl/drawings/${drawingName}" ContentType="application/vnd.openxmlformats-officedocument.drawing+xml"/>`,
+      `<Override PartName="/xl/charts/${chartName}" ContentType="application/vnd.openxmlformats-officedocument.drawingml.chart+xml"/>`
+    );
+  }
+
+  if (overrides.length) {
+    const ctPath = "[Content_Types].xml";
+    const ct = await zip.file(ctPath)!.async("string");
+    zip.file(ctPath, ct.replace("</Types>", `${overrides.join("")}</Types>`));
+  }
+
+  return zip.generateAsync({ type: "arraybuffer" });
+}
+
 /**
  * Inyecta un gráfico nativo en el buffer de un .xlsx generado por ExcelJS.
  * Devuelve un nuevo buffer. Si algo falla, relanza para que el llamador use el

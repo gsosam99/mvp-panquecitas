@@ -2,7 +2,8 @@
 
 import { useMemo, useState } from "react";
 import { KpiCard } from "@/components/dashboard/KpiCard";
-import { ExportExcelButton } from "@/components/dashboard/ExportExcelButton";
+import { ExportExcelButton, ExportExcelMultiButton } from "@/components/dashboard/ExportExcelButton";
+import type { ExcelColumn, ExcelChartConfig, ExcelSheetSpec } from "@/lib/export-excel";
 import { ReportPrintButton } from "@/components/dashboard/ReportPrintButton";
 import { ReportPrintHeader } from "@/components/dashboard/ReportPrintHeader";
 import { CoberturaComunicacionChart } from "@/components/dashboard/CoberturaComunicacionChart";
@@ -102,6 +103,64 @@ const GRANULARITY_OPTIONS: { key: TimeGranularity; label: string }[] = [
   { key: "week", label: "Semana" },
   { key: "month", label: "Mes" },
 ];
+
+// ── Export a Excel de los gráficos de efectividad (columnas + gráfico nativo) ──
+// Fuente única, usada por los 3 botones individuales y por el botón combinado.
+// El gráfico global lleva columnas de conteo (Activos/Facturados/Pedidos) que
+// los de sector omiten, por eso los índices de series difieren.
+const TOTAL_ACUM_COLUMNS: ExcelColumn<CarteraTotalDiaPunto>[] = [
+  { header: "Período", value: (r) => r.dia, width: 16 },
+  { header: "Radar acumulado (kg)", value: (r) => r.radarKgAcum, width: 20 },
+  { header: "A visitar", value: (r) => r.programados, width: 12 },
+  { header: "Activos", value: (r) => r.activos, width: 12 },
+  { header: "% Efect. activos", value: (r) => r.efectividadActivos, width: 16 },
+  { header: "Facturados", value: (r) => r.facturados, width: 12 },
+  { header: "% Efect. facturados", value: (r) => r.efectividadFacturados, width: 18 },
+  { header: "Pedidos", value: (r) => r.pedidos, width: 12 },
+  { header: "% Efect. pedidos", value: (r) => r.efectividadPedidos, width: 16 },
+  { header: "% Activación Directo", value: (r) => r.efectividadDirecto, width: 18 },
+  { header: "% Activación Indirecto", value: (r) => r.efectividadIndirecto, width: 20 },
+  { header: "% Acum. activos", value: (r) => r.efectividadActivosAcum, width: 16 },
+  { header: "% Acum. facturados", value: (r) => r.efectividadFacturadosAcum, width: 18 },
+  { header: "% Acum. pedidos", value: (r) => r.efectividadPedidosAcum, width: 16 },
+  { header: "% Acum. Directo", value: (r) => r.efectividadDirectoAcum, width: 16 },
+  { header: "% Acum. Indirecto", value: (r) => r.efectividadIndirectoAcum, width: 18 },
+];
+const TOTAL_ACUM_CHART: ExcelChartConfig = {
+  categoryCol: 0,
+  title: "Total acumulado — Radar (kg) y efectividad (%)",
+  series: [
+    { col: 1, type: "bar" },
+    { col: 4, type: "line" },
+    { col: 9, type: "line" },
+    { col: 10, type: "line" },
+  ],
+};
+const SECTOR_ACUM_COLUMNS: ExcelColumn<CarteraTotalDiaPunto>[] = [
+  { header: "Período", value: (r) => r.dia, width: 16 },
+  { header: "Radar acumulado (kg)", value: (r) => r.radarKgAcum, width: 20 },
+  { header: "A visitar", value: (r) => r.programados, width: 12 },
+  { header: "% Efect. activos", value: (r) => r.efectividadActivos, width: 16 },
+  { header: "% Efect. facturados", value: (r) => r.efectividadFacturados, width: 18 },
+  { header: "% Efect. pedidos", value: (r) => r.efectividadPedidos, width: 16 },
+  { header: "% Activación Directo", value: (r) => r.efectividadDirecto, width: 18 },
+  { header: "% Activación Indirecto", value: (r) => r.efectividadIndirecto, width: 20 },
+  { header: "% Acum. activos", value: (r) => r.efectividadActivosAcum, width: 16 },
+  { header: "% Acum. facturados", value: (r) => r.efectividadFacturadosAcum, width: 18 },
+  { header: "% Acum. pedidos", value: (r) => r.efectividadPedidosAcum, width: 16 },
+  { header: "% Acum. Directo", value: (r) => r.efectividadDirectoAcum, width: 16 },
+  { header: "% Acum. Indirecto", value: (r) => r.efectividadIndirectoAcum, width: 18 },
+];
+const sectorAcumChart = (label: string): ExcelChartConfig => ({
+  categoryCol: 0,
+  title: `Total acumulado ${label} — Radar (kg) y efectividad (%)`,
+  series: [
+    { col: 1, type: "bar" },
+    { col: 3, type: "line" },
+    { col: 6, type: "line" },
+    { col: 7, type: "line" },
+  ],
+});
 
 // Espejo del umbral de backend (getStockOut) — dienn-queries es server-only y no
 // puede importarse como valor en este Client Component; solo para mostrar el texto.
@@ -270,6 +329,26 @@ export function DiennDashboardClient({
       pilotSectors,
       sectorLabels,
     ]
+  );
+  // Un solo .xlsx con las 3 hojas (Total + cada ciudad), cada una con su gráfico
+  // editable. Usa los datos crudos de la granularidad activa (no el mapeo del
+  // gráfico), para incluir todas las columnas (día y acumulado).
+  const efectividadExcelSheets = useMemo<ExcelSheetSpec<CarteraTotalDiaPunto>[]>(
+    () => [
+      {
+        sheetName: "Total (ambas ciudades)",
+        columns: TOTAL_ACUM_COLUMNS,
+        rows: carteraPorSegmento.totalPorDia[totalGranularity],
+        chart: TOTAL_ACUM_CHART,
+      },
+      ...pilotSectors.map((s) => ({
+        sheetName: sectorLabels[s],
+        columns: SECTOR_ACUM_COLUMNS,
+        rows: carteraPorSegmento.totalPorSector[s][totalGranularity],
+        chart: sectorAcumChart(sectorLabels[s]),
+      })),
+    ],
+    [carteraPorSegmento, totalGranularity, pilotSectors, sectorLabels]
   );
   const rotacion = useMemo(() => computeRotacion(filteredSellOut), [filteredSellOut]);
   const mixProducto = bundle.mixProducto;
@@ -648,6 +727,21 @@ export function DiennDashboardClient({
 
       <Separator className="mb-6 print:hidden" />
 
+      {/* ── Efectividad y volumen acumulado (total + comparativo por ciudad) ── */}
+      <div className="mb-2 flex flex-wrap items-center justify-between gap-3">
+        <div>
+          <h2 className="text-lg font-bold text-slate-900">Efectividad y volumen acumulado</h2>
+          <p className="text-sm text-slate-400">
+            Total (ambas ciudades) y el comparativo por ciudad. Cada gráfico usa la granularidad seleccionada.
+          </p>
+        </div>
+        <ExportExcelMultiButton
+          filename="Efectividad — 3 gráficos"
+          label="Bajar los 3 (Excel)"
+          sheets={efectividadExcelSheets}
+        />
+      </div>
+
       {/* ── Total acumulado (día/semana/mes, ambas ciudades y modelos) ───── */}
       {carteraTotalDiaData.length > 0 && (
         <Card className="mb-6 print-avoid-break">
@@ -752,34 +846,8 @@ export function DiennDashboardClient({
               <ExportExcelButton
                 filename="Cartera total acumulado"
                 rows={carteraPorSegmento.totalPorDia[totalGranularity]}
-                chart={{
-                  categoryCol: 0,
-                  title: "Total acumulado — Radar (kg) y efectividad (%)",
-                  series: [
-                    { col: 1, type: "bar" },
-                    { col: 4, type: "line" },
-                    { col: 9, type: "line" },
-                    { col: 10, type: "line" },
-                  ],
-                }}
-                columns={[
-                  { header: "Período", value: (r) => r.dia, width: 16 },
-                  { header: "Radar acumulado (kg)", value: (r) => r.radarKgAcum, width: 20 },
-                  { header: "A visitar", value: (r) => r.programados, width: 12 },
-                  { header: "Activos", value: (r) => r.activos, width: 12 },
-                  { header: "% Efect. activos", value: (r) => r.efectividadActivos, width: 16 },
-                  { header: "Facturados", value: (r) => r.facturados, width: 12 },
-                  { header: "% Efect. facturados", value: (r) => r.efectividadFacturados, width: 18 },
-                  { header: "Pedidos", value: (r) => r.pedidos, width: 12 },
-                  { header: "% Efect. pedidos", value: (r) => r.efectividadPedidos, width: 16 },
-                  { header: "% Activación Directo", value: (r) => r.efectividadDirecto, width: 18 },
-                  { header: "% Activación Indirecto", value: (r) => r.efectividadIndirecto, width: 20 },
-                  { header: "% Acum. activos", value: (r) => r.efectividadActivosAcum, width: 16 },
-                  { header: "% Acum. facturados", value: (r) => r.efectividadFacturadosAcum, width: 18 },
-                  { header: "% Acum. pedidos", value: (r) => r.efectividadPedidosAcum, width: 16 },
-                  { header: "% Acum. Directo", value: (r) => r.efectividadDirectoAcum, width: 16 },
-                  { header: "% Acum. Indirecto", value: (r) => r.efectividadIndirectoAcum, width: 18 },
-                ]}
+                chart={TOTAL_ACUM_CHART}
+                columns={TOTAL_ACUM_COLUMNS}
               />
             </div>
           </CardHeader>
@@ -809,31 +877,8 @@ export function DiennDashboardClient({
                 <ExportExcelButton
                   filename={`Total acumulado — ${s.label}`}
                   rows={carteraPorSegmento.totalPorSector[s.sector][totalGranularity]}
-                  chart={{
-                    categoryCol: 0,
-                    title: `Total acumulado ${s.label} — Radar (kg) y efectividad (%)`,
-                    series: [
-                      { col: 1, type: "bar" },
-                      { col: 3, type: "line" },
-                      { col: 6, type: "line" },
-                      { col: 7, type: "line" },
-                    ],
-                  }}
-                  columns={[
-                    { header: "Período", value: (r) => r.dia, width: 16 },
-                    { header: "Radar acumulado (kg)", value: (r) => r.radarKgAcum, width: 20 },
-                    { header: "A visitar", value: (r) => r.programados, width: 12 },
-                    { header: "% Efect. activos", value: (r) => r.efectividadActivos, width: 16 },
-                    { header: "% Efect. facturados", value: (r) => r.efectividadFacturados, width: 18 },
-                    { header: "% Efect. pedidos", value: (r) => r.efectividadPedidos, width: 16 },
-                    { header: "% Activación Directo", value: (r) => r.efectividadDirecto, width: 18 },
-                    { header: "% Activación Indirecto", value: (r) => r.efectividadIndirecto, width: 20 },
-                    { header: "% Acum. activos", value: (r) => r.efectividadActivosAcum, width: 16 },
-                    { header: "% Acum. facturados", value: (r) => r.efectividadFacturadosAcum, width: 18 },
-                    { header: "% Acum. pedidos", value: (r) => r.efectividadPedidosAcum, width: 16 },
-                    { header: "% Acum. Directo", value: (r) => r.efectividadDirectoAcum, width: 16 },
-                    { header: "% Acum. Indirecto", value: (r) => r.efectividadIndirectoAcum, width: 18 },
-                  ]}
+                  chart={sectorAcumChart(s.label)}
+                  columns={SECTOR_ACUM_COLUMNS}
                 />
               </CardHeader>
               <CardContent>
