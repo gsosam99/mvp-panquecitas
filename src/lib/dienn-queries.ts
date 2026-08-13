@@ -1464,10 +1464,13 @@ export async function getCarteraPorSegmento(): Promise<CarteraSegmentoResult> {
       new Set([...radarByBucket.keys(), ...factByBucket.keys(), ...pedidoByBucket.keys()])
     ).sort();
     // Cartera total del scope (denominador del modo "acumulado": clientes
-    // activos ÷ cartera total, como la tarjeta de activación de cliente).
+    // activos acumulados ÷ cartera total, IGUAL que la tarjeta de activación de
+    // cliente). En TOTAL son los 358 del piloto (UNIVERSAL_CLIENTES_PILOTO); por
+    // ciudad, el universo de ese sector. Así la línea acumulada aterriza justo
+    // en el % de la tarjeta (ej. 58% en el total).
     const clientesScopeDir = clientesScope.filter((c) => c.segKey.endsWith("|Directo"));
     const clientesScopeInd = clientesScope.filter((c) => c.segKey.endsWith("|Indirecto"));
-    const carteraTotal = clientesScope.length;
+    const carteraTotal = sector ? clientesScope.length : UNIVERSAL_CLIENTES_PILOTO;
     const carteraDir = clientesScopeDir.length;
     const carteraInd = clientesScopeInd.length;
     const radarCum = new Set<string>();
