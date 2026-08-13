@@ -218,6 +218,9 @@ export function DiennDashboardClient({
   const [modeloAcum, setModeloAcum] = useState(false);
 
   const [sellOutClienteOpen, setSellOutClienteOpen] = useState(false);
+  // Posición del producto en PDV: una sola tarjeta, se ve por conteo de clientes
+  // ("posicion") o por Sell-Out generado ("sellout").
+  const [posicionVista, setPosicionVista] = useState<"posicion" | "sellout">("posicion");
   const [panPoblacion, setPanPoblacion] = useState<PanComparisonPoblacion>("clientes");
   const [panGranularity, setPanGranularity] = useState<PanComparisonGranularity>("month");
   const bundle = bundles[filter];
@@ -658,61 +661,72 @@ export function DiennDashboardClient({
         </CardContent>
       </Card>
 
-      {/* ── Posición del producto en el PDV (encuestas) ───────────────────── */}
+      {/* ── Posición del producto en el PDV (posición ↔ Sell-Out) ─────────── */}
       <Card className="mb-6 print-avoid-break">
         <CardHeader className="flex flex-row items-start justify-between gap-3 space-y-0">
           <div>
             <CardTitle>Posición del producto en el PDV</CardTitle>
             <p className="text-xs text-slate-400 mt-1">
-              Dónde ubican el producto los mercaderistas, entre clientes con presencia del producto. Un cliente puede
-              contar en más de una ubicación.
+              {posicionVista === "posicion"
+                ? "Dónde ubican el producto los mercaderistas, entre clientes con presencia del producto. Un cliente puede contar en más de una ubicación."
+                : "Relación entre la ubicación del producto y el Sell-Out (SAP − inventario) que generó. Un cliente con el producto en varias ubicaciones suma en cada una."}
             </p>
           </div>
-          <ExportExcelButton
-            filename={`Posición en PDV — ${filtroTexto}`}
-            rows={bundle.posicionPdv}
-            columns={[
-              { header: "Ubicación", value: (r) => r.categoria, width: 34 },
-              { header: "Clientes", value: (r) => r.clientes, width: 14 },
-            ]}
-          />
-        </CardHeader>
-        <CardContent>
-          {bundle.posicionPdv.some((p) => p.clientes > 0) ? (
-            <PosicionPdvChart data={bundle.posicionPdv} />
-          ) : (
-            <div className="h-[300px] flex items-center justify-center text-slate-400">
-              <div className="text-center">
-                <p className="text-4xl mb-2">📍</p>
-                <p>Sin datos de ubicación del producto todavía.</p>
-              </div>
+          <div className="flex flex-col items-end gap-2 print:hidden">
+            {/* Filtro: ver por conteo de clientes (posición) o por Sell-Out generado. */}
+            <div className="flex rounded-lg border border-slate-200 overflow-hidden text-xs font-medium">
+              {(
+                [
+                  ["posicion", "Por posición"],
+                  ["sellout", "Por Sell-Out"],
+                ] as const
+              ).map(([key, label]) => (
+                <button
+                  key={key}
+                  onClick={() => setPosicionVista(key)}
+                  className={`px-3 py-1.5 transition-colors ${
+                    posicionVista === key ? "bg-slate-900 text-white" : "bg-white text-slate-500 hover:bg-slate-50"
+                  }`}
+                >
+                  {label}
+                </button>
+              ))}
             </div>
-          )}
-        </CardContent>
-      </Card>
-
-      {/* ── Sell-Out por posición en el PDV ──────────────────────────────── */}
-      <Card className="mb-6 print-avoid-break">
-        <CardHeader className="flex flex-row items-start justify-between gap-3 space-y-0">
-          <div>
-            <CardTitle>Sell-Out por posición en el PDV</CardTitle>
-            <p className="text-xs text-slate-400 mt-1">
-              Relación entre la ubicación del producto y el Sell-Out (SAP − inventario) que generó. Un cliente con el
-              producto en varias ubicaciones suma en cada una.
-            </p>
+            {posicionVista === "posicion" ? (
+              <ExportExcelButton
+                filename={`Posición en PDV — ${filtroTexto}`}
+                rows={bundle.posicionPdv}
+                columns={[
+                  { header: "Ubicación", value: (r) => r.categoria, width: 34 },
+                  { header: "Clientes", value: (r) => r.clientes, width: 14 },
+                ]}
+              />
+            ) : (
+              <ExportExcelButton
+                filename={`Sell-Out por posición en PDV — ${filtroTexto}`}
+                rows={sellOutPorPosicion}
+                columns={[
+                  { header: "Ubicación", value: (r) => r.categoria, width: 34 },
+                  { header: "Sell-Out (kg)", value: (r) => r.sellOutKg, width: 16 },
+                  { header: "Clientes", value: (r) => r.clientes, width: 14 },
+                ]}
+              />
+            )}
           </div>
-          <ExportExcelButton
-            filename={`Sell-Out por posición en PDV — ${filtroTexto}`}
-            rows={sellOutPorPosicion}
-            columns={[
-              { header: "Ubicación", value: (r) => r.categoria, width: 34 },
-              { header: "Sell-Out (kg)", value: (r) => r.sellOutKg, width: 16 },
-              { header: "Clientes", value: (r) => r.clientes, width: 14 },
-            ]}
-          />
         </CardHeader>
         <CardContent>
-          {sellOutPorPosicion.length > 0 ? (
+          {posicionVista === "posicion" ? (
+            bundle.posicionPdv.some((p) => p.clientes > 0) ? (
+              <PosicionPdvChart data={bundle.posicionPdv} />
+            ) : (
+              <div className="h-[300px] flex items-center justify-center text-slate-400">
+                <div className="text-center">
+                  <p className="text-4xl mb-2">📍</p>
+                  <p>Sin datos de ubicación del producto todavía.</p>
+                </div>
+              </div>
+            )
+          ) : sellOutPorPosicion.length > 0 ? (
             <SellOutPorPosicionChart data={sellOutPorPosicion} />
           ) : (
             <div className="h-[300px] flex items-center justify-center text-slate-400">
