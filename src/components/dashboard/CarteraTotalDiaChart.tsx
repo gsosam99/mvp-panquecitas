@@ -97,7 +97,9 @@ const Inner = dynamic(
                   fill="#166534"
                   fontSize={8}
                   formatter={(v) =>
-                    Number(v ?? 0) > 0 ? Number(v ?? 0).toLocaleString("es-VE", { maximumFractionDigits: 0 }) : ""
+                    Number(v ?? 0) > 0
+                      ? `${Number(v ?? 0).toLocaleString("es-VE", { maximumFractionDigits: 0 })} kg`
+                      : ""
                   }
                 />
               </Bar>
@@ -110,7 +112,9 @@ const Inner = dynamic(
                   fill="#5b21b6"
                   fontSize={8}
                   formatter={(v) =>
-                    Number(v ?? 0) > 0 ? Number(v ?? 0).toLocaleString("es-VE", { maximumFractionDigits: 0 }) : ""
+                    Number(v ?? 0) > 0
+                      ? `${Number(v ?? 0).toLocaleString("es-VE", { maximumFractionDigits: 0 })} kg`
+                      : ""
                   }
                 />
               </Bar>
