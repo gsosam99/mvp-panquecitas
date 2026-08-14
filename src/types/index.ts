@@ -193,8 +193,9 @@ export interface SapRadarParseResult {
   errors: ParseError[];
   // TODAS las fechas distintas con venta Radar por cliente+material (no solo el
   // último corte de `valid`). Alimenta la tasa de recompra (≥2 fechas del mismo
-  // cliente). Ver tabla radar_ventas_fechas.
-  fechas: { sap_code: string; material_code: string; fecha: string }[];
+  // cliente). Ver tabla radar_ventas_fechas. Opcional: los returns de error
+  // temprano no lo traen.
+  fechas?: { sap_code: string; material_code: string; fecha: string }[];
 }
 
 // ════════════════════════════════════════════════════════════════

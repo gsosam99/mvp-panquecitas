@@ -69,7 +69,7 @@ export function SapDropzone({ mode, onCommitSuccess }: SapDropzoneProps) {
 
       if (mode === "radar") {
         const result = parseSapRadarMhtml(buffer);
-        setParsed({ format: "radar", valid: result.valid, errors: result.errors, fechas: result.fechas });
+        setParsed({ format: "radar", valid: result.valid, errors: result.errors, fechas: result.fechas ?? [] });
       } else {
         const result = parseSapFacturacionMhtml(buffer);
         setParsed({ format: "facturacion", valid: result.valid, errors: result.errors });
