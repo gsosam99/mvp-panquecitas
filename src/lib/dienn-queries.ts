@@ -1285,6 +1285,8 @@ export interface CarteraTotalDiaPunto {
   dia: string; // "YYYY-MM-DD" (día) o clave del bucket (semana/mes)
   label: string;
   radarKgDia: number; // volumen Radar del período (kg del bucket, NO acumulado)
+  radarKgDiaDirecto: number; // parte del volumen del período del modelo Directo
+  radarKgDiaIndirecto: number; // parte del volumen del período del modelo Indirecto
   programados: number; // clientes que tocaba visitar ese período (denominador)
   activos: number;
   facturados: number;
@@ -1493,6 +1495,8 @@ export async function getCarteraPorSegmento(): Promise<CarteraSegmentoResult> {
     // en el % de la tarjeta (ej. 58% en el total).
     const clientesScopeDir = clientesScope.filter((c) => c.segKey.endsWith("|Directo"));
     const clientesScopeInd = clientesScope.filter((c) => c.segKey.endsWith("|Indirecto"));
+    // Modelo por cliente del scope, para separar el volumen Radar del período.
+    const esDirectoLoc = new Map(clientesScope.map((c) => [c.locId, c.segKey.endsWith("|Directo")]));
     const carteraTotal = sector ? clientesScope.length : UNIVERSAL_CLIENTES_PILOTO;
     const carteraDir = clientesScopeDir.length;
     const carteraInd = clientesScopeInd.length;
@@ -1503,8 +1507,12 @@ export async function getCarteraPorSegmento(): Promise<CarteraSegmentoResult> {
       // Volumen Radar del período (kg del bucket, NO acumulado). El set radarCum
       // sí se acumula porque alimenta la efectividad/activación acumulada.
       let kgBucket = 0;
+      let kgBucketDir = 0;
+      let kgBucketInd = 0;
       for (const r of radarByBucket.get(b) ?? []) {
         kgBucket += r.kg;
+        if (esDirectoLoc.get(r.locId)) kgBucketDir += r.kg;
+        else if (esDirectoLoc.has(r.locId)) kgBucketInd += r.kg;
         radarCum.add(r.locId);
       }
       for (const locId of factByBucket.get(b) ?? []) factCum.add(locId);
@@ -1531,6 +1539,8 @@ export async function getCarteraPorSegmento(): Promise<CarteraSegmentoResult> {
         dia: b,
         label: bucketLabelFor(b, granularity),
         radarKgDia: Math.round(kgBucket * 10) / 10,
+        radarKgDiaDirecto: Math.round(kgBucketDir * 10) / 10,
+        radarKgDiaIndirecto: Math.round(kgBucketInd * 10) / 10,
         programados: prog.length,
         activos,
         facturados,

@@ -125,6 +125,8 @@ const TOTAL_ACUM_COLUMNS: ExcelColumn<CarteraTotalDiaPunto>[] = [
   { header: "% Acum. pedidos", value: (r) => r.efectividadPedidosAcum, width: 16 },
   { header: "% Acum. Directo", value: (r) => r.efectividadDirectoAcum, width: 16 },
   { header: "% Acum. Indirecto", value: (r) => r.efectividadIndirectoAcum, width: 18 },
+  { header: "Radar Directo (kg)", value: (r) => r.radarKgDiaDirecto, width: 18 },
+  { header: "Radar Indirecto (kg)", value: (r) => r.radarKgDiaIndirecto, width: 20 },
 ];
 const TOTAL_ACUM_CHART: ExcelChartConfig = {
   categoryCol: 0,
@@ -150,6 +152,8 @@ const SECTOR_ACUM_COLUMNS: ExcelColumn<CarteraTotalDiaPunto>[] = [
   { header: "% Acum. pedidos", value: (r) => r.efectividadPedidosAcum, width: 16 },
   { header: "% Acum. Directo", value: (r) => r.efectividadDirectoAcum, width: 16 },
   { header: "% Acum. Indirecto", value: (r) => r.efectividadIndirectoAcum, width: 18 },
+  { header: "Radar Directo (kg)", value: (r) => r.radarKgDiaDirecto, width: 18 },
+  { header: "Radar Indirecto (kg)", value: (r) => r.radarKgDiaIndirecto, width: 20 },
 ];
 const sectorAcumChart = (label: string): ExcelChartConfig => ({
   categoryCol: 0,
@@ -216,6 +220,8 @@ export function DiennDashboardClient({
   // Dos toggles separados: uno para la línea principal, otro para los modelos.
   const [efectividadAcum, setEfectividadAcum] = useState(false);
   const [modeloAcum, setModeloAcum] = useState(false);
+  // Barras de volumen Radar del período: total (false) o separadas por modelo (true).
+  const [ventasPorModelo, setVentasPorModelo] = useState(false);
 
   const [sellOutClienteOpen, setSellOutClienteOpen] = useState(false);
   // Posición del producto en PDV: una sola tarjeta, se ve por conteo de clientes
@@ -293,6 +299,8 @@ export function DiennDashboardClient({
     puntos.map((p) => ({
       label: p.label,
       radarKgDia: p.radarKgDia,
+      radarKgDiaDirecto: p.radarKgDiaDirecto,
+      radarKgDiaIndirecto: p.radarKgDiaIndirecto,
       programados: p.programados,
       // Línea principal: por período (día) o acumulada (activos ÷ cartera total).
       efectividad: efectividadAcum
@@ -862,6 +870,18 @@ export function DiennDashboardClient({
                 >
                   Modelos: {modeloAcum ? "Acumulado" : "Día"}
                 </button>
+                {/* Barras: total del período o separadas por modelo (Directo/Indirecto). */}
+                <button
+                  onClick={() => setVentasPorModelo((v) => !v)}
+                  title="Cambia las barras de volumen Radar del período entre el total y el desglose por modelo (Directo/Indirecto)"
+                  className={`px-3 py-1.5 rounded-lg border text-xs font-medium transition-colors ${
+                    ventasPorModelo
+                      ? "border-slate-900 bg-slate-900 text-white"
+                      : "border-slate-200 bg-white text-slate-500 hover:bg-slate-50"
+                  }`}
+                >
+                  Ventas: {ventasPorModelo ? "Por modelo" : "Total"}
+                </button>
               </div>
               <ExportExcelButton
                 filename="Cartera total acumulado"
@@ -877,6 +897,7 @@ export function DiennDashboardClient({
               showDirecto={showDirectoTotal}
               showIndirecto={showIndirectoTotal}
               efectividadColor={efectividadColor}
+              ventasPorModelo={ventasPorModelo}
             />
           </CardContent>
         </Card>
@@ -908,6 +929,7 @@ export function DiennDashboardClient({
                   showDirecto={showDirectoTotal}
                   showIndirecto={showIndirectoTotal}
                   efectividadColor={efectividadColor}
+                  ventasPorModelo={ventasPorModelo}
                 />
               </CardContent>
             </Card>

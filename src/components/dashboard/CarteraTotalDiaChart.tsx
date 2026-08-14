@@ -5,6 +5,8 @@ import dynamic from "next/dynamic";
 export interface CarteraTotalDiaChartPoint {
   label: string;
   radarKgDia: number;
+  radarKgDiaDirecto: number; // parte del volumen del período del modelo Directo
+  radarKgDiaIndirecto: number; // parte del volumen del período del modelo Indirecto
   programados: number;
   efectividad: number; // %
   efectividadDirecto: number; // % activación Radar modelo Directo
@@ -25,11 +27,13 @@ const Inner = dynamic(
       showDirecto,
       showIndirecto,
       efectividadColor,
+      ventasPorModelo,
     }: {
       data: CarteraTotalDiaChartPoint[];
       showDirecto: boolean;
       showIndirecto: boolean;
       efectividadColor: string;
+      ventasPorModelo: boolean;
     }) {
       return (
         <ResponsiveContainer width="100%" height={340}>
@@ -46,6 +50,8 @@ const Inner = dynamic(
                 if (name === "efectividadDirecto") return [`${Number(value ?? 0)}%`, "Activación Radar — Directo"];
                 if (name === "efectividadIndirecto") return [`${Number(value ?? 0)}%`, "Activación Radar — Indirecto"];
                 if (name === "radarKgDia") return [formatKg(Number(value ?? 0)), "Volumen Radar"];
+                if (name === "radarKgDiaDirecto") return [formatKg(Number(value ?? 0)), "Volumen Radar — Directo"];
+                if (name === "radarKgDiaIndirecto") return [formatKg(Number(value ?? 0)), "Volumen Radar — Indirecto"];
                 return [String(value ?? ""), String(name ?? "")];
               }}
             />
@@ -53,6 +59,10 @@ const Inner = dynamic(
               formatter={(value: string) =>
                 value === "radarKgDia"
                   ? "Volumen Radar (por período)"
+                  : value === "radarKgDiaDirecto"
+                  ? "Volumen Radar — Directo"
+                  : value === "radarKgDiaIndirecto"
+                  ? "Volumen Radar — Indirecto"
                   : value === "efectividad"
                   ? "Efectividad"
                   : value === "efectividadDirecto"
@@ -61,17 +71,47 @@ const Inner = dynamic(
               }
               wrapperStyle={{ fontSize: 12 }}
             />
-            <Bar yAxisId="kg" dataKey="radarKgDia" fill="#bfdbfe" radius={[3, 3, 0, 0]}>
-              {/* Kg del período, visibles sobre cada barra. */}
-              <LabelList
-                dataKey="radarKgDia"
-                position="top"
-                offset={4}
-                fill="#1e40af"
-                fontSize={9}
-                formatter={(v) => `${Number(v ?? 0).toLocaleString("es-VE", { maximumFractionDigits: 0 })} kg`}
-              />
-            </Bar>
+            {/* Barras: total del período, o desglose por modelo (apilado). Se usan
+                condicionales hermanos (no un Fragment) para que Recharts detecte los Bar. */}
+            {!ventasPorModelo && (
+              <Bar yAxisId="kg" dataKey="radarKgDia" fill="#bfdbfe" radius={[3, 3, 0, 0]}>
+                {/* Kg del período, visibles sobre cada barra. */}
+                <LabelList
+                  dataKey="radarKgDia"
+                  position="top"
+                  offset={4}
+                  fill="#1e40af"
+                  fontSize={9}
+                  formatter={(v) => `${Number(v ?? 0).toLocaleString("es-VE", { maximumFractionDigits: 0 })} kg`}
+                />
+              </Bar>
+            )}
+            {ventasPorModelo && (
+              <Bar yAxisId="kg" dataKey="radarKgDiaDirecto" stackId="kg" fill="#86efac">
+                <LabelList
+                  dataKey="radarKgDiaDirecto"
+                  position="center"
+                  fill="#166534"
+                  fontSize={8}
+                  formatter={(v) =>
+                    Number(v ?? 0) > 0 ? Number(v ?? 0).toLocaleString("es-VE", { maximumFractionDigits: 0 }) : ""
+                  }
+                />
+              </Bar>
+            )}
+            {ventasPorModelo && (
+              <Bar yAxisId="kg" dataKey="radarKgDiaIndirecto" stackId="kg" fill="#c4b5fd" radius={[3, 3, 0, 0]}>
+                <LabelList
+                  dataKey="radarKgDiaIndirecto"
+                  position="center"
+                  fill="#5b21b6"
+                  fontSize={8}
+                  formatter={(v) =>
+                    Number(v ?? 0) > 0 ? Number(v ?? 0).toLocaleString("es-VE", { maximumFractionDigits: 0 }) : ""
+                  }
+                />
+              </Bar>
+            )}
             {/* Efectividad principal (color según la métrica elegida). */}
             <Line
               yAxisId="pct"
@@ -152,13 +192,21 @@ export function CarteraTotalDiaChart({
   showDirecto = false,
   showIndirecto = false,
   efectividadColor = "#dc2626",
+  ventasPorModelo = false,
 }: {
   data: CarteraTotalDiaChartPoint[];
   showDirecto?: boolean;
   showIndirecto?: boolean;
   efectividadColor?: string;
+  ventasPorModelo?: boolean;
 }) {
   return (
-    <Inner data={data} showDirecto={showDirecto} showIndirecto={showIndirecto} efectividadColor={efectividadColor} />
+    <Inner
+      data={data}
+      showDirecto={showDirecto}
+      showIndirecto={showIndirecto}
+      efectividadColor={efectividadColor}
+      ventasPorModelo={ventasPorModelo}
+    />
   );
 }
