@@ -220,8 +220,10 @@ export function DiennDashboardClient({
   // Dos toggles separados: uno para la línea principal, otro para los modelos.
   const [efectividadAcum, setEfectividadAcum] = useState(false);
   const [modeloAcum, setModeloAcum] = useState(false);
-  // Barras de volumen Radar del período: total (false) o separadas por modelo (true).
-  const [ventasPorModelo, setVentasPorModelo] = useState(false);
+  // Barras de volumen Radar del período por modelo: dos toggles independientes.
+  // Con ambos apagados se ve el total; al prender uno/ambos, esas barras.
+  const [ventasDirecto, setVentasDirecto] = useState(false);
+  const [ventasIndirecto, setVentasIndirecto] = useState(false);
 
   const [sellOutClienteOpen, setSellOutClienteOpen] = useState(false);
   // Posición del producto en PDV: una sola tarjeta, se ve por conteo de clientes
@@ -870,17 +872,28 @@ export function DiennDashboardClient({
                 >
                   Modelos: {modeloAcum ? "Acumulado" : "Día"}
                 </button>
-                {/* Barras: total del período o separadas por modelo (Directo/Indirecto). */}
+                {/* Barras de volumen Radar del período por modelo (independientes). */}
                 <button
-                  onClick={() => setVentasPorModelo((v) => !v)}
-                  title="Cambia las barras de volumen Radar del período entre el total y el desglose por modelo (Directo/Indirecto)"
+                  onClick={() => setVentasDirecto((v) => !v)}
+                  title="Muestra las barras de volumen Radar del período del modelo Directo"
                   className={`px-3 py-1.5 rounded-lg border text-xs font-medium transition-colors ${
-                    ventasPorModelo
-                      ? "border-slate-900 bg-slate-900 text-white"
+                    ventasDirecto
+                      ? "border-green-600 bg-green-600 text-white"
                       : "border-slate-200 bg-white text-slate-500 hover:bg-slate-50"
                   }`}
                 >
-                  Ventas: {ventasPorModelo ? "Por modelo" : "Total"}
+                  Ventas Directo
+                </button>
+                <button
+                  onClick={() => setVentasIndirecto((v) => !v)}
+                  title="Muestra las barras de volumen Radar del período del modelo Indirecto"
+                  className={`px-3 py-1.5 rounded-lg border text-xs font-medium transition-colors ${
+                    ventasIndirecto
+                      ? "border-violet-600 bg-violet-600 text-white"
+                      : "border-slate-200 bg-white text-slate-500 hover:bg-slate-50"
+                  }`}
+                >
+                  Ventas Indirecto
                 </button>
               </div>
               <ExportExcelButton
@@ -897,7 +910,8 @@ export function DiennDashboardClient({
               showDirecto={showDirectoTotal}
               showIndirecto={showIndirectoTotal}
               efectividadColor={efectividadColor}
-              ventasPorModelo={ventasPorModelo}
+              showVentasDirecto={ventasDirecto}
+              showVentasIndirecto={ventasIndirecto}
             />
           </CardContent>
         </Card>
@@ -929,7 +943,8 @@ export function DiennDashboardClient({
                   showDirecto={showDirectoTotal}
                   showIndirecto={showIndirectoTotal}
                   efectividadColor={efectividadColor}
-                  ventasPorModelo={ventasPorModelo}
+                  showVentasDirecto={ventasDirecto}
+                  showVentasIndirecto={ventasIndirecto}
                 />
               </CardContent>
             </Card>

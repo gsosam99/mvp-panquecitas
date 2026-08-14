@@ -27,13 +27,15 @@ const Inner = dynamic(
       showDirecto,
       showIndirecto,
       efectividadColor,
-      ventasPorModelo,
+      showVentasDirecto,
+      showVentasIndirecto,
     }: {
       data: CarteraTotalDiaChartPoint[];
       showDirecto: boolean;
       showIndirecto: boolean;
       efectividadColor: string;
-      ventasPorModelo: boolean;
+      showVentasDirecto: boolean;
+      showVentasIndirecto: boolean;
     }) {
       return (
         <ResponsiveContainer width="100%" height={340}>
@@ -71,9 +73,10 @@ const Inner = dynamic(
               }
               wrapperStyle={{ fontSize: 12 }}
             />
-            {/* Barras: total del período, o desglose por modelo (apilado). Se usan
-                condicionales hermanos (no un Fragment) para que Recharts detecte los Bar. */}
-            {!ventasPorModelo && (
+            {/* Barras: total del período por defecto; con los toggles de modelo se
+                muestran las de Directo y/o Indirecto (apiladas si ambas). Condicionales
+                hermanos (no un Fragment) para que Recharts detecte los Bar. */}
+            {!showVentasDirecto && !showVentasIndirecto && (
               <Bar yAxisId="kg" dataKey="radarKgDia" fill="#bfdbfe" radius={[3, 3, 0, 0]}>
                 {/* Kg del período, visibles sobre cada barra. */}
                 <LabelList
@@ -86,8 +89,8 @@ const Inner = dynamic(
                 />
               </Bar>
             )}
-            {ventasPorModelo && (
-              <Bar yAxisId="kg" dataKey="radarKgDiaDirecto" stackId="kg" fill="#86efac">
+            {showVentasDirecto && (
+              <Bar yAxisId="kg" dataKey="radarKgDiaDirecto" stackId="kg" fill="#86efac" radius={[2, 2, 0, 0]}>
                 <LabelList
                   dataKey="radarKgDiaDirecto"
                   position="center"
@@ -99,8 +102,8 @@ const Inner = dynamic(
                 />
               </Bar>
             )}
-            {ventasPorModelo && (
-              <Bar yAxisId="kg" dataKey="radarKgDiaIndirecto" stackId="kg" fill="#c4b5fd" radius={[3, 3, 0, 0]}>
+            {showVentasIndirecto && (
+              <Bar yAxisId="kg" dataKey="radarKgDiaIndirecto" stackId="kg" fill="#c4b5fd" radius={[2, 2, 0, 0]}>
                 <LabelList
                   dataKey="radarKgDiaIndirecto"
                   position="center"
@@ -192,13 +195,15 @@ export function CarteraTotalDiaChart({
   showDirecto = false,
   showIndirecto = false,
   efectividadColor = "#dc2626",
-  ventasPorModelo = false,
+  showVentasDirecto = false,
+  showVentasIndirecto = false,
 }: {
   data: CarteraTotalDiaChartPoint[];
   showDirecto?: boolean;
   showIndirecto?: boolean;
   efectividadColor?: string;
-  ventasPorModelo?: boolean;
+  showVentasDirecto?: boolean;
+  showVentasIndirecto?: boolean;
 }) {
   return (
     <Inner
@@ -206,7 +211,8 @@ export function CarteraTotalDiaChart({
       showDirecto={showDirecto}
       showIndirecto={showIndirecto}
       efectividadColor={efectividadColor}
-      ventasPorModelo={ventasPorModelo}
+      showVentasDirecto={showVentasDirecto}
+      showVentasIndirecto={showVentasIndirecto}
     />
   );
 }
