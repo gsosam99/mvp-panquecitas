@@ -153,6 +153,27 @@ export async function getTotalToneladasPedidas(sector?: Sector): Promise<number>
   return Math.round((pedidaKgTotal / 1000) * 100) / 100;
 }
 
+/**
+ * "Volumen facturado" TOTAL — Cantidad Facturada cruda de Pedidos y Facturado,
+ * SIN filtrar por variant_id (a diferencia de getTotalToneladas, que solo suma
+ * las presentaciones mapeadas y por eso subcuenta). Mismo criterio que
+ * getTotalToneladasPedidas, pero sobre cantidad_facturada_kg.
+ */
+export async function getTotalFacturadoToneladas(sector?: Sector): Promise<number> {
+  const ids = await getPedidosFacturadosLocationIds(sector);
+  const supabase = createSupabaseServiceClient();
+  const { data } = await supabase
+    .from("sap_pedidos_facturados")
+    .select("cantidad_facturada_kg, location_id")
+    .eq("product_id", PRODUCT_IDS.PANQUECITAS);
+
+  let facturadaKgTotal = 0;
+  for (const r of (data ?? []) as { cantidad_facturada_kg: number; location_id: string }[]) {
+    if (ids.has(r.location_id)) facturadaKgTotal += r.cantidad_facturada_kg;
+  }
+  return Math.round((facturadaKgTotal / 1000) * 100) / 100;
+}
+
 // El Radar de Harina PAN (HPM) del perfil DIENN solo cuenta a partir de esta
 // fecha (decisión con Alejandro): las cargas de HPM anteriores no se toman en
 // cuenta, ni en el volumen acumulado ni en los gráficos. NO aplica a

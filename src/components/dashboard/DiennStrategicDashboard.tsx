@@ -15,6 +15,7 @@ import {
   getStockOut,
   getTotalToneladas,
   getTotalToneladasPedidas,
+  getTotalFacturadoToneladas,
   getVentaRecompraActivacion,
   getVolumenRadarAcumulado,
 } from "@/lib/dienn-queries";
@@ -31,6 +32,7 @@ async function getBundle(sector?: Sector): Promise<SectorBundle> {
   const [
     totalToneladas,
     totalToneladasPedidas,
+    totalFacturadoToneladas,
     volumenRadarAcumulado,
     mixProducto,
     demandaInsatisfecha,
@@ -47,6 +49,7 @@ async function getBundle(sector?: Sector): Promise<SectorBundle> {
   ] = await Promise.all([
     getTotalToneladas(sector),
     getTotalToneladasPedidas(sector),
+    getTotalFacturadoToneladas(sector),
     getVolumenRadarAcumulado(sector),
     getMixProducto(sector),
     getDemandaInsatisfecha(sector),
@@ -65,6 +68,7 @@ async function getBundle(sector?: Sector): Promise<SectorBundle> {
   return {
     totalToneladas,
     totalToneladasPedidas,
+    totalFacturadoToneladas,
     volumenRadarAcumulado,
     mixProducto,
     demandaInsatisfecha,

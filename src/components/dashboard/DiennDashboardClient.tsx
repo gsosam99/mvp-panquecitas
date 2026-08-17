@@ -63,6 +63,8 @@ export interface SectorBundle {
   totalToneladas: number;
   /** Volumen PEDIDO — exclusivo de Pedidos y Facturado (Cantidad Pedido), mismo universo que totalToneladas. */
   totalToneladasPedidas: number;
+  /** Volumen FACTURADO total (Cantidad Facturada cruda, sin filtrar por presentación). */
+  totalFacturadoToneladas: number;
   /** Toneladas reales despachadas/confirmadas según "Carga Radar", por producto. No se mezcla con las dos anteriores. */
   volumenRadarAcumulado: VolumenRadarAcumulado;
   /** Toneladas facturadas SAP por presentación (400g / 800g), desde Pedidos y Facturado. */
@@ -233,6 +235,8 @@ export function DiennDashboardClient({
   // una acumulada y otra diaria — se pueden prender ambas, una, o ninguna.
   const [ciudadAcum, setCiudadAcum] = useState(false);
   const [ciudadDia, setCiudadDia] = useState(false);
+  // Cuál ciudad se superpone: ambas, solo Cumaná o solo Cabudare.
+  const [ciudadSel, setCiudadSel] = useState<"ambas" | "cumana" | "barquisimeto_este">("ambas");
 
   const [sellOutClienteOpen, setSellOutClienteOpen] = useState(false);
   // Posición del producto en PDV: una sola tarjeta, se ve por conteo de clientes
@@ -484,7 +488,7 @@ export function DiennDashboardClient({
           annotation={[
             `Activación de cliente ${bundle.penetracionRadarVsHpm.radarPanquecitasPct}%`,
             `Proporción vs Harina PAN ${proporcionPanqVsHpm}%`,
-            `Volumen facturado ${bundle.totalToneladas.toLocaleString("es-VE", { maximumFractionDigits: 2 })} Ton`,
+            `Volumen facturado ${bundle.totalFacturadoToneladas.toLocaleString("es-VE", { maximumFractionDigits: 2 })} Ton`,
           ]}
           subtitle="Confirmado en anaquel — solo Carga Radar"
           product="panquecitas"
@@ -1037,6 +1041,16 @@ export function DiennDashboardClient({
                 >
                   Ciudad Día
                 </button>
+                {/* Cuál ciudad se superpone (aplica a ambas capas de ciudad). */}
+                <select
+                  value={ciudadSel}
+                  onChange={(e) => setCiudadSel(e.target.value as "ambas" | "cumana" | "barquisimeto_este")}
+                  className="text-xs border border-slate-200 rounded-lg px-2 py-1.5 bg-white text-slate-700"
+                >
+                  <option value="ambas">Ambas ciudades</option>
+                  <option value="cumana">Solo Cumaná</option>
+                  <option value="barquisimeto_este">Solo Cabudare</option>
+                </select>
               </div>
               <ExportExcelButton
                 filename="Cartera total acumulado"
@@ -1056,6 +1070,8 @@ export function DiennDashboardClient({
               showVentasIndirecto={ventasIndirecto}
               showCiudadAcum={ciudadAcum}
               showCiudadDia={ciudadDia}
+              showCumana={ciudadSel !== "barquisimeto_este"}
+              showCabudare={ciudadSel !== "cumana"}
             />
           </CardContent>
         </Card>

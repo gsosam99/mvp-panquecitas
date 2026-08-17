@@ -36,6 +36,8 @@ const Inner = dynamic(
       showVentasIndirecto,
       showCiudadAcum,
       showCiudadDia,
+      showCumana,
+      showCabudare,
     }: {
       data: CarteraTotalDiaChartPoint[];
       showDirecto: boolean;
@@ -45,6 +47,8 @@ const Inner = dynamic(
       showVentasIndirecto: boolean;
       showCiudadAcum: boolean;
       showCiudadDia: boolean;
+      showCumana: boolean;
+      showCabudare: boolean;
     }) {
       return (
         <ResponsiveContainer width="100%" height={340}>
@@ -204,53 +208,89 @@ const Inner = dynamic(
                 />
               </Line>
             )}
-            {/* Efectividad por ciudad ACUMULADA (línea sólida): Cumaná / Cabudare. */}
-            {showCiudadAcum && (
+            {/* Efectividad por ciudad ACUMULADA (línea sólida) — con % visible. */}
+            {showCiudadAcum && showCumana && (
               <Line
                 yAxisId="pct"
                 dataKey="efectCumanaAcum"
                 stroke="#0891b2"
                 strokeWidth={2}
-                dot={false}
+                dot={{ r: 2, fill: "#0891b2" }}
                 connectNulls
                 isAnimationActive={false}
-              />
+              >
+                <LabelList
+                  dataKey="efectCumanaAcum"
+                  position="top"
+                  offset={6}
+                  fill="#0891b2"
+                  fontSize={9}
+                  formatter={(v) => (v == null ? "" : `${Number(v)}%`)}
+                />
+              </Line>
             )}
-            {showCiudadAcum && (
+            {showCiudadAcum && showCabudare && (
               <Line
                 yAxisId="pct"
                 dataKey="efectCabudareAcum"
                 stroke="#db2777"
                 strokeWidth={2}
-                dot={false}
+                dot={{ r: 2, fill: "#db2777" }}
                 connectNulls
                 isAnimationActive={false}
-              />
+              >
+                <LabelList
+                  dataKey="efectCabudareAcum"
+                  position="bottom"
+                  offset={6}
+                  fill="#db2777"
+                  fontSize={9}
+                  formatter={(v) => (v == null ? "" : `${Number(v)}%`)}
+                />
+              </Line>
             )}
-            {/* Efectividad por ciudad DIARIA (línea punteada): Cumaná / Cabudare. */}
-            {showCiudadDia && (
+            {/* Efectividad por ciudad DIARIA (línea punteada) — con % visible. */}
+            {showCiudadDia && showCumana && (
               <Line
                 yAxisId="pct"
                 dataKey="efectCumanaDia"
                 stroke="#0891b2"
                 strokeWidth={2}
                 strokeDasharray="4 3"
-                dot={false}
+                dot={{ r: 2, fill: "#0891b2" }}
                 connectNulls
                 isAnimationActive={false}
-              />
+              >
+                <LabelList
+                  dataKey="efectCumanaDia"
+                  position="top"
+                  offset={16}
+                  fill="#0e7490"
+                  fontSize={9}
+                  formatter={(v) => (v == null ? "" : `${Number(v)}%`)}
+                />
+              </Line>
             )}
-            {showCiudadDia && (
+            {showCiudadDia && showCabudare && (
               <Line
                 yAxisId="pct"
                 dataKey="efectCabudareDia"
                 stroke="#db2777"
                 strokeWidth={2}
                 strokeDasharray="4 3"
-                dot={false}
+                dot={{ r: 2, fill: "#db2777" }}
                 connectNulls
                 isAnimationActive={false}
-              />
+              >
+                <LabelList
+                  dataKey="efectCabudareDia"
+                  position="bottom"
+                  offset={16}
+                  fill="#9d174d"
+                  fontSize={9}
+                  formatter={(v) => (v == null ? "" : `${Number(v)}%`)}
+                />
+              </Line>
             )}
           </ComposedChart>
         </ResponsiveContainer>
@@ -274,6 +314,8 @@ export function CarteraTotalDiaChart({
   showVentasIndirecto = false,
   showCiudadAcum = false,
   showCiudadDia = false,
+  showCumana = true,
+  showCabudare = true,
 }: {
   data: CarteraTotalDiaChartPoint[];
   showDirecto?: boolean;
@@ -283,6 +325,8 @@ export function CarteraTotalDiaChart({
   showVentasIndirecto?: boolean;
   showCiudadAcum?: boolean;
   showCiudadDia?: boolean;
+  showCumana?: boolean;
+  showCabudare?: boolean;
 }) {
   return (
     <Inner
@@ -294,6 +338,8 @@ export function CarteraTotalDiaChart({
       showVentasIndirecto={showVentasIndirecto}
       showCiudadAcum={showCiudadAcum}
       showCiudadDia={showCiudadDia}
+      showCumana={showCumana}
+      showCabudare={showCabudare}
     />
   );
 }
