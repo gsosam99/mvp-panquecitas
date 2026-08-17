@@ -231,6 +231,13 @@ export function DiennDashboardClient({
   // Con ambos apagados se ve el total; al prender uno/ambos, esas barras.
   const [ventasDirecto, setVentasDirecto] = useState(false);
   const [ventasIndirecto, setVentasIndirecto] = useState(false);
+  // Mismos toggles pero por CIUDAD (Cumaná / Cabudare): las barras llevan los kg
+  // y el nombre de la ciudad. Independientes de los de modelo.
+  const [ventasCumana, setVentasCumana] = useState(false);
+  const [ventasCabudare, setVentasCabudare] = useState(false);
+  // La línea de efectividad total (Radar / Facturado / Pedidos) se puede apagar
+  // para dejar solo las barras y/o las capas por modelo y ciudad.
+  const [showEfectividadTotal, setShowEfectividadTotal] = useState(true);
   // Capas de efectividad por ciudad (superpuestas a la total, independientes):
   // una acumulada y otra diaria — se pueden prender ambas, una, o ninguna.
   const [ciudadAcum, setCiudadAcum] = useState(false);
@@ -364,6 +371,9 @@ export function DiennDashboardClient({
       if (b) bAcum = metricAcum(b);
       return {
         ...mapTotalPoint(p),
+        // Volumen Radar del bucket partido por ciudad (para las barras por ciudad).
+        radarKgDiaCumana: c?.radarKgDia ?? 0,
+        radarKgDiaCabudare: b?.radarKgDia ?? 0,
         efectCumanaAcum: cAcum,
         efectCabudareAcum: bAcum,
         efectCumanaDia: c ? metricDia(c) : null,
@@ -511,7 +521,7 @@ export function DiennDashboardClient({
         <KpiCard
           title="Índice Tienda Ideal"
           value={`${tiendaIdeal.pct}%`}
-          subtitle={`${tiendaIdeal.cumplen} de ${tiendaIdeal.total} PDVs (sectores piloto)`}
+          subtitle={`${tiendaIdeal.cumplen} de ${tiendaIdeal.total} PDVs visitados por mercaderista (sectores piloto)`}
         />
       </div>
 
@@ -915,8 +925,12 @@ export function DiennDashboardClient({
                 <span className="font-medium text-violet-600">Indirecto</span>. Con los botones{" "}
                 <span className="font-medium">Efectividad</span> y <span className="font-medium">Modelos</span> alternas
                 cada línea entre el valor del período (Día) y el{" "}
-                <span className="font-medium">acumulado</span> (activos ÷ cartera total). Todo aplica también a los
-                gráficos comparativos (Cumaná / Cabudare).
+                <span className="font-medium">acumulado</span> (activos ÷ cartera total). Las barras se pueden desglosar
+                por modelo (<span className="font-medium">Ventas Directo / Indirecto</span>) o por ciudad (
+                <span className="font-medium">Ventas Cumaná / Cabudare</span>, con los kg y el nombre de la ciudad en la
+                barra), y la línea de efectividad total se apaga con{" "}
+                <span className="font-medium">Línea total</span>. Todo aplica también a los gráficos comparativos
+                (Cumaná / Cabudare).
               </p>
             </div>
             <div className="flex flex-col items-end gap-2 print:hidden">
@@ -1024,6 +1038,41 @@ export function DiennDashboardClient({
                 >
                   Ventas Indirecto
                 </button>
+                {/* Mismas barras pero por ciudad — la etiqueta lleva kg + ciudad. */}
+                <button
+                  onClick={() => setVentasCumana((v) => !v)}
+                  title="Muestra las barras de volumen Radar del período de Cumaná (kg y nombre de la ciudad)"
+                  className={`px-3 py-1.5 rounded-lg border text-xs font-medium transition-colors ${
+                    ventasCumana
+                      ? "border-cyan-600 bg-cyan-600 text-white"
+                      : "border-slate-200 bg-white text-slate-500 hover:bg-slate-50"
+                  }`}
+                >
+                  Ventas Cumaná
+                </button>
+                <button
+                  onClick={() => setVentasCabudare((v) => !v)}
+                  title="Muestra las barras de volumen Radar del período de Cabudare (kg y nombre de la ciudad)"
+                  className={`px-3 py-1.5 rounded-lg border text-xs font-medium transition-colors ${
+                    ventasCabudare
+                      ? "border-pink-600 bg-pink-600 text-white"
+                      : "border-slate-200 bg-white text-slate-500 hover:bg-slate-50"
+                  }`}
+                >
+                  Ventas Cabudare
+                </button>
+                {/* Prende/apaga la línea de efectividad total (la de la métrica activa). */}
+                <button
+                  onClick={() => setShowEfectividadTotal((v) => !v)}
+                  title="Muestra u oculta la línea de efectividad total (Radar / Facturado / Pedidos)"
+                  className={`px-3 py-1.5 rounded-lg border text-xs font-medium transition-colors ${
+                    showEfectividadTotal
+                      ? "border-slate-900 bg-slate-900 text-white"
+                      : "border-slate-200 bg-white text-slate-500 hover:bg-slate-50"
+                  }`}
+                >
+                  Línea total: {showEfectividadTotal ? "Visible" : "Oculta"}
+                </button>
                 {/* Capas de efectividad por ciudad, superpuestas a la total (independientes). */}
                 <button
                   onClick={() => setCiudadAcum((v) => !v)}
@@ -1069,11 +1118,14 @@ export function DiennDashboardClient({
           <CardContent>
             <CarteraTotalDiaChart
               data={carteraTotalDiaData}
+              showEfectividad={showEfectividadTotal}
               showDirecto={showDirectoTotal}
               showIndirecto={showIndirectoTotal}
               efectividadColor={efectividadColor}
               showVentasDirecto={ventasDirecto}
               showVentasIndirecto={ventasIndirecto}
+              showVentasCumana={ventasCumana}
+              showVentasCabudare={ventasCabudare}
               showCiudadAcum={ciudadAcum}
               showCiudadDia={ciudadDia}
               showCumana={ciudadSel !== "barquisimeto_este"}
@@ -1106,6 +1158,7 @@ export function DiennDashboardClient({
               <CardContent>
                 <CarteraTotalDiaChart
                   data={s.data}
+                  showEfectividad={showEfectividadTotal}
                   showDirecto={showDirectoTotal}
                   showIndirecto={showIndirectoTotal}
                   efectividadColor={efectividadColor}

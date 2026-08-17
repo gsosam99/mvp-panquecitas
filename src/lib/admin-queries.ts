@@ -227,7 +227,12 @@ export interface IndiceTiendaPerfectaResult {
 
 export async function getIndiceTiendaPerfecta(): Promise<IndiceTiendaPerfectaResult> {
   const rows = await getAdminExecutionSnapshot();
-  const evaluable = rows.filter((r) => r.target400 !== null);
+  // El denominador son las tiendas VISITADAS por los mercaderistas, no la
+  // cartera completa: los tres criterios (precio, POP, inventario en anaquel)
+  // solo se pueden observar en una visita, así que un PDV sin visita no es un
+  // incumplimiento — es un dato que no existe. Se mantiene el filtro de
+  // target400 porque sin PVP objetivo de la ciudad no hay contra qué comparar.
+  const evaluable = rows.filter((r) => r.target400 !== null && r.visitado);
 
   let cumplen = 0;
   for (const r of evaluable) {

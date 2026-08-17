@@ -7,6 +7,9 @@ export interface CarteraTotalDiaChartPoint {
   radarKgDia: number;
   radarKgDiaDirecto: number; // parte del volumen del período del modelo Directo
   radarKgDiaIndirecto: number; // parte del volumen del período del modelo Indirecto
+  // Parte del volumen del período de cada ciudad (solo el gráfico global las provee).
+  radarKgDiaCumana?: number;
+  radarKgDiaCabudare?: number;
   programados: number;
   efectividad: number; // %
   efectividadDirecto: number; // % activación Radar modelo Directo
@@ -29,27 +32,36 @@ const Inner = dynamic(
 
     function CarteraTotalDiaInner({
       data,
+      showEfectividad,
       showDirecto,
       showIndirecto,
       efectividadColor,
       showVentasDirecto,
       showVentasIndirecto,
+      showVentasCumana,
+      showVentasCabudare,
       showCiudadAcum,
       showCiudadDia,
       showCumana,
       showCabudare,
     }: {
       data: CarteraTotalDiaChartPoint[];
+      showEfectividad: boolean;
       showDirecto: boolean;
       showIndirecto: boolean;
       efectividadColor: string;
       showVentasDirecto: boolean;
       showVentasIndirecto: boolean;
+      showVentasCumana: boolean;
+      showVentasCabudare: boolean;
       showCiudadAcum: boolean;
       showCiudadDia: boolean;
       showCumana: boolean;
       showCabudare: boolean;
     }) {
+      // Con cualquier desglose de barras prendido (modelo o ciudad) se oculta la
+      // barra del total, para no sumar dos veces el mismo volumen.
+      const hayDesglose = showVentasDirecto || showVentasIndirecto || showVentasCumana || showVentasCabudare;
       return (
         <ResponsiveContainer width="100%" height={340}>
           <ComposedChart data={data} margin={{ top: 24, right: 12, left: 10, bottom: 5 }}>
@@ -67,6 +79,8 @@ const Inner = dynamic(
                 if (name === "radarKgDia") return [formatKg(Number(value ?? 0)), "Volumen Radar"];
                 if (name === "radarKgDiaDirecto") return [formatKg(Number(value ?? 0)), "Volumen Radar — Directo"];
                 if (name === "radarKgDiaIndirecto") return [formatKg(Number(value ?? 0)), "Volumen Radar — Indirecto"];
+                if (name === "radarKgDiaCumana") return [formatKg(Number(value ?? 0)), "Volumen Radar — Cumaná"];
+                if (name === "radarKgDiaCabudare") return [formatKg(Number(value ?? 0)), "Volumen Radar — Cabudare"];
                 if (name === "efectCumanaAcum") return [`${Number(value ?? 0)}%`, "Cumaná (acum)"];
                 if (name === "efectCumanaDia") return [`${Number(value ?? 0)}%`, "Cumaná (día)"];
                 if (name === "efectCabudareAcum") return [`${Number(value ?? 0)}%`, "Cabudare (acum)"];
@@ -82,6 +96,10 @@ const Inner = dynamic(
                   ? "Volumen Radar — Directo"
                   : value === "radarKgDiaIndirecto"
                   ? "Volumen Radar — Indirecto"
+                  : value === "radarKgDiaCumana"
+                  ? "Volumen Radar — Cumaná"
+                  : value === "radarKgDiaCabudare"
+                  ? "Volumen Radar — Cabudare"
                   : value === "efectividad"
                   ? "Efectividad"
                   : value === "efectividadDirecto"
@@ -100,10 +118,11 @@ const Inner = dynamic(
               }
               wrapperStyle={{ fontSize: 12 }}
             />
-            {/* Barras: total del período por defecto; con los toggles de modelo se
-                muestran las de Directo y/o Indirecto (apiladas si ambas). Condicionales
-                hermanos (no un Fragment) para que Recharts detecte los Bar. */}
-            {!showVentasDirecto && !showVentasIndirecto && (
+            {/* Barras: total del período por defecto; con los toggles se muestran los
+                desgloses por modelo (Directo/Indirecto) y/o por ciudad (Cumaná/Cabudare),
+                apilados dentro de su propio stack. Condicionales hermanos (no un
+                Fragment) para que Recharts detecte los Bar. */}
+            {!hayDesglose && (
               <Bar yAxisId="kg" dataKey="radarKgDia" fill="#bfdbfe" radius={[3, 3, 0, 0]}>
                 {/* Kg del período, visibles sobre cada barra. */}
                 <LabelList
@@ -117,7 +136,7 @@ const Inner = dynamic(
               </Bar>
             )}
             {showVentasDirecto && (
-              <Bar yAxisId="kg" dataKey="radarKgDiaDirecto" stackId="kg" fill="#86efac" radius={[2, 2, 0, 0]}>
+              <Bar yAxisId="kg" dataKey="radarKgDiaDirecto" stackId="modelo" fill="#86efac" radius={[2, 2, 0, 0]}>
                 <LabelList
                   dataKey="radarKgDiaDirecto"
                   position="center"
@@ -132,7 +151,7 @@ const Inner = dynamic(
               </Bar>
             )}
             {showVentasIndirecto && (
-              <Bar yAxisId="kg" dataKey="radarKgDiaIndirecto" stackId="kg" fill="#c4b5fd" radius={[2, 2, 0, 0]}>
+              <Bar yAxisId="kg" dataKey="radarKgDiaIndirecto" stackId="modelo" fill="#c4b5fd" radius={[2, 2, 0, 0]}>
                 <LabelList
                   dataKey="radarKgDiaIndirecto"
                   position="center"
@@ -146,24 +165,60 @@ const Inner = dynamic(
                 />
               </Bar>
             )}
-            {/* Efectividad principal (color según la métrica elegida). */}
-            <Line
-              yAxisId="pct"
-              dataKey="efectividad"
-              stroke={efectividadColor}
-              strokeWidth={2}
-              dot={{ r: 3, fill: efectividadColor }}
-              isAnimationActive={false}
-            >
-              <LabelList
+            {/* Barras de volumen Radar del período por CIUDAD. Stack propio ("ciudad")
+                para que, si además se prendió un desglose por modelo, queden columnas
+                lado a lado en vez de sumarse en la misma pila. La etiqueta lleva los
+                kg y el nombre de la ciudad. */}
+            {showVentasCumana && (
+              <Bar yAxisId="kg" dataKey="radarKgDiaCumana" stackId="ciudad" fill="#a5f3fc" radius={[2, 2, 0, 0]}>
+                <LabelList
+                  dataKey="radarKgDiaCumana"
+                  position="center"
+                  fill="#155e75"
+                  fontSize={8}
+                  formatter={(v) =>
+                    Number(v ?? 0) > 0
+                      ? `${Number(v ?? 0).toLocaleString("es-VE", { maximumFractionDigits: 0 })} kg · Cumaná`
+                      : ""
+                  }
+                />
+              </Bar>
+            )}
+            {showVentasCabudare && (
+              <Bar yAxisId="kg" dataKey="radarKgDiaCabudare" stackId="ciudad" fill="#fbcfe8" radius={[2, 2, 0, 0]}>
+                <LabelList
+                  dataKey="radarKgDiaCabudare"
+                  position="center"
+                  fill="#9d174d"
+                  fontSize={8}
+                  formatter={(v) =>
+                    Number(v ?? 0) > 0
+                      ? `${Number(v ?? 0).toLocaleString("es-VE", { maximumFractionDigits: 0 })} kg · Cabudare`
+                      : ""
+                  }
+                />
+              </Bar>
+            )}
+            {/* Efectividad principal (color según la métrica elegida) — se puede apagar. */}
+            {showEfectividad && (
+              <Line
+                yAxisId="pct"
                 dataKey="efectividad"
-                position="top"
-                offset={6}
-                fill={efectividadColor}
-                fontSize={9}
-                formatter={(v) => `${Number(v ?? 0)}%`}
-              />
-            </Line>
+                stroke={efectividadColor}
+                strokeWidth={2}
+                dot={{ r: 3, fill: efectividadColor }}
+                isAnimationActive={false}
+              >
+                <LabelList
+                  dataKey="efectividad"
+                  position="top"
+                  offset={6}
+                  fill={efectividadColor}
+                  fontSize={9}
+                  formatter={(v) => `${Number(v ?? 0)}%`}
+                />
+              </Line>
+            )}
             {/* Activación Radar — Directo (serie opcional). */}
             {showDirecto && (
               <Line
@@ -307,22 +362,28 @@ const Inner = dynamic(
 
 export function CarteraTotalDiaChart({
   data,
+  showEfectividad = true,
   showDirecto = false,
   showIndirecto = false,
   efectividadColor = "#dc2626",
   showVentasDirecto = false,
   showVentasIndirecto = false,
+  showVentasCumana = false,
+  showVentasCabudare = false,
   showCiudadAcum = false,
   showCiudadDia = false,
   showCumana = true,
   showCabudare = true,
 }: {
   data: CarteraTotalDiaChartPoint[];
+  showEfectividad?: boolean;
   showDirecto?: boolean;
   showIndirecto?: boolean;
   efectividadColor?: string;
   showVentasDirecto?: boolean;
   showVentasIndirecto?: boolean;
+  showVentasCumana?: boolean;
+  showVentasCabudare?: boolean;
   showCiudadAcum?: boolean;
   showCiudadDia?: boolean;
   showCumana?: boolean;
@@ -331,11 +392,14 @@ export function CarteraTotalDiaChart({
   return (
     <Inner
       data={data}
+      showEfectividad={showEfectividad}
       showDirecto={showDirecto}
       showIndirecto={showIndirecto}
       efectividadColor={efectividadColor}
       showVentasDirecto={showVentasDirecto}
       showVentasIndirecto={showVentasIndirecto}
+      showVentasCumana={showVentasCumana}
+      showVentasCabudare={showVentasCabudare}
       showCiudadAcum={showCiudadAcum}
       showCiudadDia={showCiudadDia}
       showCumana={showCumana}
