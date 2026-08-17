@@ -43,6 +43,7 @@ async function getBundle(sector?: Sector): Promise<SectorBundle> {
     materialPopPreciador,
     posicionPdv,
     detalleSegmentos,
+    conversionDegustaciones,
   ] = await Promise.all([
     getTotalToneladas(sector),
     getTotalToneladasPedidas(sector),
@@ -58,6 +59,7 @@ async function getBundle(sector?: Sector): Promise<SectorBundle> {
     getMaterialPopPreciador(sector),
     getPosicionPdv(sector),
     getDetalleClientesPorSegmento(sector),
+    getConversionDegustaciones(sector),
   ]);
 
   return {
@@ -74,6 +76,7 @@ async function getBundle(sector?: Sector): Promise<SectorBundle> {
     materialPopPreciador,
     posicionPdv,
     detalleSegmentos,
+    conversionDegustaciones,
   };
 }
 
@@ -85,13 +88,12 @@ async function getBundle(sector?: Sector): Promise<SectorBundle> {
 // Sell-Out completo (sin filtrar), y se le pasan al cliente, que decide
 // qué mostrar sin volver a pedir datos.
 export async function DiennStrategicDashboard() {
-  const [total, cumana, barquisimetoEste, coberturaComunicacion, conversionDegustaciones, tiendaIdeal, sellOutRecords, sellOutClientes, universo, motivosNoVenta, posicionPorCliente, carteraPorSegmento, precioCorrecto] =
+  const [total, cumana, barquisimetoEste, coberturaComunicacion, tiendaIdeal, sellOutRecords, sellOutClientes, universo, motivosNoVenta, posicionPorCliente, carteraPorSegmento, precioCorrecto] =
     await Promise.all([
       getBundle(undefined),
       getBundle("cumana"),
       getBundle("barquisimeto_este"),
       getCoberturaComunicacionPorSector(),
-      getConversionDegustaciones(),
       getIndiceTiendaPerfecta(),
       computeSellOut(),
       getSellOutPorClienteDiff(),
@@ -108,7 +110,6 @@ export async function DiennStrategicDashboard() {
     <DiennDashboardClient
       bundles={{ TOTAL: total, cumana, barquisimeto_este: barquisimetoEste }}
       coberturaComunicacion={coberturaComunicacion}
-      conversionDegustaciones={conversionDegustaciones}
       tiendaIdeal={tiendaIdeal}
       sectorLabels={SECTOR_LABELS}
       pilotSectors={PILOT_SECTOR_KEYS}

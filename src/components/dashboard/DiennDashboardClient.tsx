@@ -83,6 +83,8 @@ export interface SectorBundle {
   /** Distribución de la posición del producto en el PDV (encuestas). */
   posicionPdv: PosicionPdvPoint[];
   detalleSegmentos: DetalleSegmentoRow[];
+  /** Conversión de degustaciones (tickets recibidos ÷ entregados) de la ciudad/sector. */
+  conversionDegustaciones: { samples: number; conversions: number; rate: number };
 }
 
 const PAN_POBLACION_OPTIONS: { key: PanComparisonPoblacion; label: string }[] = [
@@ -176,7 +178,6 @@ const STOCK_OUT_UMBRAL_INDIRECTO = 2;
 interface Props {
   bundles: Record<FilterKey, SectorBundle>;
   coberturaComunicacion: Record<TimeGranularity, CoberturaComunicacionPoint[]>;
-  conversionDegustaciones: { samples: number; conversions: number; rate: number };
   tiendaIdeal: { pct: number; cumplen: number; total: number };
   sectorLabels: Record<Sector, string>;
   pilotSectors: readonly Sector[];
@@ -197,7 +198,6 @@ interface Props {
 export function DiennDashboardClient({
   bundles,
   coberturaComunicacion,
-  conversionDegustaciones,
   tiendaIdeal,
   sectorLabels,
   pilotSectors,
@@ -1260,8 +1260,8 @@ export function DiennDashboardClient({
 
         <KpiCard
           title="Tasa de Conversión — Degustaciones"
-          value={`${conversionDegustaciones.rate}%`}
-          subtitle={`${conversionDegustaciones.conversions} de ${conversionDegustaciones.samples} tickets`}
+          value={`${bundle.conversionDegustaciones.rate}%`}
+          subtitle={`${bundle.conversionDegustaciones.conversions} de ${bundle.conversionDegustaciones.samples} tickets`}
           product="panquecitas"
         />
         <KpiCard

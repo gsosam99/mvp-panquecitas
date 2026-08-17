@@ -810,12 +810,19 @@ export interface ConversionDegustaciones {
   rate: number;
 }
 
-export async function getConversionDegustaciones(): Promise<ConversionDegustaciones> {
+export async function getConversionDegustaciones(sector?: Sector): Promise<ConversionDegustaciones> {
   const supabase = createSupabaseServiceClient();
 
-  const { data } = await supabase.from("promotion_activities").select("tickets_entregados, tickets_recibidos");
+  const { data } = await supabase
+    .from("promotion_activities")
+    .select("location_id, tickets_entregados, tickets_recibidos");
 
-  const rows = (data ?? []) as { tickets_entregados: number; tickets_recibidos: number }[];
+  let rows = (data ?? []) as { location_id: string; tickets_entregados: number; tickets_recibidos: number }[];
+  // Por ciudad: solo las degustaciones de PDV del universo de ese sector.
+  if (sector) {
+    const ids = await getUniverseLocationIds(sector);
+    rows = rows.filter((r) => ids.has(r.location_id));
+  }
   const samples = rows.reduce((sum, r) => sum + r.tickets_entregados, 0);
   const conversions = rows.reduce((sum, r) => sum + r.tickets_recibidos, 0);
 
