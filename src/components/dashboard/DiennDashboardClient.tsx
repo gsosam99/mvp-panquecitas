@@ -352,15 +352,21 @@ export function DiennDashboardClient({
     const bIdx = new Map(
       carteraPorSegmento.totalPorSector.barquisimeto_este[totalGranularity].map((p) => [p.dia, p])
     );
+    // La ACUMULADA arrastra el último valor conocido (un acumulado no baja a
+    // hueco): así la línea es continua y visible en toda la escala aunque la
+    // ciudad no tenga movimiento ese bucket. La DIARIA sí deja hueco (null).
+    let cAcum: number | null = null;
+    let bAcum: number | null = null;
     return base.map((p) => {
       const c = cIdx.get(p.dia);
       const b = bIdx.get(p.dia);
+      if (c) cAcum = metricAcum(c);
+      if (b) bAcum = metricAcum(b);
       return {
         ...mapTotalPoint(p),
-        // null → hueco en la línea (Recharts la conecta con connectNulls).
-        efectCumanaAcum: c ? metricAcum(c) : null,
+        efectCumanaAcum: cAcum,
+        efectCabudareAcum: bAcum,
         efectCumanaDia: c ? metricDia(c) : null,
-        efectCabudareAcum: b ? metricAcum(b) : null,
         efectCabudareDia: b ? metricDia(b) : null,
       };
     });
