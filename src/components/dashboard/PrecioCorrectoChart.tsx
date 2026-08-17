@@ -102,27 +102,16 @@ const Inner = dynamic(
             />
             <Tooltip
               cursor={{ strokeDasharray: "3 3" }}
-              content={({ payload }) => {
-                const p = payload?.[0]?.payload as PrecioCorrectoRow | undefined;
-                if (!p) return null;
-                return (
-                  <div style={{ fontSize: 12, background: "#fff", border: "1px solid #e2e8f0", borderRadius: 8, padding: 8 }}>
-                    <div style={{ fontWeight: 600 }}>{p.cliente}</div>
-                    <div style={{ color: "#64748b" }}>
-                      {p.ciudad} · {p.presentacion}
-                    </div>
-                    <div>
-                      Precio: <b>{formatUsd(p.precio)}</b> · Objetivo: {formatUsd(p.target)}
-                    </div>
-                    <div style={{ color: ESTADO_COLOR[p.estado], fontWeight: 600 }}>{ESTADO_LABEL[p.estado]}</div>
-                  </div>
-                );
+              contentStyle={{ fontSize: 12, borderRadius: 8, border: "1px solid #e2e8f0" }}
+              formatter={(value, _name, item) => {
+                const p = (item?.payload ?? {}) as PrecioCorrectoRow;
+                return [
+                  `${formatUsd(Number(value ?? 0))} (obj. ${formatUsd(p.target ?? 0)})`,
+                  `${p.cliente ?? ""} — ${p.ciudad ?? ""} · ${p.estado ? ESTADO_LABEL[p.estado] : ""}`,
+                ];
               }}
             />
-            <Legend
-              payload={ESTADOS.map((e) => ({ value: ESTADO_LABEL[e], type: "circle", id: e, color: ESTADO_COLOR[e] }))}
-              wrapperStyle={{ fontSize: 12 }}
-            />
+            <Legend wrapperStyle={{ fontSize: 12 }} />
             {ESTADOS.map((estado) => (
               <Scatter key={estado} name={ESTADO_LABEL[estado]} data={porEstado.get(estado) ?? []} fill={ESTADO_COLOR[estado]} />
             ))}
