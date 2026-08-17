@@ -422,13 +422,25 @@ async function handleFacturacionUpload(supabase: any, rows: ParsedSapFacturacion
     [...new Set(pedidoFacturadoRows.map((r) => r.fecha))]
   );
 
-  const seen = new Set<string>();
-  const newRows = pedidoFacturadoRows.filter((r) => {
+  // El reporte puede traer VARIAS filas por (cliente, producto, presentación,
+  // fecha) — distintas facturas/pedidos del mismo día — que NO son duplicados:
+  // se SUMAN, no se descartan (antes se caía ~la mitad del volumen facturado).
+  const aggByKey = new Map<string, (typeof pedidoFacturadoRows)[number]>();
+  for (const r of pedidoFacturadoRows) {
     const key = dedupeKey(r.location_id, r.product_id, r.variant_id, r.fecha);
-    if (existingKeys.has(key) || seen.has(key)) return false;
-    seen.add(key);
-    return true;
-  });
+    const acc = aggByKey.get(key);
+    if (acc) {
+      acc.cantidad_pedido_kg += r.cantidad_pedido_kg;
+      acc.cantidad_facturada_kg += r.cantidad_facturada_kg;
+    } else {
+      aggByKey.set(key, { ...r });
+    }
+  }
+  // Se omiten solo las llaves ya presentes en la BD (re-carga idempotente). Para
+  // recargar con los valores corregidos, borra antes el batch anterior.
+  const newRows = [...aggByKey.values()].filter(
+    (r) => !existingKeys.has(dedupeKey(r.location_id, r.product_id, r.variant_id, r.fecha))
+  );
 
   // ── 4. Insert ────────────────────────────────────────────────────────────
   if (newRows.length > 0) {
