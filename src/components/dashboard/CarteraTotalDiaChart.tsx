@@ -11,6 +11,11 @@ export interface CarteraTotalDiaChartPoint {
   efectividad: number; // %
   efectividadDirecto: number; // % activación Radar modelo Directo
   efectividadIndirecto: number; // % activación Radar modelo Indirecto
+  // Capas por ciudad (solo el gráfico global las provee; null = hueco en la línea).
+  efectCumanaAcum?: number | null;
+  efectCumanaDia?: number | null;
+  efectCabudareAcum?: number | null;
+  efectCabudareDia?: number | null;
 }
 
 function formatKg(value: number): string {
@@ -29,6 +34,8 @@ const Inner = dynamic(
       efectividadColor,
       showVentasDirecto,
       showVentasIndirecto,
+      showCiudadAcum,
+      showCiudadDia,
     }: {
       data: CarteraTotalDiaChartPoint[];
       showDirecto: boolean;
@@ -36,6 +43,8 @@ const Inner = dynamic(
       efectividadColor: string;
       showVentasDirecto: boolean;
       showVentasIndirecto: boolean;
+      showCiudadAcum: boolean;
+      showCiudadDia: boolean;
     }) {
       return (
         <ResponsiveContainer width="100%" height={340}>
@@ -54,6 +63,10 @@ const Inner = dynamic(
                 if (name === "radarKgDia") return [formatKg(Number(value ?? 0)), "Volumen Radar"];
                 if (name === "radarKgDiaDirecto") return [formatKg(Number(value ?? 0)), "Volumen Radar — Directo"];
                 if (name === "radarKgDiaIndirecto") return [formatKg(Number(value ?? 0)), "Volumen Radar — Indirecto"];
+                if (name === "efectCumanaAcum") return [`${Number(value ?? 0)}%`, "Cumaná (acum)"];
+                if (name === "efectCumanaDia") return [`${Number(value ?? 0)}%`, "Cumaná (día)"];
+                if (name === "efectCabudareAcum") return [`${Number(value ?? 0)}%`, "Cabudare (acum)"];
+                if (name === "efectCabudareDia") return [`${Number(value ?? 0)}%`, "Cabudare (día)"];
                 return [String(value ?? ""), String(name ?? "")];
               }}
             />
@@ -69,7 +82,17 @@ const Inner = dynamic(
                   ? "Efectividad"
                   : value === "efectividadDirecto"
                   ? "Activación Radar — Directo"
-                  : "Activación Radar — Indirecto"
+                  : value === "efectividadIndirecto"
+                  ? "Activación Radar — Indirecto"
+                  : value === "efectCumanaAcum"
+                  ? "Cumaná (acum)"
+                  : value === "efectCumanaDia"
+                  ? "Cumaná (día)"
+                  : value === "efectCabudareAcum"
+                  ? "Cabudare (acum)"
+                  : value === "efectCabudareDia"
+                  ? "Cabudare (día)"
+                  : value
               }
               wrapperStyle={{ fontSize: 12 }}
             />
@@ -181,6 +204,54 @@ const Inner = dynamic(
                 />
               </Line>
             )}
+            {/* Efectividad por ciudad ACUMULADA (línea sólida): Cumaná / Cabudare. */}
+            {showCiudadAcum && (
+              <Line
+                yAxisId="pct"
+                dataKey="efectCumanaAcum"
+                stroke="#0891b2"
+                strokeWidth={2}
+                dot={false}
+                connectNulls
+                isAnimationActive={false}
+              />
+            )}
+            {showCiudadAcum && (
+              <Line
+                yAxisId="pct"
+                dataKey="efectCabudareAcum"
+                stroke="#db2777"
+                strokeWidth={2}
+                dot={false}
+                connectNulls
+                isAnimationActive={false}
+              />
+            )}
+            {/* Efectividad por ciudad DIARIA (línea punteada): Cumaná / Cabudare. */}
+            {showCiudadDia && (
+              <Line
+                yAxisId="pct"
+                dataKey="efectCumanaDia"
+                stroke="#0891b2"
+                strokeWidth={2}
+                strokeDasharray="4 3"
+                dot={false}
+                connectNulls
+                isAnimationActive={false}
+              />
+            )}
+            {showCiudadDia && (
+              <Line
+                yAxisId="pct"
+                dataKey="efectCabudareDia"
+                stroke="#db2777"
+                strokeWidth={2}
+                strokeDasharray="4 3"
+                dot={false}
+                connectNulls
+                isAnimationActive={false}
+              />
+            )}
           </ComposedChart>
         </ResponsiveContainer>
       );
@@ -201,6 +272,8 @@ export function CarteraTotalDiaChart({
   efectividadColor = "#dc2626",
   showVentasDirecto = false,
   showVentasIndirecto = false,
+  showCiudadAcum = false,
+  showCiudadDia = false,
 }: {
   data: CarteraTotalDiaChartPoint[];
   showDirecto?: boolean;
@@ -208,6 +281,8 @@ export function CarteraTotalDiaChart({
   efectividadColor?: string;
   showVentasDirecto?: boolean;
   showVentasIndirecto?: boolean;
+  showCiudadAcum?: boolean;
+  showCiudadDia?: boolean;
 }) {
   return (
     <Inner
@@ -217,6 +292,8 @@ export function CarteraTotalDiaChart({
       efectividadColor={efectividadColor}
       showVentasDirecto={showVentasDirecto}
       showVentasIndirecto={showVentasIndirecto}
+      showCiudadAcum={showCiudadAcum}
+      showCiudadDia={showCiudadDia}
     />
   );
 }

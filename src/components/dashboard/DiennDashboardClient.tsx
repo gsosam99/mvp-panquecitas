@@ -229,6 +229,10 @@ export function DiennDashboardClient({
   // Con ambos apagados se ve el total; al prender uno/ambos, esas barras.
   const [ventasDirecto, setVentasDirecto] = useState(false);
   const [ventasIndirecto, setVentasIndirecto] = useState(false);
+  // Capas de efectividad por ciudad (superpuestas a la total, independientes):
+  // una acumulada y otra diaria — se pueden prender ambas, una, o ninguna.
+  const [ciudadAcum, setCiudadAcum] = useState(false);
+  const [ciudadDia, setCiudadDia] = useState(false);
 
   const [sellOutClienteOpen, setSellOutClienteOpen] = useState(false);
   // Posición del producto en PDV: una sola tarjeta, se ve por conteo de clientes
@@ -305,38 +309,59 @@ export function DiennDashboardClient({
   // Total acumulado: un punto por bucket de la granularidad elegida. La línea
   // de efectividad usa la métrica seleccionada (Radar / Facturado / Pedidos);
   // el mismo mapeo alimenta el gráfico global y los dos por sector (comparativo).
-  const mapTotal = (puntos: CarteraTotalDiaPunto[]): CarteraTotalDiaChartPoint[] =>
-    puntos.map((p) => ({
-      label: p.label,
-      radarKgDia: p.radarKgDia,
-      radarKgDiaDirecto: p.radarKgDiaDirecto,
-      radarKgDiaIndirecto: p.radarKgDiaIndirecto,
-      programados: p.programados,
-      // Línea principal: por período (día) o acumulada (activos ÷ cartera total).
-      efectividad: efectividadAcum
-        ? carteraMetrica === "activos"
-          ? p.efectividadActivosAcum
-          : carteraMetrica === "facturados"
-          ? p.efectividadFacturadosAcum
-          : p.efectividadPedidosAcum
-        : carteraMetrica === "activos"
-        ? p.efectividadActivos
-        : carteraMetrica === "facturados"
-        ? p.efectividadFacturados
-        : p.efectividadPedidos,
-      // Líneas por modelo: mismo toggle, independiente del de la línea principal.
-      efectividadDirecto: modeloAcum ? p.efectividadDirectoAcum : p.efectividadDirecto,
-      efectividadIndirecto: modeloAcum ? p.efectividadIndirectoAcum : p.efectividadIndirecto,
-    }));
+  // Efectividad de la métrica activa (Radar / Facturado / Pedidos), en su forma
+  // diaria y acumulada — se reutiliza para la línea total y las de ciudad.
+  const metricDia = (p: CarteraTotalDiaPunto) =>
+    carteraMetrica === "activos"
+      ? p.efectividadActivos
+      : carteraMetrica === "facturados"
+      ? p.efectividadFacturados
+      : p.efectividadPedidos;
+  const metricAcum = (p: CarteraTotalDiaPunto) =>
+    carteraMetrica === "activos"
+      ? p.efectividadActivosAcum
+      : carteraMetrica === "facturados"
+      ? p.efectividadFacturadosAcum
+      : p.efectividadPedidosAcum;
+  const mapTotalPoint = (p: CarteraTotalDiaPunto): CarteraTotalDiaChartPoint => ({
+    label: p.label,
+    radarKgDia: p.radarKgDia,
+    radarKgDiaDirecto: p.radarKgDiaDirecto,
+    radarKgDiaIndirecto: p.radarKgDiaIndirecto,
+    programados: p.programados,
+    // Línea principal: por período (día) o acumulada (activos ÷ cartera total).
+    efectividad: efectividadAcum ? metricAcum(p) : metricDia(p),
+    // Líneas por modelo: mismo toggle, independiente del de la línea principal.
+    efectividadDirecto: modeloAcum ? p.efectividadDirectoAcum : p.efectividadDirecto,
+    efectividadIndirecto: modeloAcum ? p.efectividadIndirectoAcum : p.efectividadIndirecto,
+  });
+  const mapTotal = (puntos: CarteraTotalDiaPunto[]): CarteraTotalDiaChartPoint[] => puntos.map(mapTotalPoint);
   // Color de la línea de efectividad según la métrica: Radar rojo, Facturado
   // azul marino, Pedidos naranja.
   const efectividadColor =
     carteraMetrica === "activos" ? "#dc2626" : carteraMetrica === "facturados" ? "#1e3a8a" : "#ea580c";
-  const carteraTotalDiaData = useMemo(
-    () => mapTotal(carteraPorSegmento.totalPorDia[totalGranularity]),
+  // Gráfico global: además de la línea total, se superponen (opcional) las
+  // efectividades por ciudad — acumulada y/o diaria — mergeadas por bucket.
+  const carteraTotalDiaData = useMemo(() => {
+    const base = carteraPorSegmento.totalPorDia[totalGranularity];
+    const cIdx = new Map(carteraPorSegmento.totalPorSector.cumana[totalGranularity].map((p) => [p.dia, p]));
+    const bIdx = new Map(
+      carteraPorSegmento.totalPorSector.barquisimeto_este[totalGranularity].map((p) => [p.dia, p])
+    );
+    return base.map((p) => {
+      const c = cIdx.get(p.dia);
+      const b = bIdx.get(p.dia);
+      return {
+        ...mapTotalPoint(p),
+        // null → hueco en la línea (Recharts la conecta con connectNulls).
+        efectCumanaAcum: c ? metricAcum(c) : null,
+        efectCumanaDia: c ? metricDia(c) : null,
+        efectCabudareAcum: b ? metricAcum(b) : null,
+        efectCabudareDia: b ? metricDia(b) : null,
+      };
+    });
     // eslint-disable-next-line react-hooks/exhaustive-deps
-    [carteraPorSegmento.totalPorDia, totalGranularity, carteraMetrica, efectividadAcum, modeloAcum]
-  );
+  }, [carteraPorSegmento, totalGranularity, carteraMetrica, efectividadAcum, modeloAcum]);
   const carteraTotalPorSectorData = useMemo(
     () =>
       pilotSectors.map((s) => ({
@@ -459,6 +484,7 @@ export function DiennDashboardClient({
           annotation={[
             `Activación de cliente ${bundle.penetracionRadarVsHpm.radarPanquecitasPct}%`,
             `Proporción vs Harina PAN ${proporcionPanqVsHpm}%`,
+            `Volumen facturado ${bundle.totalToneladas.toLocaleString("es-VE", { maximumFractionDigits: 2 })} Ton`,
           ]}
           subtitle="Confirmado en anaquel — solo Carga Radar"
           product="panquecitas"
@@ -988,6 +1014,29 @@ export function DiennDashboardClient({
                 >
                   Ventas Indirecto
                 </button>
+                {/* Capas de efectividad por ciudad, superpuestas a la total (independientes). */}
+                <button
+                  onClick={() => setCiudadAcum((v) => !v)}
+                  title="Superpone la efectividad ACUMULADA de cada ciudad (Cumaná / Cabudare)"
+                  className={`px-3 py-1.5 rounded-lg border text-xs font-medium transition-colors ${
+                    ciudadAcum
+                      ? "border-cyan-600 bg-cyan-600 text-white"
+                      : "border-slate-200 bg-white text-slate-500 hover:bg-slate-50"
+                  }`}
+                >
+                  Ciudad Acum.
+                </button>
+                <button
+                  onClick={() => setCiudadDia((v) => !v)}
+                  title="Superpone la efectividad DIARIA (no acumulada) de cada ciudad (Cumaná / Cabudare)"
+                  className={`px-3 py-1.5 rounded-lg border text-xs font-medium transition-colors ${
+                    ciudadDia
+                      ? "border-pink-600 bg-pink-600 text-white"
+                      : "border-slate-200 bg-white text-slate-500 hover:bg-slate-50"
+                  }`}
+                >
+                  Ciudad Día
+                </button>
               </div>
               <ExportExcelButton
                 filename="Cartera total acumulado"
@@ -1005,6 +1054,8 @@ export function DiennDashboardClient({
               efectividadColor={efectividadColor}
               showVentasDirecto={ventasDirecto}
               showVentasIndirecto={ventasIndirecto}
+              showCiudadAcum={ciudadAcum}
+              showCiudadDia={ciudadDia}
             />
           </CardContent>
         </Card>
