@@ -10,6 +10,7 @@ import {
   getPenetracionRadarVsHpm,
   getPosicionPdv,
   getPosicionPorCliente,
+  getPrecioCorrecto,
   getRunningVentas,
   getStockOut,
   getTotalToneladas,
@@ -84,7 +85,7 @@ async function getBundle(sector?: Sector): Promise<SectorBundle> {
 // Sell-Out completo (sin filtrar), y se le pasan al cliente, que decide
 // qué mostrar sin volver a pedir datos.
 export async function DiennStrategicDashboard() {
-  const [total, cumana, barquisimetoEste, coberturaComunicacion, conversionDegustaciones, tiendaIdeal, sellOutRecords, sellOutClientes, universo, motivosNoVenta, posicionPorCliente, carteraPorSegmento] =
+  const [total, cumana, barquisimetoEste, coberturaComunicacion, conversionDegustaciones, tiendaIdeal, sellOutRecords, sellOutClientes, universo, motivosNoVenta, posicionPorCliente, carteraPorSegmento, precioCorrecto] =
     await Promise.all([
       getBundle(undefined),
       getBundle("cumana"),
@@ -98,6 +99,7 @@ export async function DiennStrategicDashboard() {
       getMotivosNoVenta(),
       getPosicionPorCliente(),
       getCarteraPorSegmento(),
+      getPrecioCorrecto(),
     ]);
 
   const { zonas, asesores } = getAvailableZonasYAsesores(universo);
@@ -117,6 +119,7 @@ export async function DiennStrategicDashboard() {
       motivosNoVenta={motivosNoVenta}
       posicionPorCliente={posicionPorCliente}
       carteraPorSegmento={carteraPorSegmento}
+      precioCorrecto={precioCorrecto}
     />
   );
 }

@@ -15,6 +15,7 @@ import { CarteraTotalDiaChart, type CarteraTotalDiaChartPoint } from "@/componen
 import { PanVsHarinaPanChart } from "@/components/dashboard/PanVsHarinaPanChart";
 import { RoundLegend } from "@/components/dashboard/RoundLegend";
 import { SellOutResumenChart } from "@/components/dashboard/SellOutResumenChart";
+import { PrecioCorrectoChart } from "@/components/dashboard/PrecioCorrectoChart";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Separator } from "@/components/ui/separator";
 import {
@@ -45,6 +46,7 @@ import type {
   PosicionClienteRow,
   CarteraSegmentoResult,
   CarteraTotalDiaPunto,
+  PrecioCorrectoRow,
   MaterialPopPreciadorResult,
   RunningVentasResult,
   StockOutClientePoint,
@@ -188,6 +190,8 @@ interface Props {
   posicionPorCliente: PosicionClienteRow[];
   /** Cartera por ciudad × modelo (volumen Radar + efectividad por plan de visita), por segmento y total por día. Global. */
   carteraPorSegmento: CarteraSegmentoResult;
+  /** Precio correcto: PVP capturado en campo vs objetivo por ciudad (una fila por PDV×presentación evaluable). Global. */
+  precioCorrecto: PrecioCorrectoRow[];
 }
 
 export function DiennDashboardClient({
@@ -203,6 +207,7 @@ export function DiennDashboardClient({
   asesores,
   posicionPorCliente,
   carteraPorSegmento,
+  precioCorrecto,
 }: Props) {
   const [filter, setFilter] = useState<FilterKey>("TOTAL");
   const [zonaFilter, setZonaFilter] = useState("");
@@ -229,6 +234,9 @@ export function DiennDashboardClient({
   // Posición del producto en PDV: una sola tarjeta, se ve por conteo de clientes
   // ("posicion") o por Sell-Out generado ("sellout").
   const [posicionVista, setPosicionVista] = useState<"posicion" | "sellout">("posicion");
+  // Precio Correcto: filtro por ciudad + toggle Vista A (dirección) / B (detalle).
+  const [precioVista, setPrecioVista] = useState<"A" | "B">("A");
+  const [precioCiudad, setPrecioCiudad] = useState<string>("TODAS");
   const [panPoblacion, setPanPoblacion] = useState<PanComparisonPoblacion>("clientes");
   const [panGranularity, setPanGranularity] = useState<PanComparisonGranularity>("month");
   const bundle = bundles[filter];
@@ -369,6 +377,16 @@ export function DiennDashboardClient({
   );
   const rotacion = useMemo(() => computeRotacion(filteredSellOut), [filteredSellOut]);
   const mixProducto = bundle.mixProducto;
+
+  // Precio Correcto: ciudades disponibles + filas filtradas por la ciudad activa.
+  const precioCiudades = useMemo(
+    () => Array.from(new Set(precioCorrecto.map((r) => r.ciudad))).sort(),
+    [precioCorrecto]
+  );
+  const precioFiltrado = useMemo(
+    () => (precioCiudad === "TODAS" ? precioCorrecto : precioCorrecto.filter((r) => r.ciudad === precioCiudad)),
+    [precioCorrecto, precioCiudad]
+  );
 
   const panPoints = bundle.panVsHarinaPan[panPoblacion][panGranularity];
 
@@ -747,6 +765,81 @@ export function DiennDashboardClient({
               <div className="text-center">
                 <p className="text-4xl mb-2">📊</p>
                 <p>Sin datos de Sell-Out por posición todavía.</p>
+              </div>
+            </div>
+          )}
+        </CardContent>
+      </Card>
+
+      {/* ── Precio Correcto: PVP en campo vs objetivo por ciudad (Vista A/B) ── */}
+      <Card className="mb-6 print-avoid-break">
+        <CardHeader className="flex flex-row items-start justify-between gap-3 space-y-0">
+          <div>
+            <CardTitle>Precio Correcto (PVP en campo vs objetivo)</CardTitle>
+            <p className="text-xs text-slate-400 mt-1">
+              {precioVista === "A"
+                ? "Dirección de la desviación por ciudad: cuántos PDV están por debajo (subprecio), en el objetivo, o por encima (sobreprecio) del PVP de su ciudad."
+                : "Detalle: cada punto es el precio exacto reportado en un PDV (última visita), por presentación, coloreado según su desviación vs el objetivo."}
+            </p>
+          </div>
+          <div className="flex flex-col items-end gap-2 print:hidden">
+            <div className="flex flex-wrap items-center justify-end gap-2">
+              {/* Toggle de vista: A = dirección de desviación · B = detalle de precios. */}
+              <div className="flex rounded-lg border border-slate-200 overflow-hidden text-xs font-medium">
+                {(
+                  [
+                    ["A", "Dirección"],
+                    ["B", "Detalle"],
+                  ] as const
+                ).map(([key, label]) => (
+                  <button
+                    key={key}
+                    onClick={() => setPrecioVista(key)}
+                    className={`px-3 py-1.5 transition-colors ${
+                      precioVista === key ? "bg-slate-900 text-white" : "bg-white text-slate-500 hover:bg-slate-50"
+                    }`}
+                  >
+                    {label}
+                  </button>
+                ))}
+              </div>
+              {/* Filtro por ciudad. */}
+              <select
+                value={precioCiudad}
+                onChange={(e) => setPrecioCiudad(e.target.value)}
+                className="text-sm border border-slate-200 rounded-lg px-3 py-1.5 bg-white text-slate-700"
+              >
+                <option value="TODAS">Todas las ciudades</option>
+                {precioCiudades.map((c) => (
+                  <option key={c} value={c}>
+                    {c}
+                  </option>
+                ))}
+              </select>
+            </div>
+            <ExportExcelButton
+              filename={`Precio Correcto${precioCiudad !== "TODAS" ? ` — ${precioCiudad}` : ""}`}
+              rows={precioFiltrado}
+              columns={[
+                { header: "Ciudad", value: (r) => r.ciudad, width: 14 },
+                { header: "Cliente", value: (r) => r.cliente, width: 34 },
+                { header: "Presentación", value: (r) => r.presentacion, width: 14 },
+                { header: "Precio (USD)", value: (r) => r.precio, width: 14 },
+                { header: "Objetivo (USD)", value: (r) => r.target, width: 14 },
+                { header: "Desviación (USD)", value: (r) => Math.round((r.precio - r.target) * 100) / 100, width: 16 },
+                { header: "Estado", value: (r) => r.estado, width: 14 },
+              ]}
+            />
+          </div>
+        </CardHeader>
+        <CardContent>
+          {precioFiltrado.length > 0 ? (
+            <PrecioCorrectoChart rows={precioFiltrado} vista={precioVista} />
+          ) : (
+            <div className="h-[300px] flex items-center justify-center text-slate-400">
+              <div className="text-center">
+                <p className="text-4xl mb-2">🏷️</p>
+                <p>Sin precios capturados en campo todavía.</p>
               </div>
             </div>
           )}

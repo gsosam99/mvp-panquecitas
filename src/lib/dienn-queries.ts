@@ -1,5 +1,6 @@
 import { createSupabaseServiceClient } from "@/lib/supabase/server";
 import { PRODUCT_IDS, VARIANT_IDS } from "@/data/catalog";
+import { PVP_TARGETS, PVP_TOLERANCE } from "@/data/pvp-thresholds";
 import { DIAS_HABILES_POR_SEMANA } from "@/lib/business-days";
 import {
   PILOT_SECTORS,
@@ -1239,6 +1240,85 @@ const CIUDAD_POR_SECTOR: Record<Sector, string> = {
   cumana: "Cumaná",
   barquisimeto_este: "Cabudare",
 };
+
+// ── 12. Precio Correcto (PVP capturado en campo vs. objetivo por ciudad) ──
+// Compara el precio de anaquel de la última visita (mercaderista_visits, en USD)
+// contra el PVP objetivo de la ciudad (PVP_TARGETS). Cada fila es una
+// presentación evaluable (400g/800g) de un PDV, con su dirección de desviación.
+export type EstadoPrecio = "SUBPRECIO" | "CORRECTO" | "SOBREPRECIO";
+
+export interface PrecioCorrectoRow {
+  locationId: string;
+  cliente: string;
+  ciudad: string;
+  presentacion: "400g" | "800g";
+  precio: number; // USD reportado en campo
+  target: number; // USD objetivo de la ciudad
+  estado: EstadoPrecio;
+}
+
+function clasificarPrecio(observado: number, target: number): EstadoPrecio {
+  if (Math.abs(observado - target) <= PVP_TOLERANCE) return "CORRECTO";
+  return observado > target ? "SOBREPRECIO" : "SUBPRECIO";
+}
+
+export async function getPrecioCorrecto(): Promise<PrecioCorrectoRow[]> {
+  const universo = await getUniverseLocations();
+  if (universo.length === 0) return [];
+
+  const supabase = createSupabaseServiceClient();
+  const { data: visitsData } = await supabase
+    .from("mercaderista_visits")
+    .select("location_id, created_at, price_400, price_400_na, price_800, price_800_na")
+    .order("created_at", { ascending: false });
+
+  type Visita = {
+    location_id: string;
+    price_400: number | null;
+    price_400_na: boolean | null;
+    price_800: number | null;
+    price_800_na: boolean | null;
+  };
+  // Última visita por PDV (orden desc → la primera que se ve es la más reciente).
+  const lastVisit = new Map<string, Visita>();
+  for (const v of (visitsData ?? []) as Visita[]) {
+    if (!lastVisit.has(v.location_id)) lastVisit.set(v.location_id, v);
+  }
+
+  const rows: PrecioCorrectoRow[] = [];
+  for (const l of universo) {
+    const sector = sectorGroup(l.oficina_venta);
+    if (!sector) continue; // fuera de las ciudades piloto → sin objetivo, no evaluable
+    const ciudad = CIUDAD_POR_SECTOR[sector];
+    const target = PVP_TARGETS[sector];
+    const v = lastVisit.get(l.id);
+    if (!v) continue;
+
+    if (!v.price_400_na && v.price_400 != null) {
+      rows.push({
+        locationId: l.id,
+        cliente: l.name,
+        ciudad,
+        presentacion: "400g",
+        precio: v.price_400,
+        target: target.p400,
+        estado: clasificarPrecio(v.price_400, target.p400),
+      });
+    }
+    if (!v.price_800_na && v.price_800 != null) {
+      rows.push({
+        locationId: l.id,
+        cliente: l.name,
+        ciudad,
+        presentacion: "800g",
+        precio: v.price_800,
+        target: target.p800,
+        estado: clasificarPrecio(v.price_800, target.p800),
+      });
+    }
+  }
+  return rows;
+}
 
 /** "YYYY-MM-DD" → día ISO de la semana (1=Lunes … 7=Domingo), en UTC (determinista). */
 function isoWeekday(dateStr: string): number {
