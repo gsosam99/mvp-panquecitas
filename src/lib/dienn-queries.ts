@@ -154,22 +154,26 @@ export async function getTotalToneladasPedidas(sector?: Sector): Promise<number>
 }
 
 /**
- * "Volumen facturado" TOTAL — Cantidad Facturada cruda de Pedidos y Facturado,
- * SIN filtrar por variant_id (a diferencia de getTotalToneladas, que solo suma
- * las presentaciones mapeadas y por eso subcuenta). Mismo criterio que
- * getTotalToneladasPedidas, pero sobre cantidad_facturada_kg.
+ * "Volumen facturado" — suma de la columna Cantidad Facturada del reporte
+ * Pedidos y Facturado (Panquecitas). Es "la cantidad total vendida/facturada".
+ * En TOTAL suma TODO lo guardado (la tabla ya solo tiene clientes de la cartera
+ * + distribuidoras — ver handleFacturacionUpload); NO se vuelve a filtrar por
+ * sector piloto, porque eso dejaba fuera a distribuidoras con oficina de venta
+ * distinta y subcontaba. Por ciudad sí se acota a los PDV de ese sector.
  */
 export async function getTotalFacturadoToneladas(sector?: Sector): Promise<number> {
-  const ids = await getPedidosFacturadosLocationIds(sector);
   const supabase = createSupabaseServiceClient();
   const { data } = await supabase
     .from("sap_pedidos_facturados")
     .select("cantidad_facturada_kg, location_id")
     .eq("product_id", PRODUCT_IDS.PANQUECITAS);
+  const rows = (data ?? []) as { cantidad_facturada_kg: number; location_id: string }[];
 
+  const ids = sector ? await getPedidosFacturadosLocationIds(sector) : null;
   let facturadaKgTotal = 0;
-  for (const r of (data ?? []) as { cantidad_facturada_kg: number; location_id: string }[]) {
-    if (ids.has(r.location_id)) facturadaKgTotal += r.cantidad_facturada_kg;
+  for (const r of rows) {
+    if (ids && !ids.has(r.location_id)) continue; // por ciudad: solo ese sector
+    facturadaKgTotal += r.cantidad_facturada_kg;
   }
   return Math.round((facturadaKgTotal / 1000) * 100) / 100;
 }
