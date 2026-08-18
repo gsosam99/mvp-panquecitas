@@ -17,6 +17,7 @@ import { RoundLegend } from "@/components/dashboard/RoundLegend";
 import { SellOutResumenChart } from "@/components/dashboard/SellOutResumenChart";
 import { PrecioCorrectoChart } from "@/components/dashboard/PrecioCorrectoChart";
 import { RankingSegmentoChart } from "@/components/dashboard/RankingSegmentoChart";
+import { Rendimiento3MChart } from "@/components/dashboard/Rendimiento3MChart";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Separator } from "@/components/ui/separator";
 import {
@@ -48,7 +49,9 @@ import type {
   CarteraSegmentoResult,
   CarteraTotalDiaPunto,
   PrecioCorrectoRow,
+  Pan3MPoblacion,
   RankingSegmentoRow,
+  Rendimiento3MResult,
   MaterialPopPreciadorResult,
   RunningVentasResult,
   StockOutClientePoint,
@@ -89,6 +92,8 @@ export interface SectorBundle {
   detalleSegmentos: DetalleSegmentoRow[];
   /** Ranking de volumen de Panquecitas por "Segmento de Clientes 2" de la cartera. */
   rankingSegmentos: RankingSegmentoRow[];
+  /** Rendimiento diario vs. promedio histórico 3M de Harina PAN, por población. */
+  rendimiento3M: Record<Pan3MPoblacion, Rendimiento3MResult>;
   /** Conversión de degustaciones (tickets recibidos ÷ entregados) de la ciudad/sector. */
   conversionDegustaciones: { samples: number; conversions: number; rate: number };
 }
@@ -257,6 +262,10 @@ export function DiennDashboardClient({
   const [precioVista, setPrecioVista] = useState<"A" | "B">("A");
   const [precioCiudad, setPrecioCiudad] = useState<string>("TODAS");
   const [panPoblacion, setPanPoblacion] = useState<PanComparisonPoblacion>("clientes");
+  // Gráfico de rendimiento diario vs. promedio 3M: población comparada y
+  // visibilidad de la línea fija de PAN (su escala aplasta la de Panquecitas).
+  const [pan3mPoblacion, setPan3mPoblacion] = useState<Pan3MPoblacion>("clientes");
+  const [showPanDiario, setShowPanDiario] = useState(true);
   const [panGranularity, setPanGranularity] = useState<PanComparisonGranularity>("month");
   const bundle = bundles[filter];
 
@@ -601,6 +610,97 @@ export function DiennDashboardClient({
                 <p className="text-4xl mb-2">📊</p>
                 <p>Sin datos de Panquecitas o Harina PAN todavía.</p>
                 <p className="text-xs mt-1">Carga Radar de ambos productos (Panquecitas y Harina PAN).</p>
+              </div>
+            </div>
+          )}
+        </CardContent>
+      </Card>
+
+      {/* ── Rendimiento diario vs. promedio histórico 3 Meses ──────────── */}
+      <Card className="mb-6 print-avoid-break">
+        <CardHeader className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between space-y-0">
+          <div>
+            <CardTitle>Rendimiento Diario vs. Promedio Histórico (3 Meses)</CardTitle>
+            <p className="text-xs text-slate-400 mt-1">
+              Venta diaria de Panquecitas (Carga Radar) contra el promedio de ventas diarias de Harina PAN de los
+              últimos 3 meses, que sale de la carga aparte{" "}
+              <span className="font-medium">Radar últimos 3 Meses</span>. La línea continua es ese promedio y la
+              punteada su 4%. El porcentaje sobre cada punto es el ratio del día (Panquecitas ÷ promedio PAN).
+            </p>
+          </div>
+          <div className="flex flex-wrap items-center gap-2 print:hidden">
+            {/* Filtro de comparación: PAN Cliente vs PAN Universo. */}
+            <div className="flex rounded-lg border border-slate-200 overflow-hidden text-xs font-medium">
+              {(
+                [
+                  ["clientes", "PAN Cliente"],
+                  ["universo", "PAN Universo"],
+                ] as const
+              ).map(([key, label]) => (
+                <button
+                  key={key}
+                  onClick={() => setPan3mPoblacion(key)}
+                  className={`px-3 py-1.5 transition-colors ${
+                    pan3mPoblacion === key ? "bg-slate-900 text-white" : "bg-white text-slate-500 hover:bg-slate-50"
+                  }`}
+                >
+                  {label}
+                </button>
+              ))}
+            </div>
+            {/* Apaga la línea fija de PAN sin perder el resto del estado. */}
+            <button
+              onClick={() => setShowPanDiario((v) => !v)}
+              title="Muestra u oculta la línea del promedio diario de Harina PAN"
+              className={`px-3 py-1.5 rounded-lg border text-xs font-medium transition-colors ${
+                showPanDiario
+                  ? "border-slate-900 bg-slate-900 text-white"
+                  : "border-slate-200 bg-white text-slate-500 hover:bg-slate-50"
+              }`}
+            >
+              Línea PAN: {showPanDiario ? "Visible" : "Oculta"}
+            </button>
+            <ExportExcelButton
+              filename={`Rendimiento diario vs promedio 3M — ${filtroTexto}`}
+              rows={bundle.rendimiento3M[pan3mPoblacion].puntos}
+              columns={[
+                { header: "Día", value: (r) => r.dia, width: 14 },
+                { header: "Panquecitas (kg)", value: (r) => r.panquecitasKg, width: 18 },
+                { header: "Ratio vs promedio PAN (%)", value: (r) => r.ratioPct, width: 26 },
+              ]}
+            />
+          </div>
+        </CardHeader>
+        <CardContent>
+          {bundle.rendimiento3M[pan3mPoblacion].puntos.length > 0 ? (
+            <>
+              <Rendimiento3MChart data={bundle.rendimiento3M[pan3mPoblacion]} showPanDiario={showPanDiario} />
+              <p className="text-xs text-slate-400 mt-2">
+                Promedio PAN 3M:{" "}
+                <span className="font-medium text-slate-600">
+                  {bundle.rendimiento3M[pan3mPoblacion].promedio3M.toLocaleString("es-VE", {
+                    maximumFractionDigits: 1,
+                  })}{" "}
+                  kg/día
+                </span>{" "}
+                ({bundle.rendimiento3M[pan3mPoblacion].totalPanKg.toLocaleString("es-VE", {
+                  maximumFractionDigits: 0,
+                })}{" "}
+                kg ÷ {bundle.rendimiento3M[pan3mPoblacion].diasPeriodo} días) · Meta 4%:{" "}
+                <span className="font-medium text-emerald-700">
+                  {bundle.rendimiento3M[pan3mPoblacion].meta4Pct.toLocaleString("es-VE", {
+                    maximumFractionDigits: 1,
+                  })}{" "}
+                  kg/día
+                </span>
+              </p>
+            </>
+          ) : (
+            <div className="h-[340px] flex items-center justify-center text-slate-400">
+              <div className="text-center">
+                <p className="text-4xl mb-2">📉</p>
+                <p>Falta cargar el reporte &quot;Radar últimos 3 Meses&quot;.</p>
+                <p className="text-xs mt-1">Se carga en el menú &quot;Radar 3 Meses&quot;.</p>
               </div>
             </div>
           )}

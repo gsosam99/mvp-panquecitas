@@ -14,6 +14,7 @@ const NAV_ITEMS: Record<DashboardRole, { href: string; label: string }[]> = {
   DIENN: [
     { href: '/dashboard', label: 'Dashboard' },
     { href: '/sap-upload', label: 'Carga Radar' },
+    { href: '/radar-3m', label: 'Radar 3 Meses' },
     { href: '/pedidos-pendientes', label: 'Pedidos y Facturado' },
     { href: '/motivos-no-venta', label: 'Motivos de No Venta' },
     { href: '/despachos', label: 'Despachos SAP' },

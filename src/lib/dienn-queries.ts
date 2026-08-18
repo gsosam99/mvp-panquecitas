@@ -654,6 +654,137 @@ export async function getVentaRecompraActivacion(
   };
 }
 
+
+// ── 4d. Rendimiento diario vs. promedio histórico 3 Meses (punto 1) ─
+// Compara la venta diaria de Panquecitas (Carga Radar) contra el promedio de
+// ventas diarias de Harina PAN de los últimos 3 meses, que viene de la carga
+// aparte "Radar últimos 3 Meses" (radar_3m_records, migration 017).
+//
+// Dos referencias FIJAS (no varían día a día, por eso son líneas rectas):
+//   - promedio3M: total de Harina PAN del reporte ÷ días que cubre el reporte.
+//   - meta4Pct:   promedio3M × 0,04.
+// Y por cada día, el ratio = Panquecitas del día ÷ promedio3M × 100.
+//
+// El filtro de población cambia QUÉ clientes entran en el promedio de PAN:
+//   - "clientes": solo los que tienen Panquecitas (Radar > 0).
+//   - "universo": los 358 del piloto.
+
+export type Pan3MPoblacion = "clientes" | "universo";
+
+export interface Rendimiento3MPunto {
+  dia: string; // "YYYY-MM-DD"
+  label: string;
+  panquecitasKg: number;
+  /** Panquecitas del día ÷ promedio3M × 100. */
+  ratioPct: number;
+}
+
+export interface Rendimiento3MResult {
+  /** Promedio de ventas diarias de Harina PAN de los 3 meses (kg/día). */
+  promedio3M: number;
+  /** 4% de ese promedio (kg/día) — la línea punteada de referencia. */
+  meta4Pct: number;
+  /** Días que cubre el reporte de 3 meses (denominador del promedio). */
+  diasPeriodo: number;
+  /** Total de Harina PAN del reporte, para poder auditar el promedio. */
+  totalPanKg: number;
+  puntos: Rendimiento3MPunto[];
+}
+
+const RENDIMIENTO_3M_VACIO: Rendimiento3MResult = {
+  promedio3M: 0,
+  meta4Pct: 0,
+  diasPeriodo: 0,
+  totalPanKg: 0,
+  puntos: [],
+};
+
+export async function getRendimiento3M(
+  poblacion: Pan3MPoblacion,
+  sector?: Sector
+): Promise<Rendimiento3MResult> {
+  const universoTotal = await getUniverseLocations();
+  const universo = sector ? universoTotal.filter((l) => sectorGroup(l.oficina_venta) === sector) : universoTotal;
+  if (universo.length === 0) return RENDIMIENTO_3M_VACIO;
+  const idsUniverso = new Set(universo.map((l) => l.id));
+
+  const supabase = createSupabaseServiceClient();
+
+  // Harina PAN del reporte de 3 meses. Si la tabla todavía no existe (falta el
+  // migration 017) o no se ha cargado nada, el gráfico queda vacío en vez de
+  // romper la página.
+  const { data: pan3mData } = await supabase
+    .from("radar_3m_records")
+    .select("location_id, product_id, quantity_kg, date_of_sale")
+    .eq("product_id", PRODUCT_IDS.HARINA_PAN);
+
+  const pan3m = ((pan3mData ?? []) as {
+    location_id: string;
+    quantity_kg: number;
+    date_of_sale: string;
+  }[]).filter((r) => idsUniverso.has(r.location_id));
+  if (pan3m.length === 0) return RENDIMIENTO_3M_VACIO;
+
+  // Panquecitas por día (Carga Radar viva), acotadas al sector.
+  const panqTotals = await getSellInTotalsByLocation(PRODUCT_IDS.PANQUECITAS);
+  const { data: panqData } = await supabase
+    .from("sap_sell_in_records")
+    .select("location_id, quantity_kg, date_of_sale")
+    .eq("product_id", PRODUCT_IDS.PANQUECITAS)
+    .gt("quantity_kg", 0)
+    .order("date_of_sale", { ascending: true });
+
+  const panq = ((panqData ?? []) as {
+    location_id: string;
+    quantity_kg: number;
+    date_of_sale: string;
+  }[]).filter((r) => idsUniverso.has(r.location_id));
+
+  // Población del promedio de PAN: todos, o solo los que compran Panquecitas.
+  const idsPan =
+    poblacion === "universo"
+      ? idsUniverso
+      : new Set(universo.filter((l) => (panqTotals.get(l.id) ?? 0) > 0).map((l) => l.id));
+
+  const panFiltrado = pan3m.filter((r) => idsPan.has(r.location_id));
+  const totalPanKg = panFiltrado.reduce((s, r) => s + Number(r.quantity_kg), 0);
+
+  // Días del período: de la primera a la última fecha del reporte de 3 meses.
+  const fechasPan = panFiltrado.map((r) => r.date_of_sale.slice(0, 10)).sort();
+  let diasPeriodo = 1;
+  if (fechasPan.length > 0) {
+    const primera = Date.parse(`${fechasPan[0]}T00:00:00Z`);
+    const ultima = Date.parse(`${fechasPan[fechasPan.length - 1]}T00:00:00Z`);
+    diasPeriodo = Math.max(1, Math.round((ultima - primera) / 86_400_000) + 1);
+  }
+
+  const promedio3M = totalPanKg / diasPeriodo;
+  if (promedio3M <= 0) return RENDIMIENTO_3M_VACIO;
+
+  // Panquecitas agregadas por día.
+  const kgPorDia = new Map<string, number>();
+  for (const r of panq) {
+    const dia = r.date_of_sale.slice(0, 10);
+    kgPorDia.set(dia, (kgPorDia.get(dia) ?? 0) + Number(r.quantity_kg));
+  }
+
+  const puntos: Rendimiento3MPunto[] = [...kgPorDia.entries()]
+    .sort(([a], [b]) => a.localeCompare(b))
+    .map(([dia, kg]) => ({
+      dia,
+      label: bucketLabelFor(dia, "day"),
+      panquecitasKg: Math.round(kg * 10) / 10,
+      ratioPct: Math.round((kg / promedio3M) * 100 * 10) / 10,
+    }));
+
+  return {
+    promedio3M: Math.round(promedio3M * 10) / 10,
+    meta4Pct: Math.round(promedio3M * 0.04 * 10) / 10,
+    diasPeriodo,
+    totalPanKg: Math.round(totalPanKg * 10) / 10,
+    puntos,
+  };
+}
 // ── 5. Cobertura y Comunicación por sector (semanal) ───────────────
 // Ver decisión #11: no hay datos reales de campañas de comunicación ni
 // metas por ciudad, así que se usa un proxy con datos existentes.
