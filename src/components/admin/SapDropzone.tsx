@@ -116,6 +116,7 @@ export function SapDropzone({ mode, onCommitSuccess }: SapDropzoneProps) {
         non_positive_skipped?: number;
         locations_upserted?: number;
         duplicates_skipped?: number;
+        fechas_eliminadas?: number;
         clientes_fuera_cartera?: number;
         error?: string;
         detail?: string;
@@ -141,9 +142,14 @@ export function SapDropzone({ mode, onCommitSuccess }: SapDropzoneProps) {
         const staleNote = data.stale_skipped ? ` · ${data.stale_skipped} filas obsoletas ignoradas` : "";
         const deletedNote = data.deleted ? ` · ${data.deleted} acumulados eliminados (crédito/devolución dejó el mes en 0)` : "";
         const nonPositiveNote = data.non_positive_skipped ? ` · ${data.non_positive_skipped} filas en 0 o negativo sin acumulado previo` : "";
+        // El Radar se exporta con todo el período: las fechas de recompra de
+        // cargas anteriores se REEMPLAZAN, no se suman (ver handleRadarUpload).
+        const fechasNote = data.fechas_eliminadas
+          ? ` · ${data.fechas_eliminadas} fechas de cargas anteriores reemplazadas`
+          : "";
         onCommitSuccess(batchId, (data.inserted ?? 0) + (data.updated ?? 0), data.locations_upserted ?? 0);
         setDoneSummary(
-          `${data.inserted} registros nuevos${updatedNote}${staleNote}${deletedNote}${nonPositiveNote} · ${data.locations_upserted} localidades actualizadas${foraCarteraNote}`
+          `${data.inserted} registros nuevos${updatedNote}${staleNote}${deletedNote}${nonPositiveNote}${fechasNote} · ${data.locations_upserted} localidades actualizadas${foraCarteraNote}`
         );
         toast.success(`${data.inserted} registros nuevos${updatedNote}${foraCarteraNote}`);
       }

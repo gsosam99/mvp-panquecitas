@@ -267,10 +267,21 @@ async function handleRadarUpload(supabase: any, rows: ParsedSapRadarRow[], batch
   // materiales mapeados. NO es crítico: si la tabla no existe todavía (falta
   // correr el migration 013) o falla el insert, se registra y se sigue — la
   // carga del acumulado no se rompe.
+  //
+  // REEMPLAZO, NO ACUMULACIÓN (decisión con DIENN, 18-08-2026): el reporte
+  // Radar se exporta con todo el período, así que las fechas del archivo recién
+  // cargado son la única verdad. Antes cada carga hacía upsert y nunca se
+  // borraba nada, ni siquiera al borrar el batch — las fechas de reportes
+  // corregidos seguían contando y la recompra subía sola.
+  //
+  // Orden a propósito: primero se insertan/marcan las nuevas y DESPUÉS se
+  // borran las que quedaron de cargas anteriores. Así, si el insert falla, no
+  // se pierde lo que ya había (no hay transacción vía REST).
   let fechasInserted = 0;
+  let fechasEliminadas = 0;
   try {
     const seen = new Set<string>();
-    const fechaRows: { location_id: string; product_id: string; fecha: string }[] = [];
+    const fechaRows: { location_id: string; product_id: string; fecha: string; upload_batch_id: string }[] = [];
     for (const f of fechas) {
       const location_id = knownLocationIds.get(f.sap_code);
       const product_id = SAP_RADAR_MATERIAL_PRODUCT_MAP[f.material_code];
@@ -278,14 +289,28 @@ async function handleRadarUpload(supabase: any, rows: ParsedSapRadarRow[], batch
       const key = `${location_id}|${product_id}|${f.fecha}`;
       if (seen.has(key)) continue;
       seen.add(key);
-      fechaRows.push({ location_id, product_id, fecha: f.fecha });
+      fechaRows.push({ location_id, product_id, fecha: f.fecha, upload_batch_id: batchId });
     }
     if (fechaRows.length > 0) {
+      // ignoreDuplicates:false → una fecha que ya existía queda marcada con el
+      // batch nuevo, y por eso no la borra el paso siguiente.
       const { error: fechasError } = await supabase
         .from("radar_ventas_fechas")
-        .upsert(fechaRows, { onConflict: "location_id,product_id,fecha", ignoreDuplicates: true });
+        .upsert(fechaRows, { onConflict: "location_id,product_id,fecha", ignoreDuplicates: false });
       if (fechasError) throw fechasError;
       fechasInserted = fechaRows.length;
+
+      // Todo lo que no vino en este archivo (batch anterior o filas viejas sin
+      // batch) se elimina, acotado a los productos que sí trae el archivo.
+      const productIds = [...new Set(fechaRows.map((r) => r.product_id))];
+      const { data: borradas, error: staleError } = await supabase
+        .from("radar_ventas_fechas")
+        .delete()
+        .in("product_id", productIds)
+        .or(`upload_batch_id.is.null,upload_batch_id.neq.${batchId}`)
+        .select("id");
+      if (staleError) throw staleError;
+      fechasEliminadas = (borradas ?? []).length;
     }
   } catch (fechasErr) {
     console.error("[handleRadarUpload] no se pudieron guardar las fechas de recompra (no crítico):", fechasErr);
@@ -295,6 +320,7 @@ async function handleRadarUpload(supabase: any, rows: ParsedSapRadarRow[], batch
     format: "radar",
     inserted: toInsert.length,
     fechas_registradas: fechasInserted,
+    fechas_eliminadas: fechasEliminadas,
     updated: toUpdate.length,
     deleted: toDelete.length,
     stale_skipped: staleSkipped,
@@ -471,14 +497,23 @@ export async function DELETE(req: Request) {
     // Facturado (sap_pedidos_facturados), nunca a ambas — borrar en las dos
     // es inofensivo porque el id no calza en la tabla que no le corresponde.
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    const [sellInResult, pedidosFacturadosResult] = await Promise.all([
+    const [sellInResult, pedidosFacturadosResult, fechasResult] = await Promise.all([
       (supabase as any).from("sap_sell_in_records").delete().eq("upload_batch_id", batchId),
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
       (supabase as any).from("sap_pedidos_facturados").delete().eq("upload_batch_id", batchId),
+      // Las fechas de recompra de ese mismo cargue: sin esto quedaban huérfanas
+      // y seguían inflando la tasa de recompra aunque el batch ya no exista.
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      (supabase as any).from("radar_ventas_fechas").delete().eq("upload_batch_id", batchId),
     ]);
 
     if (sellInResult.error) throw sellInResult.error;
     if (pedidosFacturadosResult.error) throw pedidosFacturadosResult.error;
+    // No crítico: si falta el migration 015 la columna no existe todavía y el
+    // borrado del batch no tiene por qué fallar por eso.
+    if (fechasResult.error) {
+      console.error("[DELETE /api/sap-upload] no se pudieron borrar las fechas de recompra:", fechasResult.error);
+    }
     return Response.json({ ok: true });
   } catch (error) {
     console.error("[DELETE /api/sap-upload]", error);
