@@ -49,6 +49,8 @@ export interface Location {
   centro_poblado: string | null;
   municipio: string | null;
   tipo_cliente: string | null;
+  /** Segmentación de cartera ("Segmento de Clientes 2"), distinta de tipo_cliente. */
+  segmento_cliente: string | null;
   oficina_venta: string | null;
   /** Grupo vendedor de SAP (ej. U29, U30) — subdivisión dentro de la oficina. */
   grupo_vendedor: string | null;
@@ -241,6 +243,8 @@ export interface ParsedCarteraRow {
   fuente_sell_out?: FuenteSellOut;
   /** Modelo de atención de la columna "Directo o Indirecto" (Directo/Indirecto/Mixto). "" si la columna no está. */
   esquema_atencion: string;
+  /** "Segmento de Clientes 2" de la Cartera Consolidada. "" si la columna no está. */
+  segmento_cliente: string;
 }
 
 export interface CarteraParseResult {

@@ -1,5 +1,5 @@
 import { createSupabaseServiceClient } from "@/lib/supabase/server";
-import { LOCATION_COLUMNS } from "@/lib/location-columns";
+import { LOCATION_COLUMNS, LOCATION_COLUMNS_CON_SEGMENTO } from "@/lib/location-columns";
 import type { Location } from "@/types";
 
 // Sectores de venta piloto evaluados por DIENN para el modelo de escalamiento
@@ -29,7 +29,14 @@ import { sectorGroup as _sectorGroup, isExcludedDistribuidor as _isExcludedDistr
 export async function getUniverseLocations(): Promise<Location[]> {
   const supabase = createSupabaseServiceClient();
 
-  const { data } = await supabase.from("locations").select(LOCATION_COLUMNS);
+  // segmento_cliente es columna nueva (migration 016). Si todavía no se corrió,
+  // la query falla completa y el dashboard se queda sin datos, así que se
+  // reintenta sin ella en vez de devolver vacío.
+  let { data } = await supabase.from("locations").select(LOCATION_COLUMNS_CON_SEGMENTO);
+  if (!data) {
+    const fallback = await supabase.from("locations").select(LOCATION_COLUMNS);
+    data = fallback.data;
+  }
 
   // Filtrado en JS (no en la query) porque oficina_venta puede venir en
   // distinta capitalización según la carga — ver sectorGroup(). Además se

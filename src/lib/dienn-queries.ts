@@ -549,9 +549,9 @@ export async function getPenetracionRadarVsHpm(sector?: Sector): Promise<Penetra
 // Todo desde Carga Radar (sap_sell_in_records) de Panquecitas, acumulado
 // en el tiempo (running total), para Día / Semana / Mes:
 //   - ventaAcumuladaKg (barras, eje kg): Σ Radar hasta el bucket.
-//   - recompraPct (línea): ventas repetidas / total de ventas. Cada FECHA
-//     distinta con venta Radar por cliente (tabla radar_ventas_fechas) es una
-//     "venta radar"; las que exceden la primera de cada cliente son recompra.
+//   - recompraPct (línea): tasa de clientes recurrentes — clientes con ≥2 FECHAS
+//     distintas de venta Radar (tabla radar_ventas_fechas) ÷ clientes con al
+//     menos una. Conteo de clientes únicos, no de ventas.
 //     Necesita el migration 013 y re-cargar los reportes de Radar.
 //   - activacionPct (línea): clientes activados (Radar>0) / cartera fija
 //     (358 en TOTAL, o el universo del sector con filtro).
@@ -582,27 +582,30 @@ function computeVentaRecompraActivacionPoints(
     // Activación: clientes con al menos una venta Radar hasta el bucket.
     const activados = new Set(rowsUpToBucket.map((r) => r.location_id)).size;
 
-    // Recompra (por FECHAS de radar_ventas_fechas): cada fecha distinta con
-    // venta Radar por cliente es una "venta radar". Numerador = ventas repetidas
-    // (las que exceden la primera de cada cliente); denominador = total ventas.
+    // Recompra = TASA DE CLIENTES RECURRENTES (punto 3 del documento de cambios,
+    // 18-08-2026): clientes con ≥2 fechas distintas de venta Radar ÷ clientes con
+    // al menos una. Es un conteo de clientes únicos, no de ventas — antes era
+    // "ventas repetidas ÷ total de ventas", que un cliente muy recurrente podía
+    // inflar solo. Las fechas salen de radar_ventas_fechas.
     const fechasByLoc = new Map<string, Set<string>>();
     for (const f of fechasRows) {
       if (bucketKeyFor(f.fecha, granularity) > bucket) continue;
       if (!fechasByLoc.has(f.location_id)) fechasByLoc.set(f.location_id, new Set());
       fechasByLoc.get(f.location_id)!.add(f.fecha);
     }
-    let totalVentas = 0;
-    let ventasRepetidas = 0;
+    let clientesConVenta = 0;
+    let clientesRecurrentes = 0;
     for (const set of fechasByLoc.values()) {
-      totalVentas += set.size;
-      ventasRepetidas += Math.max(set.size - 1, 0);
+      clientesConVenta += 1;
+      if (set.size >= 2) clientesRecurrentes += 1;
     }
 
     points.push({
       bucket,
       label: bucketLabelFor(bucket, granularity),
       ventaAcumuladaKg: Math.round(ventaAcumuladaKg * 10) / 10,
-      recompraPct: totalVentas > 0 ? Math.round((ventasRepetidas / totalVentas) * 1000) / 10 : 0,
+      recompraPct:
+        clientesConVenta > 0 ? Math.round((clientesRecurrentes / clientesConVenta) * 1000) / 10 : 0,
       activacionPct: Math.round((activados / universoSize) * 1000) / 10,
     });
   }
@@ -762,6 +765,82 @@ export interface DetalleSegmentoRow {
   hpmTotalPct: number;
   /** Volumen de Panquecitas del segmento (Carga Radar), en toneladas. */
   panquecitasTon: number;
+}
+
+// ── 6b. Ranking de Volumen por Segmento (punto 2, 18-08-2026) ──────
+// Agrupa por "Segmento de Clientes 2" de la Cartera Consolidada
+// (locations.segmento_cliente, migration 016) — NO por tipo_cliente, que es el
+// giro del negocio y ya alimenta la tabla Detalle de Clientes.
+//
+// Métrica principal (ranking, de mayor a menor): volumen total de Panquecitas
+// del segmento según Carga Radar.
+// Métrica secundaria: promedio de ventas diarias por cliente del segmento =
+// volumen total ÷ clientes CON VENTA del segmento ÷ días del período con Radar.
+// Se divide entre los clientes con venta (no la cartera completa del segmento)
+// para que el promedio describa a quien efectivamente compra; los días son los
+// del rango cubierto por el Radar cargado, de la primera a la última fecha.
+
+export interface RankingSegmentoRow {
+  segmento: string;
+  volumenKg: number;
+  volumenTon: number;
+  /** Clientes del segmento con Radar > 0. */
+  clientesConVenta: number;
+  /** Clientes del segmento en la cartera (con o sin venta). */
+  clientesCartera: number;
+  /** Volumen ÷ clientes con venta ÷ días del período (kg/día/cliente). */
+  promedioDiarioPorCliente: number;
+}
+
+export async function getRankingVolumenPorSegmento(sector?: Sector): Promise<RankingSegmentoRow[]> {
+  const universoTotal = await getUniverseLocations();
+  const universo = sector ? universoTotal.filter((l) => sectorGroup(l.oficina_venta) === sector) : universoTotal;
+  if (universo.length === 0) return [];
+
+  const panqRadarTotals = await getSellInTotalsByLocation(PRODUCT_IDS.PANQUECITAS);
+
+  // Días del período: de la primera a la última fecha con Radar de Panquecitas.
+  // Si solo hay un día (o ninguno), se usa 1 para no dividir entre cero.
+  const supabase = createSupabaseServiceClient();
+  const { data: fechasData } = await supabase
+    .from("sap_sell_in_records")
+    .select("date_of_sale")
+    .eq("product_id", PRODUCT_IDS.PANQUECITAS)
+    .gt("quantity_kg", 0)
+    .order("date_of_sale", { ascending: true });
+
+  const fechas = ((fechasData ?? []) as { date_of_sale: string }[]).map((r) => r.date_of_sale.slice(0, 10));
+  let diasPeriodo = 1;
+  if (fechas.length > 0) {
+    const primera = Date.parse(`${fechas[0]}T00:00:00Z`);
+    const ultima = Date.parse(`${fechas[fechas.length - 1]}T00:00:00Z`);
+    diasPeriodo = Math.max(1, Math.round((ultima - primera) / 86_400_000) + 1);
+  }
+
+  const bySegmento = new Map<string, Location[]>();
+  for (const l of universo) {
+    const seg = l.segmento_cliente?.trim() || "Sin segmento";
+    if (!bySegmento.has(seg)) bySegmento.set(seg, []);
+    bySegmento.get(seg)!.push(l);
+  }
+
+  const rows: RankingSegmentoRow[] = [];
+  for (const [segmento, locs] of bySegmento.entries()) {
+    const volumenKg = locs.reduce((s, l) => s + (panqRadarTotals.get(l.id) ?? 0), 0);
+    const conVenta = locs.filter((l) => (panqRadarTotals.get(l.id) ?? 0) > 0).length;
+
+    rows.push({
+      segmento,
+      volumenKg: Math.round(volumenKg * 10) / 10,
+      volumenTon: Math.round((volumenKg / 1000) * 100) / 100,
+      clientesConVenta: conVenta,
+      clientesCartera: locs.length,
+      promedioDiarioPorCliente:
+        conVenta > 0 ? Math.round((volumenKg / conVenta / diasPeriodo) * 100) / 100 : 0,
+    });
+  }
+
+  return rows.sort((a, b) => b.volumenKg - a.volumenKg);
 }
 
 export async function getDetalleClientesPorSegmento(sector?: Sector): Promise<DetalleSegmentoRow[]> {

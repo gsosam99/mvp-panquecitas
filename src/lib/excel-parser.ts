@@ -56,6 +56,12 @@ const CARTERA_HEADER_ALIASES: Record<keyof CarteraColumnMap, string[]> = {
   sap_code: ["ncliente", "nrocliente", "codigocliente", "codigosap", "sapcode"],
   name: ["nombre", "nombrecliente", "razonsocial"],
   tipo_cliente: ["tipodecliente"],
+  // Segmentación de cartera pedida por DIENN (punto 2, 18-08-2026). Solo se
+  // aceptan las variantes con el "2": el archivo trae también "Segmento de
+  // Clientes" (sin número) y, con el matching "primera columna que calza gana",
+  // agregar ese alias haría que se guardara la columna equivocada — mismo
+  // problema que ya pasó con "Ofic Ventas" vs "Oficina de ventas".
+  segmento_cliente: ["segmentodeclientes2", "segmentodecliente2", "segmentoclientes2", "segmento2"],
   // OJO: NO agregar "oficventas" aquí — es la forma normalizada de "Ofic
   // Ventas" (columna de CÓDIGO, ej. "N007"), una columna distinta de
   // "Oficina de ventas" (el NOMBRE del sector, ej. "CUMANA"). Como "Ofic
@@ -85,6 +91,7 @@ interface CarteraColumnMap {
   sap_code: number;
   name: number;
   tipo_cliente: number;
+  segmento_cliente: number;
   oficina_venta: number;
   centro_poblado: number;
   municipio: number;
@@ -187,6 +194,7 @@ export async function parseCarteraExcel(buffer: ArrayBuffer): Promise<CarteraPar
       asesor_encargado: String(col.asesor_encargado ? row.getCell(col.asesor_encargado).value ?? "" : "").trim(),
       fuente_sell_out: fuenteRaw.includes("B2B") || fuenteRaw.includes("REPORTADO") ? "Reportado_B2B" : undefined,
       esquema_atencion: String(col.esquema_atencion ? row.getCell(col.esquema_atencion).value ?? "" : "").trim(),
+      segmento_cliente: String(col.segmento_cliente ? row.getCell(col.segmento_cliente).value ?? "" : "").trim(),
     });
   });
 

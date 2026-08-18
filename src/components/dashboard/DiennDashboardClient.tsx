@@ -16,6 +16,7 @@ import { PanVsHarinaPanChart } from "@/components/dashboard/PanVsHarinaPanChart"
 import { RoundLegend } from "@/components/dashboard/RoundLegend";
 import { SellOutResumenChart } from "@/components/dashboard/SellOutResumenChart";
 import { PrecioCorrectoChart } from "@/components/dashboard/PrecioCorrectoChart";
+import { RankingSegmentoChart } from "@/components/dashboard/RankingSegmentoChart";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Separator } from "@/components/ui/separator";
 import {
@@ -47,6 +48,7 @@ import type {
   CarteraSegmentoResult,
   CarteraTotalDiaPunto,
   PrecioCorrectoRow,
+  RankingSegmentoRow,
   MaterialPopPreciadorResult,
   RunningVentasResult,
   StockOutClientePoint,
@@ -85,6 +87,8 @@ export interface SectorBundle {
   /** Distribución de la posición del producto en el PDV (encuestas). */
   posicionPdv: PosicionPdvPoint[];
   detalleSegmentos: DetalleSegmentoRow[];
+  /** Ranking de volumen de Panquecitas por "Segmento de Clientes 2" de la cartera. */
+  rankingSegmentos: RankingSegmentoRow[];
   /** Conversión de degustaciones (tickets recibidos ÷ entregados) de la ciudad/sector. */
   conversionDegustaciones: { samples: number; conversions: number; rate: number };
 }
@@ -664,8 +668,9 @@ export function DiennDashboardClient({
           <div>
             <CardTitle>Venta acumulada, Recompra y Activación de Clientes</CardTitle>
             <p className="text-xs text-slate-400 mt-1">
-              Barras: venta acumulada (Radar). Líneas (eje derecho, %): tasa de recompra y % de activación de
-              clientes sobre la cartera fija de 358.
+              Barras: venta acumulada (Radar). Líneas (eje derecho, %): tasa de recompra —{" "}
+              <span className="font-medium">clientes con 2 o más fechas de compra ÷ clientes que compraron</span>, un
+              conteo de clientes únicos — y % de activación de clientes sobre la cartera fija de 358.
             </p>
           </div>
           <div className="flex flex-wrap items-center gap-2 print:hidden">
@@ -1489,6 +1494,77 @@ export function DiennDashboardClient({
       </Card>
 
       <Separator className="mb-6 print:hidden" />
+
+      {/* ── Ranking de Volumen por Segmento de cartera ─────────────────── */}
+      <Card className="mb-6 print-avoid-break">
+        <CardHeader className="flex flex-row items-start justify-between gap-3 space-y-0">
+          <div>
+            <CardTitle>Ranking de Volumen por Segmento</CardTitle>
+            <p className="text-xs text-slate-400 mt-1">
+              Volumen de Panquecitas (Carga Radar) por <span className="font-medium">Segmento de Clientes 2</span> de la
+              Cartera Consolidada, de mayor a menor. El promedio diario por cliente es el volumen del segmento ÷ sus
+              clientes con venta ÷ los días del período cargado.
+            </p>
+          </div>
+          <ExportExcelButton
+            filename={`Ranking de volumen por segmento — ${filtroTexto}`}
+            rows={bundle.rankingSegmentos}
+            columns={[
+              { header: "Segmento", value: (r) => r.segmento, width: 30 },
+              { header: "Volumen (kg)", value: (r) => r.volumenKg, width: 16 },
+              { header: "Volumen (Ton)", value: (r) => r.volumenTon, width: 16 },
+              { header: "Clientes con venta", value: (r) => r.clientesConVenta, width: 20 },
+              { header: "Clientes en cartera", value: (r) => r.clientesCartera, width: 20 },
+              { header: "Prom. diario x cliente (kg)", value: (r) => r.promedioDiarioPorCliente, width: 26 },
+            ]}
+          />
+        </CardHeader>
+        <CardContent>
+          {bundle.rankingSegmentos.length === 0 ? (
+            <div className="h-[240px] flex items-center justify-center text-slate-400">
+              <div className="text-center">
+                <p className="text-4xl mb-2">🏷️</p>
+                <p>Sin segmentación de cartera todavía.</p>
+                <p className="text-xs mt-1">
+                  Carga la Cartera Consolidada con la columna &quot;Segmento de Clientes 2&quot;.
+                </p>
+              </div>
+            </div>
+          ) : (
+            <>
+              <RankingSegmentoChart data={bundle.rankingSegmentos} />
+              <div className="mt-4 overflow-x-auto">
+                <Table>
+                  <TableHeader>
+                    <TableRow>
+                      <TableHead>Segmento</TableHead>
+                      <TableHead className="text-right">Volumen (Ton)</TableHead>
+                      <TableHead className="text-right">Clientes con venta</TableHead>
+                      <TableHead className="text-right">Prom. diario x cliente</TableHead>
+                    </TableRow>
+                  </TableHeader>
+                  <TableBody>
+                    {bundle.rankingSegmentos.map((row) => (
+                      <TableRow key={row.segmento}>
+                        <TableCell className="font-medium">{row.segmento}</TableCell>
+                        <TableCell className="text-right">
+                          {row.volumenTon.toLocaleString("es-VE", { maximumFractionDigits: 2 })}
+                        </TableCell>
+                        <TableCell className="text-right">
+                          {row.clientesConVenta} <span className="text-slate-400">de {row.clientesCartera}</span>
+                        </TableCell>
+                        <TableCell className="text-right">
+                          {row.promedioDiarioPorCliente.toLocaleString("es-VE", { maximumFractionDigits: 2 })} kg
+                        </TableCell>
+                      </TableRow>
+                    ))}
+                  </TableBody>
+                </Table>
+              </div>
+            </>
+          )}
+        </CardContent>
+      </Card>
 
       {/* ── Tabla: Detalle de Clientes ─────────────────────────────────── */}
       <Card className="mb-6 print:hidden">

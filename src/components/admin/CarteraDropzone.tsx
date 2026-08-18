@@ -67,7 +67,12 @@ export function CarteraDropzone({ onCommitSuccess }: CarteraDropzoneProps) {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ rows: parseResult.valid }),
       });
-      const data = (await res.json()) as { locations_upserted?: number; sin_sector?: number; error?: string };
+      const data = (await res.json()) as {
+        locations_upserted?: number;
+        sin_sector?: number;
+        con_segmento?: number;
+        error?: string;
+      };
       if (!res.ok) {
         toast.error(data.error ?? "Error al guardar");
         setState("previewing");
@@ -81,6 +86,14 @@ export function CarteraDropzone({ onCommitSuccess }: CarteraDropzoneProps) {
         );
       } else {
         toast.success(`${data.locations_upserted} localidades actualizadas`);
+      }
+      // El ranking por segmento de DIENN depende de la columna "Segmento de
+      // Clientes 2": si el archivo no la trae, conviene avisarlo aquí y no que
+      // el gráfico aparezca vacío sin explicación.
+      if (!data.con_segmento) {
+        toast.warning(
+          'Ninguna fila traía "Segmento de Clientes 2": el Ranking de Volumen por Segmento de DIENN saldrá vacío.'
+        );
       }
     } catch {
       toast.error("Error de conexión. Intenta de nuevo.");

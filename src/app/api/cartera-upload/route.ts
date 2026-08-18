@@ -32,6 +32,7 @@ export async function POST(req: Request) {
       name: row.name,
       type: row.type,
       tipo_cliente: row.tipo_cliente || null,
+      segmento_cliente: row.segmento_cliente || null,
       oficina_venta: row.oficina_venta || null,
       centro_poblado: row.centro_poblado || null,
       municipio: row.municipio || null,
@@ -55,8 +56,15 @@ export async function POST(req: Request) {
     // sí haya sido exitosa. Ver bug reportado: "dice que la carga fue
     // exitosa pero los perfiles de campo no ven la lista".
     const sinSector = locationsToUpsert.filter((l) => sectorGroup(l.oficina_venta) === null).length;
+    // Cuántas filas trajeron "Segmento de Clientes 2": si es 0, el archivo no
+    // tiene esa columna y el ranking por segmento va a salir vacío.
+    const conSegmento = locationsToUpsert.filter((l) => l.segmento_cliente !== null).length;
 
-    return Response.json({ locations_upserted: (upserted ?? []).length, sin_sector: sinSector });
+    return Response.json({
+      locations_upserted: (upserted ?? []).length,
+      sin_sector: sinSector,
+      con_segmento: conSegmento,
+    });
   } catch (error) {
     console.error("[POST /api/cartera-upload]", error);
     return Response.json({ error: "Error interno del servidor" }, { status: 500 });
