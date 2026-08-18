@@ -760,6 +760,8 @@ export interface DetalleSegmentoRow {
   recompraPct: number;
   hpmVsBasePct: number;
   hpmTotalPct: number;
+  /** Volumen de Panquecitas del segmento (Carga Radar), en toneladas. */
+  panquecitasTon: number;
 }
 
 export async function getDetalleClientesPorSegmento(sector?: Sector): Promise<DetalleSegmentoRow[]> {
@@ -810,6 +812,9 @@ export async function getDetalleClientesPorSegmento(sector?: Sector): Promise<De
 
     const segHmpKg = locs.reduce((s, l) => s + (hmpTotals.get(l.id) ?? 0), 0);
     const segPanqKg = locs.reduce((s, l) => s + (panqPedidoTotals.get(l.id) ?? 0), 0);
+    // Volumen de Panquecitas del segmento por Carga Radar — la métrica de volumen
+    // de DIENN (lo confirmado en anaquel), no la Cantidad Pedido que usa hpmVsBasePct.
+    const segPanqRadarKg = locs.reduce((s, l) => s + (panqRadarTotals.get(l.id) ?? 0), 0);
 
     rows.push({
       segmento,
@@ -820,10 +825,12 @@ export async function getDetalleClientesPorSegmento(sector?: Sector): Promise<De
       recompraPct: facturados.length > 0 ? Math.round((conRecompra.length / facturados.length) * 1000) / 10 : 0,
       hpmVsBasePct: segHmpKg > 0 ? Math.round((segPanqKg / segHmpKg) * 1000) / 10 : 0,
       hpmTotalPct: universoTotalHmpKg > 0 ? Math.round((segHmpKg / universoTotalHmpKg) * 1000) / 10 : 0,
+      panquecitasTon: Math.round((segPanqRadarKg / 1000) * 100) / 100,
     });
   }
 
-  return rows.sort((a, b) => b.hpmTotalPct - a.hpmTotalPct);
+  // Ordenado por volumen de Panquecitas: el segmento que más vende queda arriba.
+  return rows.sort((a, b) => b.panquecitasTon - a.panquecitasTon);
 }
 
 // ── 7. Tasa de conversión en degustaciones (sistema de tickets) ───

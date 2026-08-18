@@ -423,6 +423,16 @@ export function DiennDashboardClient({
   const rotacion = useMemo(() => computeRotacion(filteredSellOut), [filteredSellOut]);
   const mixProducto = bundle.mixProducto;
 
+  // Segmento con más volumen de Panquecitas (Carga Radar) del corte activo, para
+  // marcarlo en la tabla. Sale del bundle, así que sigue el filtro de ciudad.
+  const segmentoTopVolumen = useMemo(() => {
+    const top = bundle.detalleSegmentos.reduce<DetalleSegmentoRow | null>(
+      (best, r) => (best === null || r.panquecitasTon > best.panquecitasTon ? r : best),
+      null
+    );
+    return top && top.panquecitasTon > 0 ? top.segmento : null;
+  }, [bundle.detalleSegmentos]);
+
   // Precio Correcto: ciudades disponibles + filas filtradas por la ciudad activa.
   const precioCiudades = useMemo(
     () => Array.from(new Set(precioCorrecto.map((r) => r.ciudad))).sort(),
@@ -1483,12 +1493,19 @@ export function DiennDashboardClient({
       {/* ── Tabla: Detalle de Clientes ─────────────────────────────────── */}
       <Card className="mb-6 print:hidden">
         <CardHeader className="flex flex-row items-start justify-between gap-3 space-y-0">
-          <CardTitle>Detalle de Clientes (# clts y ton vendidas)</CardTitle>
+          <div>
+            <CardTitle>Detalle de Clientes (# clts y ton vendidas)</CardTitle>
+            <p className="text-xs text-slate-400 mt-1">
+              Ordenado por volumen de Panquecitas (Carga Radar): el segmento que más vende queda arriba y va marcado
+              como <span className="font-medium text-emerald-700">mayor volumen</span>.
+            </p>
+          </div>
           <ExportExcelButton
             filename={`Detalle de clientes por segmento — ${filtroTexto}`}
             rows={bundle.detalleSegmentos}
             columns={[
               { header: "Segmento", value: (r) => r.segmento, width: 30 },
+              { header: "Vol. Panquecitas (Ton)", value: (r) => r.panquecitasTon, width: 22 },
               { header: "Activación x seg (%)", value: (r) => r.penetracionPct, width: 22 },
               { header: "Recompra x seg (%)", value: (r) => r.recompraPct, width: 22 },
               { header: "% HPM vs Base", value: (r) => r.hpmVsBasePct, width: 18 },
@@ -1505,6 +1522,7 @@ export function DiennDashboardClient({
                 <TableHeader>
                   <TableRow>
                     <TableHead>Segmento</TableHead>
+                    <TableHead className="text-right">Vol. Panquecitas (Ton)</TableHead>
                     <TableHead className="text-right">Activación x seg (%)</TableHead>
                     <TableHead className="text-right">Recompra x seg (%)</TableHead>
                     <TableHead className="text-right">% HPM vs Base</TableHead>
@@ -1514,7 +1532,17 @@ export function DiennDashboardClient({
                 <TableBody>
                   {bundle.detalleSegmentos.map((row) => (
                     <TableRow key={row.segmento}>
-                      <TableCell className="font-medium">{row.segmento}</TableCell>
+                      <TableCell className="font-medium">
+                        {row.segmento}
+                        {row.segmento === segmentoTopVolumen && (
+                          <span className="ml-2 inline-flex items-center rounded px-1.5 py-0.5 text-[10px] font-semibold bg-emerald-100 text-emerald-700">
+                            mayor volumen
+                          </span>
+                        )}
+                      </TableCell>
+                      <TableCell className="text-right font-semibold">
+                        {row.panquecitasTon.toLocaleString("es-VE", { maximumFractionDigits: 2 })}
+                      </TableCell>
                       <TableCell className="text-right">{row.penetracionPct}%</TableCell>
                       <TableCell className="text-right">{row.recompraPct}%</TableCell>
                       <TableCell className="text-right">{row.hpmVsBasePct}%</TableCell>
