@@ -1387,7 +1387,11 @@ export function DiennDashboardClient({
         <KpiCard
           title="Tasa de Conversión — Degustaciones"
           value={`${bundle.conversionDegustaciones.rate}%`}
-          subtitle={`${bundle.conversionDegustaciones.conversions} de ${bundle.conversionDegustaciones.samples} tickets`}
+          annotation={[
+            `${bundle.conversionDegustaciones.samples.toLocaleString("es-VE")} degustaciones entregadas`,
+            `${bundle.conversionDegustaciones.conversions.toLocaleString("es-VE")} se convirtieron en compra`,
+          ]}
+          subtitle={`Tickets entregados vs. recibidos — ${filtroTexto}`}
           product="panquecitas"
         />
         <KpiCard

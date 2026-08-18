@@ -4,6 +4,7 @@ import { getUniverseLocations } from "@/lib/universe";
 import { sectorGroup } from "@/lib/sectors";
 import { PVP_TARGETS } from "@/data/pvp-thresholds";
 import { desviado400, desviado800, type AdminPdvRow, type AdminVisitSnapshot } from "@/lib/admin-metrics";
+import { getBcvRateLookup, precioVisitaEnUsd } from "@/lib/bcv";
 
 // ────────────────────────────────────────────────────────────────
 // Perfil Administrador — Auditoría, Control de Ejecución en PDV.
@@ -118,6 +119,10 @@ export async function getAdminExecutionSnapshot(): Promise<AdminPdvRow[]> {
     }
   }
 
+  // Precios capturados en Bs por error (> 100) se normalizan a USD con la tasa
+  // del día de la visita — ver src/lib/bcv.ts.
+  const rateAt = await getBcvRateLookup();
+
   return universo.map((location) => {
     const visit = lastVisitByLocation.get(location.id) ?? null;
     const sector = sectorGroup(location.oficina_venta);
@@ -134,8 +139,16 @@ export async function getAdminExecutionSnapshot(): Promise<AdminPdvRow[]> {
       frontFaces: visit?.front_faces ?? null,
       // price_*_na = "el local no maneja esa presentación": se guarda como
       // precio no observado (null), igual que si no se hubiera visitado.
-      price400: visit && !visit.price_400_na ? visit.price_400 : null,
-      price800: visit && !visit.price_800_na ? visit.price_800 : null,
+      price400: precioVisitaEnUsd(
+        visit && !visit.price_400_na ? visit.price_400 : null,
+        visit?.created_at ?? null,
+        rateAt
+      ),
+      price800: precioVisitaEnUsd(
+        visit && !visit.price_800_na ? visit.price_800 : null,
+        visit?.created_at ?? null,
+        rateAt
+      ),
       target400: target?.p400 ?? null,
       target800: target?.p800 ?? null,
       unidadesAnaquel: visit?.total_units_anaquel ?? null,
@@ -202,12 +215,15 @@ export async function getAdminVisitHistory(): Promise<AdminVisitSnapshot[]> {
     unidadesDepositoByVisit.set(a.visit_id, (unidadesDepositoByVisit.get(a.visit_id) ?? 0) + unidades);
   }
 
+  // Misma normalización de Bs→USD que el snapshot, con la tasa de cada visita.
+  const rateAt = await getBcvRateLookup();
+
   return visits.map((v) => ({
     locationId: v.location_id,
     createdAt: v.created_at,
     popPresent: v.pop_present,
-    price400: v.price_400_na ? null : v.price_400,
-    price800: v.price_800_na ? null : v.price_800,
+    price400: precioVisitaEnUsd(v.price_400_na ? null : v.price_400, v.created_at, rateAt),
+    price800: precioVisitaEnUsd(v.price_800_na ? null : v.price_800, v.created_at, rateAt),
     unidadesAnaquel: v.total_units_anaquel,
     unidadesDeposito: unidadesDepositoByVisit.get(v.id) ?? 0,
     depositAccess: v.deposit_access,

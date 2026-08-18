@@ -2,6 +2,7 @@ import { createSupabaseServiceClient } from "@/lib/supabase/server";
 import { PRODUCT_IDS, VARIANT_IDS } from "@/data/catalog";
 import { PVP_TARGETS, PVP_TOLERANCE } from "@/data/pvp-thresholds";
 import { DIAS_HABILES_POR_SEMANA } from "@/lib/business-days";
+import { getBcvRateLookup, precioVisitaEnUsd } from "@/lib/bcv";
 import {
   PILOT_SECTORS,
   SECTOR_LABELS,
@@ -1306,6 +1307,7 @@ export async function getPrecioCorrecto(): Promise<PrecioCorrectoRow[]> {
 
   type Visita = {
     location_id: string;
+    created_at: string;
     price_400: number | null;
     price_400_na: boolean | null;
     price_800: number | null;
@@ -1317,6 +1319,10 @@ export async function getPrecioCorrecto(): Promise<PrecioCorrectoRow[]> {
     if (!lastVisit.has(v.location_id)) lastVisit.set(v.location_id, v);
   }
 
+  // Precio capturado en Bs por error (> 100) → USD con la tasa del día de la
+  // visita (ver src/lib/bcv.ts), para no clasificarlo como sobreprecio.
+  const rateAt = await getBcvRateLookup();
+
   const rows: PrecioCorrectoRow[] = [];
   for (const l of universo) {
     const sector = sectorGroup(l.oficina_venta);
@@ -1326,26 +1332,29 @@ export async function getPrecioCorrecto(): Promise<PrecioCorrectoRow[]> {
     const v = lastVisit.get(l.id);
     if (!v) continue;
 
-    if (!v.price_400_na && v.price_400 != null) {
+    const precio400 = precioVisitaEnUsd(v.price_400, v.created_at, rateAt);
+    const precio800 = precioVisitaEnUsd(v.price_800, v.created_at, rateAt);
+
+    if (!v.price_400_na && precio400 != null) {
       rows.push({
         locationId: l.id,
         cliente: l.name,
         ciudad,
         presentacion: "400g",
-        precio: v.price_400,
+        precio: precio400,
         target: target.p400,
-        estado: clasificarPrecio(v.price_400, target.p400),
+        estado: clasificarPrecio(precio400, target.p400),
       });
     }
-    if (!v.price_800_na && v.price_800 != null) {
+    if (!v.price_800_na && precio800 != null) {
       rows.push({
         locationId: l.id,
         cliente: l.name,
         ciudad,
         presentacion: "800g",
-        precio: v.price_800,
+        precio: precio800,
         target: target.p800,
-        estado: clasificarPrecio(v.price_800, target.p800),
+        estado: clasificarPrecio(precio800, target.p800),
       });
     }
   }
