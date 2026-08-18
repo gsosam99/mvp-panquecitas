@@ -232,7 +232,7 @@ export function DiennDashboardClient({
   const [ventasDirecto, setVentasDirecto] = useState(false);
   const [ventasIndirecto, setVentasIndirecto] = useState(false);
   // Mismos toggles pero por CIUDAD (Cumaná / Cabudare): las barras llevan los kg
-  // y el nombre de la ciudad. Independientes de los de modelo.
+  // y se distinguen por color (sin texto de ciudad). Independientes de los de modelo.
   const [ventasCumana, setVentasCumana] = useState(false);
   const [ventasCabudare, setVentasCabudare] = useState(false);
   // La línea de efectividad total (Radar / Facturado / Pedidos) se puede apagar
@@ -937,8 +937,8 @@ export function DiennDashboardClient({
                 cada línea entre el valor del período (Día) y el{" "}
                 <span className="font-medium">acumulado</span> (activos ÷ cartera total). Las barras se pueden desglosar
                 por modelo (<span className="font-medium">Ventas Directo / Indirecto</span>) o por ciudad (
-                <span className="font-medium">Ventas Cumaná / Cabudare</span>, con los kg y el nombre de la ciudad en la
-                barra), y la línea de efectividad total se apaga con{" "}
+                <span className="font-medium">Ventas Cumaná / Cabudare</span>, en dos tonos de azul que se repiten en
+                sus líneas de activación), y la línea de efectividad total se apaga con{" "}
                 <span className="font-medium">Línea total</span>. Todo aplica también a los gráficos comparativos
                 (Cumaná / Cabudare).
               </p>
@@ -1051,10 +1051,10 @@ export function DiennDashboardClient({
                 {/* Mismas barras pero por ciudad — la etiqueta lleva kg + ciudad. */}
                 <button
                   onClick={() => setVentasCumana((v) => !v)}
-                  title="Muestra las barras de volumen Radar del período de Cumaná (kg y nombre de la ciudad)"
+                  title="Muestra las barras de volumen Radar del período de Cumaná (solo kg; la ciudad se identifica por color)"
                   className={`px-3 py-1.5 rounded-lg border text-xs font-medium transition-colors ${
                     ventasCumana
-                      ? "border-cyan-600 bg-cyan-600 text-white"
+                      ? "border-sky-700 bg-sky-700 text-white"
                       : "border-slate-200 bg-white text-slate-500 hover:bg-slate-50"
                   }`}
                 >
@@ -1062,10 +1062,10 @@ export function DiennDashboardClient({
                 </button>
                 <button
                   onClick={() => setVentasCabudare((v) => !v)}
-                  title="Muestra las barras de volumen Radar del período de Cabudare (kg y nombre de la ciudad)"
+                  title="Muestra las barras de volumen Radar del período de Cabudare (solo kg; la ciudad se identifica por color)"
                   className={`px-3 py-1.5 rounded-lg border text-xs font-medium transition-colors ${
                     ventasCabudare
-                      ? "border-pink-600 bg-pink-600 text-white"
+                      ? "border-blue-900 bg-blue-900 text-white"
                       : "border-slate-200 bg-white text-slate-500 hover:bg-slate-50"
                   }`}
                 >
@@ -1089,7 +1089,7 @@ export function DiennDashboardClient({
                   title="Superpone la efectividad ACUMULADA de cada ciudad (Cumaná / Cabudare)"
                   className={`px-3 py-1.5 rounded-lg border text-xs font-medium transition-colors ${
                     ciudadAcum
-                      ? "border-cyan-600 bg-cyan-600 text-white"
+                      ? "border-sky-700 bg-sky-700 text-white"
                       : "border-slate-200 bg-white text-slate-500 hover:bg-slate-50"
                   }`}
                 >
@@ -1100,7 +1100,7 @@ export function DiennDashboardClient({
                   title="Superpone la efectividad DIARIA (no acumulada) de cada ciudad (Cumaná / Cabudare)"
                   className={`px-3 py-1.5 rounded-lg border text-xs font-medium transition-colors ${
                     ciudadDia
-                      ? "border-pink-600 bg-pink-600 text-white"
+                      ? "border-blue-900 bg-blue-900 text-white"
                       : "border-slate-200 bg-white text-slate-500 hover:bg-slate-50"
                   }`}
                 >

@@ -167,33 +167,33 @@ const Inner = dynamic(
             )}
             {/* Barras de volumen Radar del período por CIUDAD. Stack propio ("ciudad")
                 para que, si además se prendió un desglose por modelo, queden columnas
-                lado a lado en vez de sumarse en la misma pila. La etiqueta lleva los
-                kg y el nombre de la ciudad. */}
+                lado a lado en vez de sumarse en la misma pila. La etiqueta lleva solo
+                los kg (sin el nombre de la ciudad) — se identifican por color. */}
             {showVentasCumana && (
-              <Bar yAxisId="kg" dataKey="radarKgDiaCumana" stackId="ciudad" fill="#a5f3fc" radius={[2, 2, 0, 0]}>
+              <Bar yAxisId="kg" dataKey="radarKgDiaCumana" stackId="ciudad" fill="#b4d0e7" radius={[2, 2, 0, 0]}>
                 <LabelList
                   dataKey="radarKgDiaCumana"
                   position="center"
-                  fill="#155e75"
+                  fill="#1f4e79"
                   fontSize={8}
                   formatter={(v) =>
                     Number(v ?? 0) > 0
-                      ? `${Number(v ?? 0).toLocaleString("es-VE", { maximumFractionDigits: 0 })} kg · Cumaná`
+                      ? `${Number(v ?? 0).toLocaleString("es-VE", { maximumFractionDigits: 0 })} kg`
                       : ""
                   }
                 />
               </Bar>
             )}
             {showVentasCabudare && (
-              <Bar yAxisId="kg" dataKey="radarKgDiaCabudare" stackId="ciudad" fill="#fbcfe8" radius={[2, 2, 0, 0]}>
+              <Bar yAxisId="kg" dataKey="radarKgDiaCabudare" stackId="ciudad" fill="#5a89b8" radius={[2, 2, 0, 0]}>
                 <LabelList
                   dataKey="radarKgDiaCabudare"
                   position="center"
-                  fill="#9d174d"
+                  fill="#ffffff"
                   fontSize={8}
                   formatter={(v) =>
                     Number(v ?? 0) > 0
-                      ? `${Number(v ?? 0).toLocaleString("es-VE", { maximumFractionDigits: 0 })} kg · Cabudare`
+                      ? `${Number(v ?? 0).toLocaleString("es-VE", { maximumFractionDigits: 0 })} kg`
                       : ""
                   }
                 />
@@ -268,9 +268,9 @@ const Inner = dynamic(
               <Line
                 yAxisId="pct"
                 dataKey="efectCumanaAcum"
-                stroke="#0891b2"
+                stroke="#3e7cb1"
                 strokeWidth={2}
-                dot={{ r: 2, fill: "#0891b2" }}
+                dot={{ r: 2, fill: "#3e7cb1" }}
                 connectNulls
                 isAnimationActive={false}
               >
@@ -278,7 +278,7 @@ const Inner = dynamic(
                   dataKey="efectCumanaAcum"
                   position="top"
                   offset={6}
-                  fill="#0891b2"
+                  fill="#3e7cb1"
                   fontSize={9}
                   formatter={(v) => (v == null ? "" : `${Number(v)}%`)}
                 />
@@ -288,9 +288,9 @@ const Inner = dynamic(
               <Line
                 yAxisId="pct"
                 dataKey="efectCabudareAcum"
-                stroke="#db2777"
+                stroke="#1f4e79"
                 strokeWidth={2}
-                dot={{ r: 2, fill: "#db2777" }}
+                dot={{ r: 2, fill: "#1f4e79" }}
                 connectNulls
                 isAnimationActive={false}
               >
@@ -298,7 +298,7 @@ const Inner = dynamic(
                   dataKey="efectCabudareAcum"
                   position="bottom"
                   offset={6}
-                  fill="#db2777"
+                  fill="#1f4e79"
                   fontSize={9}
                   formatter={(v) => (v == null ? "" : `${Number(v)}%`)}
                 />
@@ -309,10 +309,10 @@ const Inner = dynamic(
               <Line
                 yAxisId="pct"
                 dataKey="efectCumanaDia"
-                stroke="#0891b2"
+                stroke="#3e7cb1"
                 strokeWidth={2}
                 strokeDasharray="4 3"
-                dot={{ r: 2, fill: "#0891b2" }}
+                dot={{ r: 2, fill: "#3e7cb1" }}
                 connectNulls
                 isAnimationActive={false}
               >
@@ -320,7 +320,7 @@ const Inner = dynamic(
                   dataKey="efectCumanaDia"
                   position="top"
                   offset={16}
-                  fill="#0e7490"
+                  fill="#3e7cb1"
                   fontSize={9}
                   formatter={(v) => (v == null ? "" : `${Number(v)}%`)}
                 />
@@ -330,10 +330,10 @@ const Inner = dynamic(
               <Line
                 yAxisId="pct"
                 dataKey="efectCabudareDia"
-                stroke="#db2777"
+                stroke="#1f4e79"
                 strokeWidth={2}
                 strokeDasharray="4 3"
-                dot={{ r: 2, fill: "#db2777" }}
+                dot={{ r: 2, fill: "#1f4e79" }}
                 connectNulls
                 isAnimationActive={false}
               >
@@ -341,7 +341,7 @@ const Inner = dynamic(
                   dataKey="efectCabudareDia"
                   position="bottom"
                   offset={16}
-                  fill="#9d174d"
+                  fill="#1f4e79"
                   fontSize={9}
                   formatter={(v) => (v == null ? "" : `${Number(v)}%`)}
                 />
