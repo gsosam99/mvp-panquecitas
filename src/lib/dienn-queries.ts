@@ -1,7 +1,7 @@
 import { createSupabaseServiceClient } from "@/lib/supabase/server";
 import { PRODUCT_IDS, VARIANT_IDS } from "@/data/catalog";
 import { PVP_TARGETS, PVP_TOLERANCE } from "@/data/pvp-thresholds";
-import { DIAS_HABILES_POR_SEMANA } from "@/lib/business-days";
+import { DIAS_HABILES_POR_SEMANA, contarDiasHabiles } from "@/lib/business-days";
 import { getBcvRateLookup, precioVisitaEnUsd } from "@/lib/bcv";
 import {
   PILOT_SECTORS,
@@ -669,6 +669,11 @@ export async function getVentaRecompraActivacion(
 //   - "clientes": solo los que tienen Panquecitas (Radar > 0).
 //   - "universo": los 358 del piloto.
 
+// El comportamiento diario se grafica desde el 03-08-2026 en adelante
+// (decisión con DIENN, 18-08-2026). El reporte de 3 meses hacia atrás NO se
+// dibuja: solo aporta el promedio de referencia y su 4%.
+const RENDIMIENTO_DIARIO_DESDE = "2026-08-03";
+
 export type Pan3MPoblacion = "clientes" | "universo";
 
 export interface Rendimiento3MPunto {
@@ -747,24 +752,29 @@ export async function getRendimiento3M(
       : new Set(universo.filter((l) => (panqTotals.get(l.id) ?? 0) > 0).map((l) => l.id));
 
   const panFiltrado = pan3m.filter((r) => idsPan.has(r.location_id));
+  // Con población "clientes" puede quedar vacío (ningún cliente con Panquecitas
+  // tiene PAN en el reporte de 3 meses): sin filas no hay promedio que calcular
+  // y fechasPan[0] sería undefined.
+  if (panFiltrado.length === 0) return RENDIMIENTO_3M_VACIO;
   const totalPanKg = panFiltrado.reduce((s, r) => s + Number(r.quantity_kg), 0);
 
-  // Días del período: de la primera a la última fecha del reporte de 3 meses.
+  // Días del período de referencia: los DÍAS HÁBILES que cubre el reporte de 3
+  // meses, de su primera a su última fecha. Hábiles y no calendario porque el
+  // producto se despacha de lunes a viernes (ver business-days.ts) — dividir
+  // entre días corridos subestimaría el ritmo diario real de PAN.
   const fechasPan = panFiltrado.map((r) => r.date_of_sale.slice(0, 10)).sort();
-  let diasPeriodo = 1;
-  if (fechasPan.length > 0) {
-    const primera = Date.parse(`${fechasPan[0]}T00:00:00Z`);
-    const ultima = Date.parse(`${fechasPan[fechasPan.length - 1]}T00:00:00Z`);
-    diasPeriodo = Math.max(1, Math.round((ultima - primera) / 86_400_000) + 1);
-  }
+  const diasPeriodo = contarDiasHabiles(fechasPan[0], fechasPan[fechasPan.length - 1]);
 
   const promedio3M = totalPanKg / diasPeriodo;
   if (promedio3M <= 0) return RENDIMIENTO_3M_VACIO;
 
-  // Panquecitas agregadas por día.
+  // Panquecitas agregadas por día, solo del 03-08-2026 en adelante: el gráfico
+  // muestra el comportamiento del piloto, no el histórico de referencia.
+  // date_of_sale es ISO (YYYY-MM-DD…), así que comparar strings es correcto.
   const kgPorDia = new Map<string, number>();
   for (const r of panq) {
     const dia = r.date_of_sale.slice(0, 10);
+    if (dia < RENDIMIENTO_DIARIO_DESDE) continue;
     kgPorDia.set(dia, (kgPorDia.get(dia) ?? 0) + Number(r.quantity_kg));
   }
 
@@ -930,23 +940,21 @@ export async function getRankingVolumenPorSegmento(sector?: Sector): Promise<Ran
 
   const panqRadarTotals = await getSellInTotalsByLocation(PRODUCT_IDS.PANQUECITAS);
 
-  // Días del período: de la primera a la última fecha con Radar de Panquecitas.
-  // Si solo hay un día (o ninguno), se usa 1 para no dividir entre cero.
+  // Días del período: DÍAS HÁBILES desde el 03-08-2026 (mismo arranque que el
+  // gráfico de rendimiento diario) hasta la última fecha con Radar de
+  // Panquecitas. Hábiles porque el producto se despacha de lunes a viernes.
   const supabase = createSupabaseServiceClient();
   const { data: fechasData } = await supabase
     .from("sap_sell_in_records")
     .select("date_of_sale")
     .eq("product_id", PRODUCT_IDS.PANQUECITAS)
     .gt("quantity_kg", 0)
+    .gte("date_of_sale", RENDIMIENTO_DIARIO_DESDE)
     .order("date_of_sale", { ascending: true });
 
   const fechas = ((fechasData ?? []) as { date_of_sale: string }[]).map((r) => r.date_of_sale.slice(0, 10));
-  let diasPeriodo = 1;
-  if (fechas.length > 0) {
-    const primera = Date.parse(`${fechas[0]}T00:00:00Z`);
-    const ultima = Date.parse(`${fechas[fechas.length - 1]}T00:00:00Z`);
-    diasPeriodo = Math.max(1, Math.round((ultima - primera) / 86_400_000) + 1);
-  }
+  const diasPeriodo =
+    fechas.length > 0 ? contarDiasHabiles(RENDIMIENTO_DIARIO_DESDE, fechas[fechas.length - 1]) : 1;
 
   const bySegmento = new Map<string, Location[]>();
   for (const l of universo) {

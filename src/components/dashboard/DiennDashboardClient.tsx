@@ -625,7 +625,9 @@ export function DiennDashboardClient({
               Venta diaria de Panquecitas (Carga Radar) contra el promedio de ventas diarias de Harina PAN de los
               últimos 3 meses, que sale de la carga aparte{" "}
               <span className="font-medium">Radar últimos 3 Meses</span>. La línea continua es ese promedio y la
-              punteada su 4%. El porcentaje sobre cada punto es el ratio del día (Panquecitas ÷ promedio PAN).
+              punteada su 4%. El porcentaje sobre cada punto es el ratio del día (Panquecitas ÷ promedio PAN). El
+              comportamiento diario se grafica <span className="font-medium">desde el 03-08-2026</span>; los 3 meses
+              hacia atrás solo aportan el promedio de referencia, sobre días hábiles (L–V).
             </p>
           </div>
           <div className="flex flex-wrap items-center gap-2 print:hidden">
@@ -699,8 +701,17 @@ export function DiennDashboardClient({
             <div className="h-[340px] flex items-center justify-center text-slate-400">
               <div className="text-center">
                 <p className="text-4xl mb-2">📉</p>
-                <p>Falta cargar el reporte &quot;Radar últimos 3 Meses&quot;.</p>
-                <p className="text-xs mt-1">Se carga en el menú &quot;Radar 3 Meses&quot;.</p>
+                {bundle.rendimiento3M[pan3mPoblacion].promedio3M > 0 ? (
+                  <>
+                    <p>Sin ventas de Panquecitas desde el 03-08-2026.</p>
+                    <p className="text-xs mt-1">El promedio de referencia ya está cargado; falta la venta del piloto.</p>
+                  </>
+                ) : (
+                  <>
+                    <p>Falta cargar el reporte &quot;Radar últimos 3 Meses&quot;.</p>
+                    <p className="text-xs mt-1">Se carga en el menú &quot;Radar 3 Meses&quot;.</p>
+                  </>
+                )}
               </div>
             </div>
           )}
@@ -1603,7 +1614,7 @@ export function DiennDashboardClient({
             <p className="text-xs text-slate-400 mt-1">
               Volumen de Panquecitas (Carga Radar) por <span className="font-medium">Segmento de Clientes 2</span> de la
               Cartera Consolidada, de mayor a menor. El promedio diario por cliente es el volumen del segmento ÷ sus
-              clientes con venta ÷ los días del período cargado.
+              clientes con venta ÷ los días hábiles desde el 03-08-2026.
             </p>
           </div>
           <ExportExcelButton
@@ -1631,37 +1642,7 @@ export function DiennDashboardClient({
               </div>
             </div>
           ) : (
-            <>
-              <RankingSegmentoChart data={bundle.rankingSegmentos} />
-              <div className="mt-4 overflow-x-auto">
-                <Table>
-                  <TableHeader>
-                    <TableRow>
-                      <TableHead>Segmento</TableHead>
-                      <TableHead className="text-right">Volumen (Ton)</TableHead>
-                      <TableHead className="text-right">Clientes con venta</TableHead>
-                      <TableHead className="text-right">Prom. diario x cliente</TableHead>
-                    </TableRow>
-                  </TableHeader>
-                  <TableBody>
-                    {bundle.rankingSegmentos.map((row) => (
-                      <TableRow key={row.segmento}>
-                        <TableCell className="font-medium">{row.segmento}</TableCell>
-                        <TableCell className="text-right">
-                          {row.volumenTon.toLocaleString("es-VE", { maximumFractionDigits: 2 })}
-                        </TableCell>
-                        <TableCell className="text-right">
-                          {row.clientesConVenta} <span className="text-slate-400">de {row.clientesCartera}</span>
-                        </TableCell>
-                        <TableCell className="text-right">
-                          {row.promedioDiarioPorCliente.toLocaleString("es-VE", { maximumFractionDigits: 2 })} kg
-                        </TableCell>
-                      </TableRow>
-                    ))}
-                  </TableBody>
-                </Table>
-              </div>
-            </>
+            <RankingSegmentoChart data={bundle.rankingSegmentos} />
           )}
         </CardContent>
       </Card>
