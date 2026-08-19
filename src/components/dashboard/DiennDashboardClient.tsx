@@ -628,9 +628,9 @@ export function DiennDashboardClient({
               punteada su 4%. El porcentaje sobre cada punto es el ratio del día (Panquecitas ÷ promedio PAN). El
               comportamiento diario se grafica <span className="font-medium">desde el 03-08-2026</span>; los 3 meses
               hacia atrás solo aportan el promedio de referencia: venta acumulada de los 3 meses ÷ días hábiles (L–V)
-              de esos meses completos. <span className="font-medium">PAN Universo</span> usa el reporte completo tal
-              como se cargó; <span className="font-medium">PAN Cliente</span>, solo los PDV de la cartera que además
-              compran Panquecitas.
+              de esos meses completos. Ambas poblaciones son de la cartera:{" "}
+              <span className="font-medium">PAN Universo</span> son todos sus PDV, hayan comprado Panquecitas o no;{" "}
+              <span className="font-medium">PAN Cliente</span>, solo los que además compran Panquecitas.
             </p>
           </div>
           <div className="flex flex-wrap items-center gap-2 print:hidden">

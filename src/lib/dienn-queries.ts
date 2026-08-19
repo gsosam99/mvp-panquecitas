@@ -748,9 +748,8 @@ export async function getRendimiento3M(
     if (pagina.length < PAGINA) break;
   }
 
-  // Sin filtrar por cartera: el promedio de referencia es la venta TOTAL de
-  // Harina PAN del reporte, incluidos los clientes que no están en la cartera
-  // del piloto (esos vienen con location_id null desde la migration 018).
+  // El recorte por cartera se hace más abajo, al elegir la población: acá se
+  // conservan todas las filas leídas.
   const pan3m = (pan3mData ?? []) as {
     location_id: string | null;
     quantity_kg: number;
@@ -773,19 +772,18 @@ export async function getRendimiento3M(
     date_of_sale: string;
   }[]).filter((r) => idsUniverso.has(r.location_id));
 
-  // Población del promedio de PAN:
-  //   - "universo": TODO el reporte de 3 meses, tal cual se cargó. Es una
-  //     referencia fija, la misma en TOTAL y en cada ciudad.
-  //   - "clientes": solo los PDV de la cartera (del corte activo) que además
-  //     compran Panquecitas. Las filas sin location_id quedan fuera por
-  //     definición: no se sabe si ese cliente compra Panquecitas.
+  // Población del promedio de PAN — ambas acotadas a la CARTERA (decisión de
+  // DIENN, 18-08-2026: "PAN Universo son los 358 clientes de la cartera"):
+  //   - "universo": todos los PDV de la cartera del corte activo, hayan
+  //     comprado Panquecitas o no.
+  //   - "clientes": solo los que además compran Panquecitas.
+  // El reporte trae bastantes más clientes que la cartera (734 vs 358); esas
+  // filas se guardan igual pero vienen con location_id null y quedan fuera.
   const idsClientesPanq = new Set(
     universo.filter((l) => (panqTotals.get(l.id) ?? 0) > 0).map((l) => l.id)
   );
-  const panFiltrado =
-    poblacion === "universo"
-      ? pan3m
-      : pan3m.filter((r) => r.location_id !== null && idsClientesPanq.has(r.location_id));
+  const idsPan = poblacion === "universo" ? idsUniverso : idsClientesPanq;
+  const panFiltrado = pan3m.filter((r) => r.location_id !== null && idsPan.has(r.location_id));
   // Con población "clientes" puede quedar vacío (ningún cliente con Panquecitas
   // tiene PAN en el reporte de 3 meses): sin filas no hay promedio que calcular
   // y fechasPan[0] sería undefined.

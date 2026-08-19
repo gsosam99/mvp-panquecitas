@@ -57,12 +57,23 @@ export async function POST(req: Request) {
       }
     }
 
-    // Colapsar por cliente+producto+mes, quedándose con la fecha más reciente:
+    // Colapsar por cliente+MATERIAL+mes, quedándose con la fecha más reciente:
     // "Venta Acumulada" se reinicia cada mes, así que el último corte de cada
     // mes ES el total de ese mes, y sumar los meses da el total del período.
+    //
+    // Por MATERIAL y no por producto: Harina PAN tiene dos (H187 de 1 kg y H439
+    // de 2 kg). Colapsando por producto, un cliente con las dos presentaciones
+    // perdía el volumen de una — es el "aunque estén repetidos en el reporte".
     const byKey = new Map<
       string,
-      { sap_code: string; location_id: string | null; product_id: string; quantity_kg: number; date_of_sale: string }
+      {
+        sap_code: string;
+        material_code: string;
+        location_id: string | null;
+        product_id: string;
+        quantity_kg: number;
+        date_of_sale: string;
+      }
     >();
     // Se cuentan CLIENTES distintos, no filas: un cliente aparece muchas veces
     // (una por corte diario) y contar filas daba un número sin significado.
@@ -70,9 +81,9 @@ export async function POST(req: Request) {
     const materialesNoMapeados = new Set<string>();
 
     for (const r of rows) {
-      // Los clientes que no están en la cartera NO se descartan: el promedio de
-      // referencia es la venta total del reporte. Solo se quedan sin
-      // location_id, lo que los excluye del filtro "PAN Cliente".
+      // Los clientes fuera de la cartera se guardan igual (para poder reportarlos),
+      // pero quedan sin location_id y por eso NO entran en el promedio: PAN
+      // Universo son los clientes de la cartera. Ver getRendimiento3M.
       const location_id = locationIds.get(r.sap_code) ?? null;
       if (!location_id) codigosFuera.add(r.sap_code);
 
@@ -81,11 +92,12 @@ export async function POST(req: Request) {
         materialesNoMapeados.add(`${r.material_code} (${r.material_name})`);
         continue;
       }
-      const key = `${r.sap_code}|${product_id}|${monthKey(r.fecha)}`;
+      const key = `${r.sap_code}|${r.material_code}|${monthKey(r.fecha)}`;
       const prev = byKey.get(key);
       if (!prev || r.fecha > prev.date_of_sale) {
         byKey.set(key, {
           sap_code: r.sap_code,
+          material_code: r.material_code,
           location_id,
           product_id,
           quantity_kg: r.quantity_kg,
@@ -120,7 +132,7 @@ export async function POST(req: Request) {
       const { error: upsertError } = await supabase
         .from("radar_3m_records")
         .upsert(toInsert.slice(i, i + TANDA_FILAS), {
-          onConflict: "sap_code,product_id,date_of_sale",
+          onConflict: "sap_code,material_code,date_of_sale",
           ignoreDuplicates: false,
         });
       if (upsertError) throw upsertError;
