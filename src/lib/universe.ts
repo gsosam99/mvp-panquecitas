@@ -32,17 +32,26 @@ export async function getUniverseLocations(): Promise<Location[]> {
   // segmento_cliente es columna nueva (migration 016). Si todavía no se corrió,
   // la query falla completa y el dashboard se queda sin datos, así que se
   // reintenta sin ella en vez de devolver vacío.
-  let { data } = await supabase.from("locations").select(LOCATION_COLUMNS_CON_SEGMENTO);
-  if (!data) {
-    const fallback = await supabase.from("locations").select(LOCATION_COLUMNS);
-    data = fallback.data;
+  //
+  // El acumulador va como unknown[] a propósito: supabase-js deriva el tipo de
+  // la fila del string del .select(), así que los dos intentos devuelven formas
+  // distintas (una con segmento_cliente y otra sin) y no son asignables entre
+  // sí. El cast a Location[] de abajo es el mismo que ya se hacía.
+  let rows: unknown[] | null = null;
+
+  const conSegmento = await supabase.from("locations").select(LOCATION_COLUMNS_CON_SEGMENTO);
+  if (conSegmento.data) {
+    rows = conSegmento.data;
+  } else {
+    const base = await supabase.from("locations").select(LOCATION_COLUMNS);
+    rows = base.data;
   }
 
   // Filtrado en JS (no en la query) porque oficina_venta puede venir en
   // distinta capitalización según la carga — ver sectorGroup(). Además se
   // excluyen las distribuidoras intermediarias conocidas (ver
   // isExcludedDistribuidor) aunque su oficina_venta caiga en un sector piloto.
-  return ((data ?? []) as Location[]).filter(
+  return ((rows ?? []) as Location[]).filter(
     (l) => _sectorGroup(l.oficina_venta) !== null && !_isExcludedDistribuidor(l.sap_code)
   );
 }
