@@ -67,9 +67,9 @@ const Inner = dynamic(
 
       return (
         <ResponsiveContainer width="100%" height={340}>
-          <ComposedChart data={chartData} margin={{ top: 34, right: 16, left: 10, bottom: 5 }}>
+          <ComposedChart data={chartData} margin={{ top: 40, right: 16, left: 10, bottom: 5 }}>
             <CartesianGrid strokeDasharray="3 3" stroke="#f1f5f9" vertical={false} />
-            <XAxis dataKey="label" tick={{ fontSize: 11, fill: "#94a3b8" }} minTickGap={16} />
+            <XAxis dataKey="label" tick={{ fontSize: 13, fill: "#64748b" }} minTickGap={16} />
             {/* El dominio se fuerza a incluir las líneas fijas: en automático
                 Recharts escala solo con las Panquecitas y el promedio de PAN
                 (mucho mayor) queda FUERA del área visible — por eso no se veía.
@@ -84,7 +84,7 @@ const Inner = dynamic(
             {/* Eje propio para los ratios por ciudad (%). */}
             <YAxis yAxisId="pct" hide />
             <Tooltip
-              contentStyle={{ fontSize: 12, borderRadius: 8, border: "1px solid #e2e8f0" }}
+              contentStyle={{ fontSize: 13, borderRadius: 8, border: "1px solid #e2e8f0" }}
               formatter={(value, name, item) => {
                 if (name === "ratioCumanaAcum")
                   return [`${Number(value ?? 0)}%`, "Ratio acumulado — Cumaná"];
@@ -113,7 +113,7 @@ const Inner = dynamic(
                   ? "Ratio acum. — Cabudare"
                   : value
               }
-              wrapperStyle={{ fontSize: 12 }}
+              wrapperStyle={{ fontSize: 13 }}
             />
             {/* Indicador Fijo A: promedio diario de Harina PAN de los 3 meses. */}
             {showPanDiario && (
@@ -126,7 +126,7 @@ const Inner = dynamic(
                   value: `Promedio PAN 3M: ${data.promedio3M.toLocaleString("es-VE", { maximumFractionDigits: 0 })} kg/día`,
                   position: "insideTopLeft",
                   fill: "#334155",
-                  fontSize: 13,
+                  fontSize: 15,
                   fontWeight: 600,
                 }}
               />
@@ -142,7 +142,7 @@ const Inner = dynamic(
                 value: `Meta 4%: ${data.meta4Pct.toLocaleString("es-VE", { maximumFractionDigits: 0 })} kg/día`,
                 position: "insideBottomLeft",
                 fill: "#15803d",
-                fontSize: 13,
+                fontSize: 15,
                 fontWeight: 600,
               }}
             />
@@ -163,7 +163,7 @@ const Inner = dynamic(
                 position="top"
                 offset={8}
                 fill="#1a65bd"
-                fontSize={13}
+                fontSize={15}
                 fontWeight={600}
                 formatter={(v) => `${Number(v ?? 0)}%`}
               />
