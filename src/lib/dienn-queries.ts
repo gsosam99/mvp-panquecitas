@@ -730,10 +730,23 @@ export async function getRendimiento3M(
   // Harina PAN del reporte de 3 meses. Si la tabla todavía no existe (falta el
   // migration 017) o no se ha cargado nada, el gráfico queda vacío en vez de
   // romper la página.
-  const { data: pan3mData } = await supabase
-    .from("radar_3m_records")
-    .select("location_id, product_id, quantity_kg, date_of_sale")
-    .eq("product_id", PRODUCT_IDS.HARINA_PAN);
+  // Paginado a propósito: PostgREST corta las respuestas (1000 filas por
+  // defecto en Supabase) y esta tabla tiene ~1 fila por cliente y mes — con 734
+  // clientes × 3 meses se pasa del tope y solo llegaban las primeras, que son
+  // las de mayo. De ahí que el promedio saliera calculado sobre un solo mes.
+  const PAGINA = 1000;
+  const pan3mData: { location_id: string | null; quantity_kg: number; date_of_sale: string }[] = [];
+  for (let desde = 0; ; desde += PAGINA) {
+    const { data: pagina } = await supabase
+      .from("radar_3m_records")
+      .select("location_id, product_id, quantity_kg, date_of_sale")
+      .eq("product_id", PRODUCT_IDS.HARINA_PAN)
+      .order("date_of_sale", { ascending: true })
+      .range(desde, desde + PAGINA - 1);
+    if (!pagina || pagina.length === 0) break;
+    pan3mData.push(...(pagina as typeof pan3mData));
+    if (pagina.length < PAGINA) break;
+  }
 
   // Sin filtrar por cartera: el promedio de referencia es la venta TOTAL de
   // Harina PAN del reporte, incluidos los clientes que no están en la cartera

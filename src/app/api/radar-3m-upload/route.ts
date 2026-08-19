@@ -42,14 +42,20 @@ export async function POST(req: Request) {
     // location_id (lo usa el filtro "PAN Cliente"). Los que no calzan igual se
     // guardan: el promedio de referencia es la venta total del reporte.
     const sapCodes = [...new Set(rows.map((r) => r.sap_code))];
-    const { data: locs, error: locError } = await supabase
-      .from("locations")
-      .select("id, sap_code")
-      .in("sap_code", sapCodes);
-    if (locError) throw locError;
-    const locationIds = new Map(
-      ((locs ?? []) as { id: string; sap_code: string }[]).map((l) => [l.sap_code, l.id])
-    );
+    // Por tandas: el .in() viaja en la URL y con ~700 códigos se pasa del largo
+    // máximo de una petición, que la haría fallar entera.
+    const locationIds = new Map<string, string>();
+    const TANDA_CODIGOS = 200;
+    for (let i = 0; i < sapCodes.length; i += TANDA_CODIGOS) {
+      const { data: locs, error: locError } = await supabase
+        .from("locations")
+        .select("id, sap_code")
+        .in("sap_code", sapCodes.slice(i, i + TANDA_CODIGOS));
+      if (locError) throw locError;
+      for (const l of (locs ?? []) as { id: string; sap_code: string }[]) {
+        locationIds.set(l.sap_code, l.id);
+      }
+    }
 
     // Colapsar por cliente+producto+mes, quedándose con la fecha más reciente:
     // "Venta Acumulada" se reinicia cada mes, así que el último corte de cada
@@ -107,10 +113,18 @@ export async function POST(req: Request) {
 
     // Primero inserta/marca y después borra lo de cargas anteriores, para no
     // quedar sin datos si el insert falla (no hay transacción vía REST).
-    const { error: upsertError } = await supabase
-      .from("radar_3m_records")
-      .upsert(toInsert, { onConflict: "sap_code,product_id,date_of_sale", ignoreDuplicates: false });
-    if (upsertError) throw upsertError;
+    // También por tandas: ~700 clientes × 3 meses son miles de filas en un solo
+    // cuerpo de petición.
+    const TANDA_FILAS = 500;
+    for (let i = 0; i < toInsert.length; i += TANDA_FILAS) {
+      const { error: upsertError } = await supabase
+        .from("radar_3m_records")
+        .upsert(toInsert.slice(i, i + TANDA_FILAS), {
+          onConflict: "sap_code,product_id,date_of_sale",
+          ignoreDuplicates: false,
+        });
+      if (upsertError) throw upsertError;
+    }
 
     const { data: borradas, error: staleError } = await supabase
       .from("radar_3m_records")
