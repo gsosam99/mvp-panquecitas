@@ -844,7 +844,11 @@ export function DiennDashboardClient({
                   maximumFractionDigits: 0,
                 })}{" "}
                 kg ÷ {rendimiento3MData.diasPeriodo} días hábiles, del{" "}
-                {rendimiento3MData.desde} al {rendimiento3MData.hasta}) · Meta 4%:{" "}
+                {rendimiento3MData.desde} al {rendimiento3MData.hasta}) · aportado por{" "}
+                <span className="font-medium text-slate-600">
+                  {rendimiento3MData.clientesPan} de {rendimiento3MData.clientesPoblacion} PDV
+                </span>{" "}
+                del corte · Meta 4%:{" "}
                 <span className="font-medium text-emerald-700">
                   {rendimiento3MData.meta4Pct.toLocaleString("es-VE", {
                     maximumFractionDigits: 1,

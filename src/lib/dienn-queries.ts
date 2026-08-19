@@ -696,6 +696,10 @@ export interface Rendimiento3MResult {
   hasta: string;
   /** Total de Harina PAN del reporte, para poder auditar el promedio. */
   totalPanKg: number;
+  /** PDV que aportaron ese total (los que tienen PAN en el reporte). */
+  clientesPan: number;
+  /** PDV de la población elegida en este corte, para comparar contra el anterior. */
+  clientesPoblacion: number;
   puntos: Rendimiento3MPunto[];
 }
 
@@ -713,6 +717,8 @@ const RENDIMIENTO_3M_VACIO: Rendimiento3MResult = {
   desde: "",
   hasta: "",
   totalPanKg: 0,
+  clientesPan: 0,
+  clientesPoblacion: 0,
   puntos: [],
 };
 
@@ -757,20 +763,25 @@ export async function getRendimiento3M(
   }[];
   if (pan3m.length === 0) return RENDIMIENTO_3M_VACIO;
 
-  // Panquecitas por día (Carga Radar viva), acotadas al sector.
+  // Panquecitas por día (Carga Radar viva), acotadas al sector. Paginado por el
+  // mismo motivo que arriba: sap_sell_in_records pasa de 1000 filas y sin
+  // paginar la serie diaria salía recortada.
   const panqTotals = await getSellInTotalsByLocation(PRODUCT_IDS.PANQUECITAS);
-  const { data: panqData } = await supabase
-    .from("sap_sell_in_records")
-    .select("location_id, quantity_kg, date_of_sale")
-    .eq("product_id", PRODUCT_IDS.PANQUECITAS)
-    .gt("quantity_kg", 0)
-    .order("date_of_sale", { ascending: true });
+  const panqData: { location_id: string; quantity_kg: number; date_of_sale: string }[] = [];
+  for (let desde = 0; ; desde += PAGINA) {
+    const { data: pagina } = await supabase
+      .from("sap_sell_in_records")
+      .select("location_id, quantity_kg, date_of_sale")
+      .eq("product_id", PRODUCT_IDS.PANQUECITAS)
+      .gt("quantity_kg", 0)
+      .order("date_of_sale", { ascending: true })
+      .range(desde, desde + PAGINA - 1);
+    if (!pagina || pagina.length === 0) break;
+    panqData.push(...(pagina as typeof panqData));
+    if (pagina.length < PAGINA) break;
+  }
 
-  const panq = ((panqData ?? []) as {
-    location_id: string;
-    quantity_kg: number;
-    date_of_sale: string;
-  }[]).filter((r) => idsUniverso.has(r.location_id));
+  const panq = panqData.filter((r) => idsUniverso.has(r.location_id));
 
   // Población del promedio de PAN — ambas acotadas a la CARTERA (decisión de
   // DIENN, 18-08-2026: "PAN Universo son los 358 clientes de la cartera"):
@@ -833,6 +844,8 @@ export async function getRendimiento3M(
     desde: inicioPeriodo,
     hasta: finPeriodo,
     totalPanKg: Math.round(totalPanKg * 10) / 10,
+    clientesPan: new Set(panFiltrado.map((r) => r.location_id)).size,
+    clientesPoblacion: idsPan.size,
     puntos,
   };
 }
