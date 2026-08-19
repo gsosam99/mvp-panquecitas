@@ -205,6 +205,9 @@ export interface SapRadarParseResult {
   // poder sumar el acumulado de cada mes. Opcional: los returns de error
   // temprano no lo traen.
   filas?: ParsedSapRadarRow[];
+  /** Cuántas columnas "Venta Acumulada" trae el archivo (una por mes en el
+   *  reporte de 3 meses). Diagnóstico: con 1 sola, los meses extra vendrían en 0. */
+  columnasVenta?: number;
 }
 
 // ════════════════════════════════════════════════════════════════

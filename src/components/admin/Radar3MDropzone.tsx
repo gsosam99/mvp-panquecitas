@@ -18,6 +18,9 @@ export function Radar3MDropzone() {
   const [state, setState] = useState<UploadState>("idle");
   const [dragOver, setDragOver] = useState(false);
   const [rows, setRows] = useState<ParsedSapRadarRow[]>([]);
+  // Cuántas columnas "Venta Acumulada" trae el archivo: el reporte de 3 meses
+  // debe traer una por mes. Con 1 sola, los meses extra se leen en 0.
+  const [columnasVenta, setColumnasVenta] = useState(0);
   const [errors, setErrors] = useState<ParseError[]>([]);
   const [fileName, setFileName] = useState("");
   const [doneSummary, setDoneSummary] = useState("");
@@ -42,6 +45,7 @@ export function Radar3MDropzone() {
       // corte por cliente+material, que en un reporte de 3 meses deja solo el
       // último mes y perdería los otros dos.
       setRows(result.filas ?? result.valid);
+      setColumnasVenta(result.columnasVenta ?? 0);
       setErrors(result.errors);
       setState("previewing");
     } catch {
@@ -121,6 +125,7 @@ export function Radar3MDropzone() {
   function reset() {
     setState("idle");
     setRows([]);
+    setColumnasVenta(0);
     setErrors([]);
     setFileName("");
     setDoneSummary("");
@@ -152,6 +157,9 @@ export function Radar3MDropzone() {
         <div className="flex flex-wrap items-center gap-3">
           <span className="font-medium text-slate-900">{fileName}</span>
           <Badge variant="secondary">{clientes} clientes</Badge>
+          <Badge variant={columnasVenta >= meses.length ? "secondary" : "destructive"}>
+            {columnasVenta} col. Venta Acumulada
+          </Badge>
           <Badge variant="secondary">{panRows} filas</Badge>
           <Badge variant="secondary">
             {meses.length} {meses.length === 1 ? "mes" : "meses"}: {meses.join(", ")}

@@ -201,12 +201,38 @@ function findRadarColumns(headerRow: string[]): RadarColumnMap | null {
  * ratio y el encabezado real, que el radar de Panquecitas no trae. Por eso
  * se escanea hacia arriba en vez de mirar solo la fila inmediata anterior.
  */
-function findRadarRatioColumn(grid: string[][], headerRowIdx: number): number | null {
+/**
+ * TODAS las columnas "Venta Acumulada" que haya sobre el encabezado.
+ *
+ * Antes se devolvía solo la primera. En el reporte de un mes eso alcanza, pero
+ * el de 3 meses trae UNA COLUMNA POR MES: leyendo siempre la primera, las filas
+ * de junio y julio caían en 0 (síntoma real: 683 y 710 filas sin volumen) y el
+ * promedio salía calculado solo con mayo.
+ */
+function findRadarRatioColumns(grid: string[][], headerRowIdx: number): number[] {
+  const encontradas: number[] = [];
   for (let r = headerRowIdx - 1; r >= 0 && r >= headerRowIdx - 4; r--) {
-    const idx = grid[r].map(normalizeHeader).indexOf("ventaacumulada");
-    if (idx >= 0) return idx;
+    grid[r].forEach((celda, idx) => {
+      if (normalizeHeader(celda) === "ventaacumulada" && !encontradas.includes(idx)) {
+        encontradas.push(idx);
+      }
+    });
+    if (encontradas.length > 0) break; // la fila más cercana al encabezado manda
   }
-  return null;
+  return encontradas.sort((a, b) => a - b);
+}
+
+/**
+ * Valor de la fila entre las columnas de "Venta Acumulada": cada fila pertenece
+ * a un mes y solo la columna de ese mes trae cifra, así que se toma la primera
+ * distinta de cero. Con una sola columna se comporta igual que antes.
+ */
+function valorVentaAcumulada(row: string[], ratioCols: number[]): number {
+  for (const col of ratioCols) {
+    const valor = parseLatinNumber(row[col]);
+    if (valor !== 0) return valor;
+  }
+  return 0;
 }
 
 export function parseSapRadarMhtml(buffer: ArrayBuffer): SapRadarParseResult {
@@ -252,8 +278,8 @@ export function parseSapRadarMhtml(buffer: ArrayBuffer): SapRadarParseResult {
     };
   }
 
-  const ratioCol = findRadarRatioColumn(grid, headerRowIdx);
-  if (ratioCol === null) {
+  const ratioCols = findRadarRatioColumns(grid, headerRowIdx);
+  if (ratioCols.length === 0) {
     return {
       valid: [],
       errors: [{ row: 0, field: "formato", message: 'No se encontró la columna "Venta Acumulada" sobre el encabezado.' }],
@@ -303,7 +329,7 @@ export function parseSapRadarMhtml(buffer: ArrayBuffer): SapRadarParseResult {
       material_code: materialCode,
       material_name: (row[cols.materialNombre] ?? "").trim(),
       fecha,
-      quantity_kg: parseLatinNumber(row[ratioCol]),
+      quantity_kg: valorVentaAcumulada(row, ratioCols),
     };
     // Sin colapsar: una entrada por cliente+material+fecha.
     todasLasFilas.set(`${sapCode}|${materialCode}|${fecha}`, parsed);
@@ -321,7 +347,7 @@ export function parseSapRadarMhtml(buffer: ArrayBuffer): SapRadarParseResult {
     errors.push({ row: 0, field: "datos", message: "No se encontraron filas de datos en el reporte." });
   }
 
-  return { valid, errors, fechas: Array.from(fechasSet.values()), filas };
+  return { valid, errors, fechas: Array.from(fechasSet.values()), filas, columnasVenta: ratioCols.length };
 }
 
 // ════════════════════════════════════════════════════════════════
