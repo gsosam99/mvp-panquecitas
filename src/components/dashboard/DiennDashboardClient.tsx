@@ -24,7 +24,6 @@ import {
   Rendimiento3MChart,
   type Rendimiento3MRatioCiudad,
 } from "@/components/dashboard/Rendimiento3MChart";
-import { contarDiasHabiles } from "@/lib/business-days";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Separator } from "@/components/ui/separator";
 import {
@@ -277,6 +276,11 @@ export function DiennDashboardClient({
   // Se calcula acá con los bundles por sector que ya llegan del servidor.
   const [ratioPorCiudadPan, setRatioPorCiudadPan] = useState(false);
   const [ratioPorCiudad3M, setRatioPorCiudad3M] = useState(false);
+  // Acota el gráfico de 3 meses a una ciudad: sus ventas y el promedio de PAN de
+  // los clientes ubicados ahí. "TOTAL" devuelve el corte de la pestaña de arriba.
+  const [ciudad3M, setCiudad3M] = useState<"TOTAL" | Sector>("TOTAL");
+  // Ranking por segmento: volumen en kg o como % del total.
+  const [rankingComoPct, setRankingComoPct] = useState(false);
   const [panGranularity, setPanGranularity] = useState<PanComparisonGranularity>("month");
   const bundle = bundles[filter];
 
@@ -502,34 +506,51 @@ export function DiennDashboardClient({
     });
   }, [bundle, bundles, panPoblacion, panGranularity]);
 
-  // Ratio acumulado por ciudad para el gráfico de 3 meses: Σ Panquecitas de la
-  // ciudad ÷ (su promedio PAN × días hábiles transcurridos) × 100. Es la versión
-  // acumulada del mismo ratio diario, con el promedio de referencia de cada
-  // ciudad — no el global, porque cada una tiene su propio piso de PAN.
-  const ratios3MPorCiudad = useMemo<Rendimiento3MRatioCiudad[]>(() => {
-    const base = bundle.rendimiento3M[pan3mPoblacion].puntos;
-    if (base.length === 0) return [];
-    const serie = (s: Sector) => {
-      const r = bundles[s].rendimiento3M[pan3mPoblacion];
-      return { promedio: r.promedio3M, porDia: new Map(r.puntos.map((p) => [p.dia, p])) };
-    };
-    const c = serie("cumana");
-    const b = serie("barquisimeto_este");
-    const primerDia = base[0].dia;
+  // Gráfico de 3 meses: por ciudad o el corte de la pestaña de arriba. El bundle
+  // de cada sector ya trae sus ventas Y el promedio de PAN calculado solo con
+  // los clientes de esa ciudad, así que basta con cambiar de bundle.
+  const rendimiento3MData =
+    ciudad3M === "TOTAL"
+      ? bundle.rendimiento3M[pan3mPoblacion]
+      : bundles[ciudad3M].rendimiento3M[pan3mPoblacion];
 
-    let cAcum = 0;
-    let bAcum = 0;
+  // Ratio acumulado por ciudad (definición de DIENN, 18-08-2026): se acumulan
+  // los RATIOS DIARIOS que ya muestra el gráfico y se dividen entre el número de
+  // días con venta de Panquecitas. O sea, el promedio corrido de los ratios
+  // diarios — no Σ kg ÷ Σ referencia, que era lo que hacía antes.
+  //
+  // Cada ciudad usa su propio ratio diario, que ya viene calculado contra el
+  // promedio de PAN de esa ciudad.
+  const ratios3MPorCiudad = useMemo<Rendimiento3MRatioCiudad[]>(() => {
+    const base = rendimiento3MData.puntos;
+    if (base.length === 0) return [];
+    const porDia = (s: Sector) =>
+      new Map(bundles[s].rendimiento3M[pan3mPoblacion].puntos.map((p) => [p.dia, p]));
+    const c = porDia("cumana");
+    const b = porDia("barquisimeto_este");
+
+    let cSuma = 0;
+    let cDias = 0;
+    let bSuma = 0;
+    let bDias = 0;
     return base.map((p) => {
-      cAcum += c.porDia.get(p.dia)?.panquecitasKg ?? 0;
-      bAcum += b.porDia.get(p.dia)?.panquecitasKg ?? 0;
-      const dias = contarDiasHabiles(primerDia, p.dia);
+      const cp = c.get(p.dia);
+      if (cp) {
+        cSuma += cp.ratioPct;
+        cDias += 1;
+      }
+      const bp = b.get(p.dia);
+      if (bp) {
+        bSuma += bp.ratioPct;
+        bDias += 1;
+      }
       return {
         dia: p.dia,
-        ratioCumanaAcum: c.promedio > 0 ? Math.round((cAcum / (c.promedio * dias)) * 1000) / 10 : null,
-        ratioCabudareAcum: b.promedio > 0 ? Math.round((bAcum / (b.promedio * dias)) * 1000) / 10 : null,
+        ratioCumanaAcum: cDias > 0 ? Math.round((cSuma / cDias) * 10) / 10 : null,
+        ratioCabudareAcum: bDias > 0 ? Math.round((bSuma / bDias) * 10) / 10 : null,
       };
     });
-  }, [bundle, bundles, pan3mPoblacion]);
+  }, [rendimiento3MData, bundles, pan3mPoblacion]);
 
   const comboPoints = bundle.ventaRecompraActivacion[comboGranularity];
 
@@ -717,7 +738,12 @@ export function DiennDashboardClient({
               hacia atrás solo aportan el promedio de referencia: venta acumulada de los 3 meses ÷ días hábiles (L–V)
               de esos meses completos. Ambas poblaciones son de la cartera:{" "}
               <span className="font-medium">PAN Universo</span> son todos sus PDV, hayan comprado Panquecitas o no;{" "}
-              <span className="font-medium">PAN Cliente</span>, solo los que además compran Panquecitas.
+              <span className="font-medium">PAN Cliente</span>, solo los que además compran Panquecitas. Con{" "}
+              <span className="font-medium">Cumaná</span> o <span className="font-medium">Cabudare</span> el gráfico se
+              acota a esa ciudad: sus ventas contra el promedio de PAN de los clientes ubicados ahí.{" "}
+              <span className="font-medium">Total</span> vuelve al corte de las pestañas de arriba. Con la línea de PAN
+              visible el eje pasa a escala logarítmica, porque en lineal el promedio se lleva toda la altura y aplasta
+              la meta y el día a día.
             </p>
           </div>
           <div className="flex flex-wrap items-center gap-2 print:hidden">
@@ -734,6 +760,28 @@ export function DiennDashboardClient({
                   onClick={() => setPan3mPoblacion(key)}
                   className={`px-3 py-1.5 transition-colors ${
                     pan3mPoblacion === key ? "bg-slate-900 text-white" : "bg-white text-slate-500 hover:bg-slate-50"
+                  }`}
+                >
+                  {label}
+                </button>
+              ))}
+            </div>
+            {/* Acota el gráfico a una ciudad: sus ventas y el promedio de PAN de
+                los clientes ubicados ahí. "Total" vuelve al comportamiento
+                original (el corte de la pestaña de arriba). */}
+            <div className="flex rounded-lg border border-slate-200 overflow-hidden text-xs font-medium">
+              {(
+                [
+                  ["TOTAL", "Total"],
+                  ["cumana", "Cumaná"],
+                  ["barquisimeto_este", "Cabudare"],
+                ] as const
+              ).map(([key, label]) => (
+                <button
+                  key={key}
+                  onClick={() => setCiudad3M(key)}
+                  className={`px-3 py-1.5 transition-colors ${
+                    ciudad3M === key ? "bg-sky-700 text-white" : "bg-white text-slate-500 hover:bg-slate-50"
                   }`}
                 >
                   {label}
@@ -766,7 +814,7 @@ export function DiennDashboardClient({
             </button>
             <ExportExcelButton
               filename={`Rendimiento diario vs promedio 3M — ${filtroTexto}`}
-              rows={bundle.rendimiento3M[pan3mPoblacion].puntos}
+              rows={rendimiento3MData.puntos}
               columns={[
                 { header: "Día", value: (r) => r.dia, width: 14 },
                 { header: "Panquecitas (kg)", value: (r) => r.panquecitasKg, width: 18 },
@@ -776,10 +824,10 @@ export function DiennDashboardClient({
           </div>
         </CardHeader>
         <CardContent>
-          {bundle.rendimiento3M[pan3mPoblacion].puntos.length > 0 ? (
+          {rendimiento3MData.puntos.length > 0 ? (
             <>
               <Rendimiento3MChart
-                data={bundle.rendimiento3M[pan3mPoblacion]}
+                data={rendimiento3MData}
                 showPanDiario={showPanDiario}
                 ratiosCiudad={ratios3MPorCiudad}
                 showRatioCiudades={ratioPorCiudad3M}
@@ -787,18 +835,18 @@ export function DiennDashboardClient({
               <p className="text-xs text-slate-400 mt-2">
                 Promedio PAN 3M:{" "}
                 <span className="font-medium text-slate-600">
-                  {bundle.rendimiento3M[pan3mPoblacion].promedio3M.toLocaleString("es-VE", {
+                  {rendimiento3MData.promedio3M.toLocaleString("es-VE", {
                     maximumFractionDigits: 1,
                   })}{" "}
                   kg/día
                 </span>{" "}
-                ({bundle.rendimiento3M[pan3mPoblacion].totalPanKg.toLocaleString("es-VE", {
+                ({rendimiento3MData.totalPanKg.toLocaleString("es-VE", {
                   maximumFractionDigits: 0,
                 })}{" "}
-                kg ÷ {bundle.rendimiento3M[pan3mPoblacion].diasPeriodo} días hábiles, del{" "}
-                {bundle.rendimiento3M[pan3mPoblacion].desde} al {bundle.rendimiento3M[pan3mPoblacion].hasta}) · Meta 4%:{" "}
+                kg ÷ {rendimiento3MData.diasPeriodo} días hábiles, del{" "}
+                {rendimiento3MData.desde} al {rendimiento3MData.hasta}) · Meta 4%:{" "}
                 <span className="font-medium text-emerald-700">
-                  {bundle.rendimiento3M[pan3mPoblacion].meta4Pct.toLocaleString("es-VE", {
+                  {rendimiento3MData.meta4Pct.toLocaleString("es-VE", {
                     maximumFractionDigits: 1,
                   })}{" "}
                   kg/día
@@ -809,7 +857,7 @@ export function DiennDashboardClient({
             <div className="h-[340px] flex items-center justify-center text-slate-400">
               <div className="text-center">
                 <p className="text-4xl mb-2">📉</p>
-                {bundle.rendimiento3M[pan3mPoblacion].promedio3M > 0 ? (
+                {rendimiento3MData.promedio3M > 0 ? (
                   <>
                     <p>Sin ventas de Panquecitas desde el 03-08-2026.</p>
                     <p className="text-xs mt-1">El promedio de referencia ya está cargado; falta la venta del piloto.</p>
@@ -1722,9 +1770,30 @@ export function DiennDashboardClient({
             <p className="text-xs text-slate-400 mt-1">
               Volumen de Panquecitas (Carga Radar) por <span className="font-medium">Segmento de Clientes 2</span> de la
               Cartera Consolidada, de mayor a menor. El promedio diario por cliente es el volumen del segmento ÷ sus
-              clientes con venta ÷ los días hábiles desde el 03-08-2026.
+              clientes con venta ÷ los días hábiles desde el 03-08-2026. Con el botón de la derecha el panel de volumen
+              alterna entre kg y el porcentaje que representa ese segmento sobre el total.
             </p>
           </div>
+          <div className="flex flex-col items-end gap-2 print:hidden">
+            {/* Volumen en kg o como participación sobre el total de segmentos. */}
+            <div className="flex rounded-lg border border-slate-200 overflow-hidden text-xs font-medium">
+              {(
+                [
+                  [false, "Kg"],
+                  [true, "% del total"],
+                ] as const
+              ).map(([key, label]) => (
+                <button
+                  key={label}
+                  onClick={() => setRankingComoPct(key)}
+                  className={`px-3 py-1.5 transition-colors ${
+                    rankingComoPct === key ? "bg-slate-900 text-white" : "bg-white text-slate-500 hover:bg-slate-50"
+                  }`}
+                >
+                  {label}
+                </button>
+              ))}
+            </div>
           <ExportExcelButton
             filename={`Ranking de volumen por segmento — ${filtroTexto}`}
             rows={bundle.rankingSegmentos}
@@ -1737,6 +1806,7 @@ export function DiennDashboardClient({
               { header: "Prom. diario x cliente (kg)", value: (r) => r.promedioDiarioPorCliente, width: 26 },
             ]}
           />
+          </div>
         </CardHeader>
         <CardContent>
           {bundle.rankingSegmentos.length === 0 ? (
@@ -1750,7 +1820,7 @@ export function DiennDashboardClient({
               </div>
             </div>
           ) : (
-            <RankingSegmentoChart data={bundle.rankingSegmentos} />
+            <RankingSegmentoChart data={bundle.rankingSegmentos} comoPct={rankingComoPct} />
           )}
         </CardContent>
       </Card>

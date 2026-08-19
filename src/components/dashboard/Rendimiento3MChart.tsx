@@ -34,12 +34,27 @@ const Inner = dynamic(
       ratiosCiudad: Rendimiento3MRatioCiudad[];
       showRatioCiudades: boolean;
     }) {
-      // Tope del eje: el mayor entre la venta diaria más alta y las referencias
-      // visibles, con 10% de aire. Sin esto la línea del promedio de PAN, que
-      // suele ser un orden de magnitud mayor, no entra en el gráfico.
-      const maxPanquecitas = data.puntos.reduce((m, p) => Math.max(m, p.panquecitasKg), 0);
-      const maxReferencia = showPanDiario ? data.promedio3M : data.meta4Pct;
-      const maxY = Math.ceil(Math.max(maxPanquecitas, maxReferencia) * 1.1);
+      // Escala del eje de kg.
+      //
+      // El promedio de PAN es un orden de magnitud mayor que la venta diaria de
+      // Panquecitas (p. ej. 17.939 vs ~500 kg). Con eje LINEAL el promedio se
+      // lleva toda la altura, la meta del 4% queda pegada al piso y el
+      // comportamiento diario no se aprecia.
+      //
+      // Con la línea de PAN visible se usa escala LOGARÍTMICA: el promedio queda
+      // arriba como referencia, pero la meta y el día a día recuperan detalle.
+      // Con la línea apagada no hay rango extremo que resolver y se vuelve al
+      // eje lineal, que es más fácil de leer.
+      const valores = data.puntos.map((p) => p.panquecitasKg).filter((v) => v > 0);
+      const maxPanquecitas = valores.length > 0 ? Math.max(...valores) : 0;
+      const minPanquecitas = valores.length > 0 ? Math.min(...valores) : 1;
+
+      const escalaLog = showPanDiario && data.promedio3M > 0;
+      const maxLineal = Math.ceil(Math.max(maxPanquecitas, data.meta4Pct) * 1.15);
+      // En log el dominio no puede tocar el 0; se deja un piso por debajo del
+      // valor más chico para que ningún punto quede fuera.
+      const minLog = Math.max(1, Math.floor(Math.min(minPanquecitas, data.meta4Pct) * 0.6));
+      const maxLog = Math.ceil(data.promedio3M * 1.3);
 
       // Los ratios por ciudad llegan aparte y se pegan por día: van en su propio
       // eje porque son % y en la escala de kg quedarían pegados a cero.
@@ -59,7 +74,13 @@ const Inner = dynamic(
                 Recharts escala solo con las Panquecitas y el promedio de PAN
                 (mucho mayor) queda FUERA del área visible — por eso no se veía.
                 Eje oculto, igual que en Panquecitas vs Harina PAN. */}
-            <YAxis yAxisId="kg" hide domain={[0, maxY]} />
+            <YAxis
+              yAxisId="kg"
+              hide
+              scale={escalaLog ? "log" : "auto"}
+              domain={escalaLog ? [minLog, maxLog] : [0, maxLineal]}
+              allowDataOverflow
+            />
             {/* Eje propio para los ratios por ciudad (%). */}
             <YAxis yAxisId="pct" hide />
             <Tooltip

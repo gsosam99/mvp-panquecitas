@@ -14,6 +14,9 @@ import type { RankingSegmentoRow } from "@/lib/dienn-queries";
 // panel derecho no repite los nombres de segmento (reserva el eje sin dibujar
 // los rótulos) para no duplicar la lectura.
 
+/** Fila del ranking + su participación en el volumen total, que se deriva acá. */
+type FilaRanking = RankingSegmentoRow & { volumenPct: number };
+
 const Inner = dynamic(
   async () => {
     const { ResponsiveContainer, BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, LabelList } =
@@ -29,8 +32,8 @@ const Inner = dynamic(
       tooltipLabel,
       height,
     }: {
-      data: RankingSegmentoRow[];
-      dataKey: "volumenKg" | "promedioDiarioPorCliente";
+      data: FilaRanking[];
+      dataKey: "volumenKg" | "volumenPct" | "promedioDiarioPorCliente";
       fill: string;
       labelFill: string;
       mostrarSegmentos: boolean;
@@ -71,7 +74,13 @@ const Inner = dynamic(
       );
     }
 
-    function RankingSegmentoInner({ data }: { data: RankingSegmentoRow[] }) {
+    function RankingSegmentoInner({ data, comoPct }: { data: RankingSegmentoRow[]; comoPct: boolean }) {
+      // Porcentaje que representa cada segmento sobre el volumen total.
+      const totalKg = data.reduce((s, r) => s + r.volumenKg, 0);
+      const datos = data.map((r) => ({
+        ...r,
+        volumenPct: totalKg > 0 ? Math.round((r.volumenKg / totalKg) * 1000) / 10 : 0,
+      }));
       // Alto proporcional a la cantidad de segmentos; el mismo para los dos
       // paneles, que es lo que mantiene las filas alineadas.
       const height = Math.max(240, data.length * 42 + 40);
@@ -80,17 +89,21 @@ const Inner = dynamic(
         <div className="grid grid-cols-1 gap-4 lg:grid-cols-2">
           <div>
             <p className="text-xs font-semibold uppercase tracking-widest text-muted-foreground mb-1">
-              Volumen de Panquecitas (kg)
+              {comoPct ? "Participación en el volumen (%)" : "Volumen de Panquecitas (kg)"}
             </p>
             <Panel
-              data={data}
-              dataKey="volumenKg"
+              data={datos}
+              dataKey={comoPct ? "volumenPct" : "volumenKg"}
               fill="#3e7cb1"
               labelFill="#1f4e79"
               mostrarSegmentos
               height={height}
-              tooltipLabel="Volumen Radar"
-              formatLabel={(v) => `${v.toLocaleString("es-VE", { maximumFractionDigits: 0 })} kg`}
+              tooltipLabel={comoPct ? "% del volumen total" : "Volumen Radar"}
+              formatLabel={(v) =>
+                comoPct
+                  ? `${v.toLocaleString("es-VE", { maximumFractionDigits: 1 })}%`
+                  : `${v.toLocaleString("es-VE", { maximumFractionDigits: 0 })} kg`
+              }
             />
           </div>
           <div>
@@ -98,7 +111,7 @@ const Inner = dynamic(
               Promedio diario por cliente (kg)
             </p>
             <Panel
-              data={data}
+              data={datos}
               dataKey="promedioDiarioPorCliente"
               fill="#b4d0e7"
               labelFill="#1f4e79"
@@ -120,6 +133,12 @@ const Inner = dynamic(
   }
 );
 
-export function RankingSegmentoChart({ data }: { data: RankingSegmentoRow[] }) {
-  return <Inner data={data} />;
+export function RankingSegmentoChart({
+  data,
+  comoPct = false,
+}: {
+  data: RankingSegmentoRow[];
+  comoPct?: boolean;
+}) {
+  return <Inner data={data} comoPct={comoPct} />;
 }
