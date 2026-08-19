@@ -115,9 +115,21 @@ export async function POST(req: Request) {
       );
     }
 
-    const toInsert = [...byKey.values()]
+    const colapsadas = [...byKey.values()];
+    const toInsert = colapsadas
       .filter((r) => r.quantity_kg > 0)
       .map((r) => ({ ...r, upload_batch_id: batchId }));
+
+    // Diagnóstico fino: distingue "el mes no venía en el archivo" de "el mes
+    // venía pero su columna de volumen se leyó en 0". Sin esto no se puede
+    // saber si el problema es del parser o del reporte.
+    const mesesEnArchivo = [...new Set(colapsadas.map((r) => monthKey(r.date_of_sale)))].sort();
+    const sinVolumenPorMes: Record<string, number> = {};
+    for (const r of colapsadas) {
+      if (r.quantity_kg > 0) continue;
+      const m = monthKey(r.date_of_sale);
+      sinVolumenPorMes[m] = (sinVolumenPorMes[m] ?? 0) + 1;
+    }
 
     if (toInsert.length === 0) {
       return Response.json({ error: "El archivo no trajo ninguna fila con volumen." }, { status: 422 });
@@ -155,6 +167,18 @@ export async function POST(req: Request) {
       clientes_fuera_cartera: codigosFuera.size,
       clientes_en_archivo: sapCodes.length,
       meses: [...new Set(toInsert.map((r) => monthKey(r.date_of_sale)))].sort(),
+      meses_en_archivo: mesesEnArchivo,
+      sin_volumen_por_mes: sinVolumenPorMes,
+      // Total por mes: se compara de un vistazo contra el reporte y dice si
+      // algún mes se está leyendo corto.
+      total_kg_por_mes: Object.fromEntries(
+        mesesEnArchivo.map((m) => [
+          m,
+          Math.round(
+            toInsert.filter((r) => monthKey(r.date_of_sale) === m).reduce((s, r) => s + r.quantity_kg, 0) * 10
+          ) / 10,
+        ])
+      ),
       desde: fechas[0],
       hasta: fechas[fechas.length - 1],
       total_kg: Math.round(toInsert.reduce((s, r) => s + r.quantity_kg, 0) * 10) / 10,

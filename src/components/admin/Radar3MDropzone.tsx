@@ -66,6 +66,9 @@ export function Radar3MDropzone() {
         clientes_fuera_cartera?: number;
         clientes_en_archivo?: number;
         meses?: string[];
+        meses_en_archivo?: string[];
+        sin_volumen_por_mes?: Record<string, number>;
+        total_kg_por_mes?: Record<string, number>;
         desde?: string;
         hasta?: string;
         total_kg?: number;
@@ -80,13 +83,29 @@ export function Radar3MDropzone() {
       setState("done");
       // Resumen detallado a propósito: el promedio de referencia del gráfico
       // sale de estos números, así que hay que poder auditar de dónde salen.
+      const porMes = Object.entries(data.total_kg_por_mes ?? {})
+        .map(([m, kg]) => `${m}: ${kg.toLocaleString("es-VE", { maximumFractionDigits: 0 })} kg`)
+        .join(" · ");
       const partes = [
         `${data.inserted} registros guardados`,
         `${data.clientes_en_cartera} clientes de la cartera (de ${data.clientes_en_archivo} en el archivo)`,
-        `${data.meses?.length ?? 0} meses: ${data.meses?.join(", ") ?? "—"}`,
+        `${data.meses?.length ?? 0} meses con volumen: ${data.meses?.join(", ") ?? "—"}`,
         `rango ${data.desde} → ${data.hasta}`,
         `total ${(data.total_kg ?? 0).toLocaleString("es-VE", { maximumFractionDigits: 0 })} kg`,
       ];
+      if (porMes) partes.push(`por mes → ${porMes}`);
+      // Si el archivo traía meses que quedaron sin volumen, el problema no es
+      // el parser sino la lectura de la columna de kg de esos meses.
+      const mesesSinVolumen = (data.meses_en_archivo ?? []).filter((m) => !(data.meses ?? []).includes(m));
+      if (mesesSinVolumen.length > 0) {
+        partes.push(
+          `ATENCIÓN: ${mesesSinVolumen.join(", ")} vinieron en el archivo pero con volumen 0 (${Object.entries(
+            data.sin_volumen_por_mes ?? {}
+          )
+            .map(([m, n]) => `${m}: ${n} filas`)
+            .join(", ")})`
+        );
+      }
       if (data.clientes_fuera_cartera) {
         partes.push(`${data.clientes_fuera_cartera} clientes del archivo NO están en la cartera (ignorados)`);
       }
