@@ -5,7 +5,7 @@ import type { ParsedSapRadarRow } from "@/types";
 
 // ── "Radar últimos 3 Meses" ────────────────────────────────────────
 // Mismo formato de archivo que la Carga Radar, pero va a su propia tabla
-// (radar_3m_records, migration 017) y NO toca sap_sell_in_records: es el
+// (radar_3m_records, migrations 017 y 018) y NO toca sap_sell_in_records: es el
 // histórico de Harina PAN que sirve de referencia fija en el gráfico de
 // rendimiento diario, no venta viva del piloto.
 //
@@ -38,7 +38,9 @@ export async function POST(req: Request) {
       return Response.json({ error: "Datos inválidos" }, { status: 400 });
     }
 
-    // Solo clientes que ya están en la cartera (no se crean localidades acá).
+    // Se resuelve el cliente contra la cartera solo para poder marcar
+    // location_id (lo usa el filtro "PAN Cliente"). Los que no calzan igual se
+    // guardan: el promedio de referencia es la venta total del reporte.
     const sapCodes = [...new Set(rows.map((r) => r.sap_code))];
     const { data: locs, error: locError } = await supabase
       .from("locations")
@@ -52,27 +54,37 @@ export async function POST(req: Request) {
     // Colapsar por cliente+producto+mes, quedándose con la fecha más reciente:
     // "Venta Acumulada" se reinicia cada mes, así que el último corte de cada
     // mes ES el total de ese mes, y sumar los meses da el total del período.
-    const byKey = new Map<string, { location_id: string; product_id: string; quantity_kg: number; date_of_sale: string }>();
+    const byKey = new Map<
+      string,
+      { sap_code: string; location_id: string | null; product_id: string; quantity_kg: number; date_of_sale: string }
+    >();
     // Se cuentan CLIENTES distintos, no filas: un cliente aparece muchas veces
     // (una por corte diario) y contar filas daba un número sin significado.
     const codigosFuera = new Set<string>();
     const materialesNoMapeados = new Set<string>();
 
     for (const r of rows) {
-      const location_id = locationIds.get(r.sap_code);
-      if (!location_id) {
-        codigosFuera.add(r.sap_code);
-        continue;
-      }
+      // Los clientes que no están en la cartera NO se descartan: el promedio de
+      // referencia es la venta total del reporte. Solo se quedan sin
+      // location_id, lo que los excluye del filtro "PAN Cliente".
+      const location_id = locationIds.get(r.sap_code) ?? null;
+      if (!location_id) codigosFuera.add(r.sap_code);
+
       const product_id = SAP_RADAR_MATERIAL_PRODUCT_MAP[r.material_code];
       if (!product_id) {
         materialesNoMapeados.add(`${r.material_code} (${r.material_name})`);
         continue;
       }
-      const key = `${location_id}|${product_id}|${monthKey(r.fecha)}`;
+      const key = `${r.sap_code}|${product_id}|${monthKey(r.fecha)}`;
       const prev = byKey.get(key);
       if (!prev || r.fecha > prev.date_of_sale) {
-        byKey.set(key, { location_id, product_id, quantity_kg: r.quantity_kg, date_of_sale: r.fecha });
+        byKey.set(key, {
+          sap_code: r.sap_code,
+          location_id,
+          product_id,
+          quantity_kg: r.quantity_kg,
+          date_of_sale: r.fecha,
+        });
       }
     }
 
@@ -90,14 +102,14 @@ export async function POST(req: Request) {
       .map((r) => ({ ...r, upload_batch_id: batchId }));
 
     if (toInsert.length === 0) {
-      return Response.json({ error: "El archivo no trajo filas con volumen para clientes de la cartera." }, { status: 422 });
+      return Response.json({ error: "El archivo no trajo ninguna fila con volumen." }, { status: 422 });
     }
 
     // Primero inserta/marca y después borra lo de cargas anteriores, para no
     // quedar sin datos si el insert falla (no hay transacción vía REST).
     const { error: upsertError } = await supabase
       .from("radar_3m_records")
-      .upsert(toInsert, { onConflict: "location_id,product_id,date_of_sale", ignoreDuplicates: false });
+      .upsert(toInsert, { onConflict: "sap_code,product_id,date_of_sale", ignoreDuplicates: false });
     if (upsertError) throw upsertError;
 
     const { data: borradas, error: staleError } = await supabase
@@ -113,7 +125,7 @@ export async function POST(req: Request) {
     return Response.json({
       inserted: toInsert.length,
       reemplazadas: (borradas ?? []).length,
-      clientes_en_cartera: new Set(toInsert.map((r) => r.location_id)).size,
+      clientes_en_cartera: new Set(toInsert.filter((r) => r.location_id).map((r) => r.location_id)).size,
       clientes_fuera_cartera: codigosFuera.size,
       clientes_en_archivo: sapCodes.length,
       meses: [...new Set(toInsert.map((r) => monthKey(r.date_of_sale)))].sort(),
