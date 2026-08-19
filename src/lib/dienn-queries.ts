@@ -699,6 +699,13 @@ export interface Rendimiento3MResult {
   puntos: Rendimiento3MPunto[];
 }
 
+/** "2026-07" → "2026-07-31". Día 0 del mes siguiente = último día de este. */
+function ultimoDiaDelMes(mes: string): string {
+  const [y, m] = mes.split("-").map(Number);
+  const dia = new Date(Date.UTC(y, m, 0)).getUTCDate();
+  return `${mes}-${String(dia).padStart(2, "0")}`;
+}
+
 const RENDIMIENTO_3M_VACIO: Rendimiento3MResult = {
   promedio3M: 0,
   meta4Pct: 0,
@@ -763,18 +770,19 @@ export async function getRendimiento3M(
   if (panFiltrado.length === 0) return RENDIMIENTO_3M_VACIO;
   const totalPanKg = panFiltrado.reduce((s, r) => s + Number(r.quantity_kg), 0);
 
-  // Días del período de referencia, en DÍAS HÁBILES (el producto se despacha de
-  // lunes a viernes; dividir entre días corridos subestimaría el ritmo real).
+  // Promedio = venta acumulada de los 3 meses ÷ días hábiles de esos 3 meses
+  // COMPLETOS (definición de DIENN, 18-08-2026).
   //
-  // OJO con el punto de partida: en radar_3m_records se guarda UN corte por mes
-  // (el último, que es el acumulado del mes completo), así que la fecha más
-  // antigua es un fin de mes, no el inicio del período. Usar esa fecha dejaba
-  // fuera casi un mes entero y inflaba el promedio. El acumulado de un mes cubre
-  // ese mes desde el día 1, así que el período arranca el día 1 del mes más
-  // antiguo presente.
+  // El período NO se toma de las fechas guardadas: en radar_3m_records hay un
+  // corte por mes (el último, que es el acumulado del mes entero), así que la
+  // fecha más antigua es un fin de mes y la más nueva es el corte de julio, que
+  // puede no ser el 31. Tomarlas literal recortaba el período por los dos
+  // extremos e inflaba el promedio. Se usan los MESES presentes, de su primer
+  // día al último.
   const fechasPan = panFiltrado.map((r) => r.date_of_sale.slice(0, 10)).sort();
   const inicioPeriodo = `${fechasPan[0].slice(0, 7)}-01`;
-  const diasPeriodo = contarDiasHabiles(inicioPeriodo, fechasPan[fechasPan.length - 1]);
+  const finPeriodo = ultimoDiaDelMes(fechasPan[fechasPan.length - 1].slice(0, 7));
+  const diasPeriodo = contarDiasHabiles(inicioPeriodo, finPeriodo);
 
   const promedio3M = totalPanKg / diasPeriodo;
   if (promedio3M <= 0) return RENDIMIENTO_3M_VACIO;
@@ -803,7 +811,7 @@ export async function getRendimiento3M(
     meta4Pct: Math.round(promedio3M * 0.04 * 10) / 10,
     diasPeriodo,
     desde: inicioPeriodo,
-    hasta: fechasPan[fechasPan.length - 1],
+    hasta: finPeriodo,
     totalPanKg: Math.round(totalPanKg * 10) / 10,
     puntos,
   };
