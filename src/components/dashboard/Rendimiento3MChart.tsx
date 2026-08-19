@@ -67,7 +67,7 @@ const Inner = dynamic(
 
       return (
         <ResponsiveContainer width="100%" height={340}>
-          <ComposedChart data={chartData} margin={{ top: 24, right: 16, left: 10, bottom: 5 }}>
+          <ComposedChart data={chartData} margin={{ top: 34, right: 16, left: 10, bottom: 5 }}>
             <CartesianGrid strokeDasharray="3 3" stroke="#f1f5f9" vertical={false} />
             <XAxis dataKey="label" tick={{ fontSize: 11, fill: "#94a3b8" }} minTickGap={16} />
             {/* El dominio se fuerza a incluir las líneas fijas: en automático
@@ -125,8 +125,9 @@ const Inner = dynamic(
                 label={{
                   value: `Promedio PAN 3M: ${data.promedio3M.toLocaleString("es-VE", { maximumFractionDigits: 0 })} kg/día`,
                   position: "insideTopLeft",
-                  fill: "#475569",
-                  fontSize: 10,
+                  fill: "#334155",
+                  fontSize: 13,
+                  fontWeight: 600,
                 }}
               />
             )}
@@ -141,7 +142,8 @@ const Inner = dynamic(
                 value: `Meta 4%: ${data.meta4Pct.toLocaleString("es-VE", { maximumFractionDigits: 0 })} kg/día`,
                 position: "insideBottomLeft",
                 fill: "#15803d",
-                fontSize: 10,
+                fontSize: 13,
+                fontWeight: 600,
               }}
             />
             {/* Suavizada y con el mismo grosor/puntos que Panquecitas vs Harina PAN. */}
@@ -154,12 +156,15 @@ const Inner = dynamic(
               dot={{ r: 3, fill: "#1a65bd" }}
               isAnimationActive={false}
             >
+              {/* Ratio del día: es el dato que se lee, así que va más grande y en
+                  seminegrita — con 9px se perdía sobre la línea. */}
               <LabelList
                 dataKey="ratioPct"
                 position="top"
-                offset={6}
+                offset={8}
                 fill="#1a65bd"
-                fontSize={9}
+                fontSize={13}
+                fontWeight={600}
                 formatter={(v) => `${Number(v ?? 0)}%`}
               />
             </Line>
