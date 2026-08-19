@@ -273,11 +273,17 @@ export function parseSapRadarMhtml(buffer: ArrayBuffer): SapRadarParseResult {
     const row = grid[r];
     const sapCode = (row[cols.clienteCodigo] ?? "").trim();
     if (!sapCode) continue;
-    if (normalizeHeader(sapCode) === "resultadototal") break; // fila de totales: fin de los datos
+    // Filas de subtotal de SAP ("Resultado", "Resultado total"): se SALTAN, no
+    // cortan la lectura. Antes esto era un break, y como el export con jerarquía
+    // por mes trae un subtotal AL FINAL DE CADA MES, el reporte de 3 meses se
+    // dejaba de leer al terminar el primero — solo cargaba mayo.
+    if (normalizeHeader(sapCode).startsWith("resultado")) continue;
 
     const diaRaw = (row[cols.dia] ?? "").trim();
     const fecha = parseSapDate(diaRaw);
     if (!fecha) {
+      // Una fecha ilegible después de un subtotal suele ser pie de página, no
+      // un dato perdido; se registra igual para no ocultar problemas reales.
       errors.push({ row: r + 1, field: "dia", message: `"Día" inválido: "${diaRaw}".` });
       continue;
     }
