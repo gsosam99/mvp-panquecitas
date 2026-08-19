@@ -12,12 +12,19 @@ import { VentaRecompraActivacionChart } from "@/components/dashboard/VentaRecomp
 import { PosicionPdvChart } from "@/components/dashboard/PosicionPdvChart";
 import { SellOutPorPosicionChart } from "@/components/dashboard/SellOutPorPosicionChart";
 import { CarteraTotalDiaChart, type CarteraTotalDiaChartPoint } from "@/components/dashboard/CarteraTotalDiaChart";
-import { PanVsHarinaPanChart } from "@/components/dashboard/PanVsHarinaPanChart";
+import {
+  PanVsHarinaPanChart,
+  type PanVsHarinaPanChartPoint,
+} from "@/components/dashboard/PanVsHarinaPanChart";
 import { RoundLegend } from "@/components/dashboard/RoundLegend";
 import { SellOutResumenChart } from "@/components/dashboard/SellOutResumenChart";
 import { PrecioCorrectoChart } from "@/components/dashboard/PrecioCorrectoChart";
 import { RankingSegmentoChart } from "@/components/dashboard/RankingSegmentoChart";
-import { Rendimiento3MChart } from "@/components/dashboard/Rendimiento3MChart";
+import {
+  Rendimiento3MChart,
+  type Rendimiento3MRatioCiudad,
+} from "@/components/dashboard/Rendimiento3MChart";
+import { contarDiasHabiles } from "@/lib/business-days";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Separator } from "@/components/ui/separator";
 import {
@@ -266,6 +273,10 @@ export function DiennDashboardClient({
   // visibilidad de la línea fija de PAN (su escala aplasta la de Panquecitas).
   const [pan3mPoblacion, setPan3mPoblacion] = useState<Pan3MPoblacion>("clientes");
   const [showPanDiario, setShowPanDiario] = useState(true);
+  // Ratio ACUMULADO por ciudad, superpuesto en los dos gráficos vs Harina PAN.
+  // Se calcula acá con los bundles por sector que ya llegan del servidor.
+  const [ratioPorCiudadPan, setRatioPorCiudadPan] = useState(false);
+  const [ratioPorCiudad3M, setRatioPorCiudad3M] = useState(false);
   const [panGranularity, setPanGranularity] = useState<PanComparisonGranularity>("month");
   const bundle = bundles[filter];
 
@@ -456,7 +467,69 @@ export function DiennDashboardClient({
     [precioCorrecto, precioCiudad]
   );
 
-  const panPoints = bundle.panVsHarinaPan[panPoblacion][panGranularity];
+  // Panquecitas vs Harina PAN + el ratio ACUMULADO de cada ciudad. El acumulado
+  // se arrastra sumando kg bucket a bucket (Σ Panquecitas ÷ Σ HPM), no
+  // promediando ratios: un promedio de ratios daría mal si los volúmenes por
+  // período son muy distintos. Sale de los bundles por sector, que ya vienen
+  // calculados desde el servidor.
+  const panPoints = useMemo<PanVsHarinaPanChartPoint[]>(() => {
+    const base = bundle.panVsHarinaPan[panPoblacion][panGranularity];
+    const idxPorSector = (s: Sector) =>
+      new Map(bundles[s].panVsHarinaPan[panPoblacion][panGranularity].map((p) => [p.bucket, p]));
+    const cIdx = idxPorSector("cumana");
+    const bIdx = idxPorSector("barquisimeto_este");
+
+    let cPanq = 0;
+    let cHpm = 0;
+    let bPanq = 0;
+    let bHpm = 0;
+    return base.map((p) => {
+      const c = cIdx.get(p.bucket);
+      if (c) {
+        cPanq += c.panquecitasKg;
+        cHpm += c.harinaPanKg;
+      }
+      const b = bIdx.get(p.bucket);
+      if (b) {
+        bPanq += b.panquecitasKg;
+        bHpm += b.harinaPanKg;
+      }
+      return {
+        ...p,
+        ratioCumanaAcum: cHpm > 0 ? Math.round((cPanq / cHpm) * 1000) / 10 : null,
+        ratioCabudareAcum: bHpm > 0 ? Math.round((bPanq / bHpm) * 1000) / 10 : null,
+      };
+    });
+  }, [bundle, bundles, panPoblacion, panGranularity]);
+
+  // Ratio acumulado por ciudad para el gráfico de 3 meses: Σ Panquecitas de la
+  // ciudad ÷ (su promedio PAN × días hábiles transcurridos) × 100. Es la versión
+  // acumulada del mismo ratio diario, con el promedio de referencia de cada
+  // ciudad — no el global, porque cada una tiene su propio piso de PAN.
+  const ratios3MPorCiudad = useMemo<Rendimiento3MRatioCiudad[]>(() => {
+    const base = bundle.rendimiento3M[pan3mPoblacion].puntos;
+    if (base.length === 0) return [];
+    const serie = (s: Sector) => {
+      const r = bundles[s].rendimiento3M[pan3mPoblacion];
+      return { promedio: r.promedio3M, porDia: new Map(r.puntos.map((p) => [p.dia, p])) };
+    };
+    const c = serie("cumana");
+    const b = serie("barquisimeto_este");
+    const primerDia = base[0].dia;
+
+    let cAcum = 0;
+    let bAcum = 0;
+    return base.map((p) => {
+      cAcum += c.porDia.get(p.dia)?.panquecitasKg ?? 0;
+      bAcum += b.porDia.get(p.dia)?.panquecitasKg ?? 0;
+      const dias = contarDiasHabiles(primerDia, p.dia);
+      return {
+        dia: p.dia,
+        ratioCumanaAcum: c.promedio > 0 ? Math.round((cAcum / (c.promedio * dias)) * 1000) / 10 : null,
+        ratioCabudareAcum: b.promedio > 0 ? Math.round((bAcum / (b.promedio * dias)) * 1000) / 10 : null,
+      };
+    });
+  }, [bundle, bundles, pan3mPoblacion]);
 
   const comboPoints = bundle.ventaRecompraActivacion[comboGranularity];
 
@@ -590,6 +663,18 @@ export function DiennDashboardClient({
                 </button>
               ))}
             </div>
+            {/* Ratio acumulado por ciudad, superpuesto (eje propio en %). */}
+            <button
+              onClick={() => setRatioPorCiudadPan((v) => !v)}
+              title="Superpone el ratio Panquecitas/Harina PAN acumulado de cada ciudad"
+              className={`px-3 py-1.5 rounded-lg border text-xs font-medium transition-colors ${
+                ratioPorCiudadPan
+                  ? "border-sky-700 bg-sky-700 text-white"
+                  : "border-slate-200 bg-white text-slate-500 hover:bg-slate-50"
+              }`}
+            >
+              Ratio acum. por ciudad
+            </button>
             <ExportExcelButton
               filename="datos_panquecitas_vs_harina_pan"
               rows={panPoints}
@@ -597,13 +682,15 @@ export function DiennDashboardClient({
                 { header: "Período", value: (r) => r.label },
                 { header: "Panquecitas (kg)", value: (r) => r.panquecitasKg },
                 { header: "Harina PAN (kg)", value: (r) => r.harinaPanKg },
+                { header: "Ratio acum. Cumaná (%)", value: (r) => r.ratioCumanaAcum ?? "" },
+                { header: "Ratio acum. Cabudare (%)", value: (r) => r.ratioCabudareAcum ?? "" },
               ]}
             />
           </div>
         </CardHeader>
         <CardContent>
           {panPoints.length > 0 ? (
-            <PanVsHarinaPanChart data={panPoints} />
+            <PanVsHarinaPanChart data={panPoints} showRatioCiudades={ratioPorCiudadPan} />
           ) : (
             <div className="h-[300px] flex items-center justify-center text-slate-400">
               <div className="text-center">
@@ -665,6 +752,18 @@ export function DiennDashboardClient({
             >
               Línea PAN: {showPanDiario ? "Visible" : "Oculta"}
             </button>
+            {/* Mismo desglose que en Panquecitas vs Harina PAN. */}
+            <button
+              onClick={() => setRatioPorCiudad3M((v) => !v)}
+              title="Superpone el ratio acumulado de cada ciudad contra su propio promedio de PAN"
+              className={`px-3 py-1.5 rounded-lg border text-xs font-medium transition-colors ${
+                ratioPorCiudad3M
+                  ? "border-sky-700 bg-sky-700 text-white"
+                  : "border-slate-200 bg-white text-slate-500 hover:bg-slate-50"
+              }`}
+            >
+              Ratio acum. por ciudad
+            </button>
             <ExportExcelButton
               filename={`Rendimiento diario vs promedio 3M — ${filtroTexto}`}
               rows={bundle.rendimiento3M[pan3mPoblacion].puntos}
@@ -679,7 +778,12 @@ export function DiennDashboardClient({
         <CardContent>
           {bundle.rendimiento3M[pan3mPoblacion].puntos.length > 0 ? (
             <>
-              <Rendimiento3MChart data={bundle.rendimiento3M[pan3mPoblacion]} showPanDiario={showPanDiario} />
+              <Rendimiento3MChart
+                data={bundle.rendimiento3M[pan3mPoblacion]}
+                showPanDiario={showPanDiario}
+                ratiosCiudad={ratios3MPorCiudad}
+                showRatioCiudades={ratioPorCiudad3M}
+              />
               <p className="text-xs text-slate-400 mt-2">
                 Promedio PAN 3M:{" "}
                 <span className="font-medium text-slate-600">

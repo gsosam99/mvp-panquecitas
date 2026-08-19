@@ -3,6 +3,13 @@
 import dynamic from "next/dynamic";
 import type { Rendimiento3MResult } from "@/lib/dienn-queries";
 
+/** Ratio ACUMULADO por ciudad, alineado por día con data.puntos. */
+export interface Rendimiento3MRatioCiudad {
+  dia: string;
+  ratioCumanaAcum: number | null;
+  ratioCabudareAcum: number | null;
+}
+
 // Rendimiento diario de Panquecitas contra el promedio histórico de Harina PAN
 // de los últimos 3 meses (punto 1 del documento de cambios).
 //
@@ -19,9 +26,13 @@ const Inner = dynamic(
     function Rendimiento3MInner({
       data,
       showPanDiario,
+      ratiosCiudad,
+      showRatioCiudades,
     }: {
       data: Rendimiento3MResult;
       showPanDiario: boolean;
+      ratiosCiudad: Rendimiento3MRatioCiudad[];
+      showRatioCiudades: boolean;
     }) {
       // Tope del eje: el mayor entre la venta diaria más alta y las referencias
       // visibles, con 10% de aire. Sin esto la línea del promedio de PAN, que
@@ -30,19 +41,34 @@ const Inner = dynamic(
       const maxReferencia = showPanDiario ? data.promedio3M : data.meta4Pct;
       const maxY = Math.ceil(Math.max(maxPanquecitas, maxReferencia) * 1.1);
 
+      // Los ratios por ciudad llegan aparte y se pegan por día: van en su propio
+      // eje porque son % y en la escala de kg quedarían pegados a cero.
+      const ratioPorDia = new Map(ratiosCiudad.map((r) => [r.dia, r]));
+      const chartData = data.puntos.map((p) => ({
+        ...p,
+        ratioCumanaAcum: ratioPorDia.get(p.dia)?.ratioCumanaAcum ?? null,
+        ratioCabudareAcum: ratioPorDia.get(p.dia)?.ratioCabudareAcum ?? null,
+      }));
+
       return (
         <ResponsiveContainer width="100%" height={340}>
-          <ComposedChart data={data.puntos} margin={{ top: 24, right: 16, left: 10, bottom: 5 }}>
+          <ComposedChart data={chartData} margin={{ top: 24, right: 16, left: 10, bottom: 5 }}>
             <CartesianGrid strokeDasharray="3 3" stroke="#f1f5f9" vertical={false} />
             <XAxis dataKey="label" tick={{ fontSize: 11, fill: "#94a3b8" }} minTickGap={16} />
             {/* El dominio se fuerza a incluir las líneas fijas: en automático
                 Recharts escala solo con las Panquecitas y el promedio de PAN
                 (mucho mayor) queda FUERA del área visible — por eso no se veía.
                 Eje oculto, igual que en Panquecitas vs Harina PAN. */}
-            <YAxis hide domain={[0, maxY]} />
+            <YAxis yAxisId="kg" hide domain={[0, maxY]} />
+            {/* Eje propio para los ratios por ciudad (%). */}
+            <YAxis yAxisId="pct" hide />
             <Tooltip
               contentStyle={{ fontSize: 12, borderRadius: 8, border: "1px solid #e2e8f0" }}
               formatter={(value, name, item) => {
+                if (name === "ratioCumanaAcum")
+                  return [`${Number(value ?? 0)}%`, "Ratio acumulado — Cumaná"];
+                if (name === "ratioCabudareAcum")
+                  return [`${Number(value ?? 0)}%`, "Ratio acumulado — Cabudare"];
                 if (name === "panquecitasKg") {
                   // Cast defensivo: el tipo del item del tooltip varía entre
                   // versiones de Recharts y solo se necesita el ratio del punto.
@@ -57,12 +83,21 @@ const Inner = dynamic(
               }}
             />
             <Legend
-              formatter={(value: string) => (value === "panquecitasKg" ? "Panquecitas del día (kg)" : value)}
+              formatter={(value: string) =>
+                value === "panquecitasKg"
+                  ? "Panquecitas del día (kg)"
+                  : value === "ratioCumanaAcum"
+                  ? "Ratio acum. — Cumaná"
+                  : value === "ratioCabudareAcum"
+                  ? "Ratio acum. — Cabudare"
+                  : value
+              }
               wrapperStyle={{ fontSize: 12 }}
             />
             {/* Indicador Fijo A: promedio diario de Harina PAN de los 3 meses. */}
             {showPanDiario && (
               <ReferenceLine
+                yAxisId="kg"
                 y={data.promedio3M}
                 stroke="#64748b"
                 strokeWidth={2}
@@ -76,6 +111,7 @@ const Inner = dynamic(
             )}
             {/* Indicador Fijo B: 4% de ese promedio — la meta. */}
             <ReferenceLine
+              yAxisId="kg"
               y={data.meta4Pct}
               stroke="#16a34a"
               strokeWidth={2}
@@ -89,6 +125,7 @@ const Inner = dynamic(
             />
             {/* Suavizada y con el mismo grosor/puntos que Panquecitas vs Harina PAN. */}
             <Line
+              yAxisId="kg"
               type="monotone"
               dataKey="panquecitasKg"
               stroke="#1a65bd"
@@ -105,6 +142,35 @@ const Inner = dynamic(
                 formatter={(v) => `${Number(v ?? 0)}%`}
               />
             </Line>
+            {/* Ratio ACUMULADO por ciudad (opcional): Σ Panquecitas de la ciudad ÷
+                (su promedio PAN × días hábiles transcurridos). Mismos tonos de
+                azul que el resto del dashboard. */}
+            {showRatioCiudades && (
+              <Line
+                yAxisId="pct"
+                type="monotone"
+                dataKey="ratioCumanaAcum"
+                stroke="#3e7cb1"
+                strokeWidth={2}
+                strokeDasharray="5 3"
+                dot={{ r: 2, fill: "#3e7cb1" }}
+                connectNulls
+                isAnimationActive={false}
+              />
+            )}
+            {showRatioCiudades && (
+              <Line
+                yAxisId="pct"
+                type="monotone"
+                dataKey="ratioCabudareAcum"
+                stroke="#1f4e79"
+                strokeWidth={2}
+                strokeDasharray="2 3"
+                dot={{ r: 2, fill: "#1f4e79" }}
+                connectNulls
+                isAnimationActive={false}
+              />
+            )}
           </ComposedChart>
         </ResponsiveContainer>
       );
@@ -121,9 +187,20 @@ const Inner = dynamic(
 export function Rendimiento3MChart({
   data,
   showPanDiario = true,
+  ratiosCiudad = [],
+  showRatioCiudades = false,
 }: {
   data: Rendimiento3MResult;
   showPanDiario?: boolean;
+  ratiosCiudad?: Rendimiento3MRatioCiudad[];
+  showRatioCiudades?: boolean;
 }) {
-  return <Inner data={data} showPanDiario={showPanDiario} />;
+  return (
+    <Inner
+      data={data}
+      showPanDiario={showPanDiario}
+      ratiosCiudad={ratiosCiudad}
+      showRatioCiudades={showRatioCiudades}
+    />
+  );
 }
