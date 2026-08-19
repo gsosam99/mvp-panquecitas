@@ -688,7 +688,8 @@ export function DiennDashboardClient({
                 ({bundle.rendimiento3M[pan3mPoblacion].totalPanKg.toLocaleString("es-VE", {
                   maximumFractionDigits: 0,
                 })}{" "}
-                kg ÷ {bundle.rendimiento3M[pan3mPoblacion].diasPeriodo} días) · Meta 4%:{" "}
+                kg ÷ {bundle.rendimiento3M[pan3mPoblacion].diasPeriodo} días hábiles, del{" "}
+                {bundle.rendimiento3M[pan3mPoblacion].desde} al {bundle.rendimiento3M[pan3mPoblacion].hasta}) · Meta 4%:{" "}
                 <span className="font-medium text-emerald-700">
                   {bundle.rendimiento3M[pan3mPoblacion].meta4Pct.toLocaleString("es-VE", {
                     maximumFractionDigits: 1,

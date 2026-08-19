@@ -167,7 +167,19 @@ export function CarteraDropzone({ onCommitSuccess }: CarteraDropzoneProps) {
               {parseResult.errors.length > 0 && (
                 <Badge variant="destructive">{parseResult.errors.length} errores</Badge>
               )}
+              {/* El ranking por segmento de DIENN depende de esta columna: hay que
+                  poder ver ANTES de confirmar si se reconoció o no. */}
+              <Badge variant={parseResult.segmentoDetectado ? "secondary" : "destructive"}>
+                {parseResult.segmentoDetectado ? "Segmento de Clientes 2 ✓" : "Sin columna de segmento"}
+              </Badge>
             </div>
+            {!parseResult.segmentoDetectado && parseResult.headers && (
+              <div className="text-xs text-slate-500">
+                No reconocí la columna de segmento. Debe llamarse{" "}
+                <span className="font-medium">&quot;Segmento de Clientes 2&quot;</span>. Encabezados encontrados en el
+                archivo: <span className="font-mono">{parseResult.headers.join(" · ")}</span>
+              </div>
+            )}
           </div>
           <Button variant="ghost" size="sm" onClick={handleReset}>
             Cambiar archivo

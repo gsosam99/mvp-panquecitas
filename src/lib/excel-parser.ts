@@ -202,7 +202,15 @@ export async function parseCarteraExcel(buffer: ArrayBuffer): Promise<CarteraPar
     errors.push({ row: 0, field: "datos", message: "No se encontraron filas de clientes." });
   }
 
-  return { valid, errors };
+  // Encabezados crudos de la fila de header, para poder decir POR QUÉ no se
+  // reconoció una columna en vez de dejar el gráfico vacío sin explicación.
+  const headers: string[] = [];
+  ws.getRow(headerRowNum).eachCell({ includeEmpty: false }, (cell) => {
+    const texto = String(cell.value ?? "").trim();
+    if (texto) headers.push(texto);
+  });
+
+  return { valid, errors, headers, segmentoDetectado: col.segmento_cliente !== undefined };
 }
 
 function parseDateCell(value: unknown): string | null {

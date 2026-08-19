@@ -49,15 +49,19 @@ export async function POST(req: Request) {
       ((locs ?? []) as { id: string; sap_code: string }[]).map((l) => [l.sap_code, l.id])
     );
 
-    // Colapsar por cliente+producto+mes, quedándose con la fecha más reciente.
+    // Colapsar por cliente+producto+mes, quedándose con la fecha más reciente:
+    // "Venta Acumulada" se reinicia cada mes, así que el último corte de cada
+    // mes ES el total de ese mes, y sumar los meses da el total del período.
     const byKey = new Map<string, { location_id: string; product_id: string; quantity_kg: number; date_of_sale: string }>();
-    let fueraCartera = 0;
+    // Se cuentan CLIENTES distintos, no filas: un cliente aparece muchas veces
+    // (una por corte diario) y contar filas daba un número sin significado.
+    const codigosFuera = new Set<string>();
     const materialesNoMapeados = new Set<string>();
 
     for (const r of rows) {
       const location_id = locationIds.get(r.sap_code);
       if (!location_id) {
-        fueraCartera++;
+        codigosFuera.add(r.sap_code);
         continue;
       }
       const product_id = SAP_RADAR_MATERIAL_PRODUCT_MAP[r.material_code];
@@ -103,10 +107,19 @@ export async function POST(req: Request) {
       .select("id");
     if (staleError) throw staleError;
 
+    // Diagnóstico: sin esto, un "10 registros" no dice si el archivo venía
+    // corto, si los clientes no calzan con la cartera o si faltan meses.
+    const fechas = toInsert.map((r) => r.date_of_sale).sort();
     return Response.json({
       inserted: toInsert.length,
       reemplazadas: (borradas ?? []).length,
-      clientes_fuera_cartera: fueraCartera,
+      clientes_en_cartera: new Set(toInsert.map((r) => r.location_id)).size,
+      clientes_fuera_cartera: codigosFuera.size,
+      clientes_en_archivo: sapCodes.length,
+      meses: [...new Set(toInsert.map((r) => monthKey(r.date_of_sale)))].sort(),
+      desde: fechas[0],
+      hasta: fechas[fechas.length - 1],
+      total_kg: Math.round(toInsert.reduce((s, r) => s + r.quantity_kg, 0) * 10) / 10,
     });
   } catch (error) {
     console.error("[POST /api/radar-3m-upload]", error);

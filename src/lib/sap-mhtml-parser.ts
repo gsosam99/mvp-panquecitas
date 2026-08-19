@@ -265,6 +265,10 @@ export function parseSapRadarMhtml(buffer: ArrayBuffer): SapRadarParseResult {
   // TODAS las fechas distintas por cliente+material (para la recompra): a
   // diferencia de `latestByKey`, aquí NO se descartan los cortes intermedios.
   const fechasSet = new Map<string, { sap_code: string; material_code: string; fecha: string }>();
+  // Todas las filas sin colapsar (cliente+material+FECHA), con su kg. Necesario
+  // para reportes de varios meses, donde el "Venta Acumulada" se reinicia cada
+  // mes y quedarse solo con el último corte perdería los meses anteriores.
+  const todasLasFilas = new Map<string, ParsedSapRadarRow>();
   for (let r = headerRowIdx + 1; r < grid.length; r++) {
     const row = grid[r];
     const sapCode = (row[cols.clienteCodigo] ?? "").trim();
@@ -281,11 +285,7 @@ export function parseSapRadarMhtml(buffer: ArrayBuffer): SapRadarParseResult {
     const materialCode = (row[cols.materialCodigo] ?? "").trim();
     // Registra la fecha (distinta por cliente+material+fecha) antes de colapsar.
     fechasSet.set(`${sapCode}|${materialCode}|${fecha}`, { sap_code: sapCode, material_code: materialCode, fecha });
-    const key = `${sapCode}|${materialCode}`;
-    const existing = latestByKey.get(key);
-    if (existing && existing.fecha >= fecha) continue; // ya hay una fila más reciente para esta llave
-
-    latestByKey.set(key, {
+    const parsed: ParsedSapRadarRow = {
       sap_code: sapCode,
       client_name: (row[cols.clienteNombre] ?? "").trim(),
       tipo_cliente: (row[cols.tipoCliente] ?? "").trim().toUpperCase(),
@@ -298,15 +298,24 @@ export function parseSapRadarMhtml(buffer: ArrayBuffer): SapRadarParseResult {
       material_name: (row[cols.materialNombre] ?? "").trim(),
       fecha,
       quantity_kg: parseLatinNumber(row[ratioCol]),
-    });
+    };
+    // Sin colapsar: una entrada por cliente+material+fecha.
+    todasLasFilas.set(`${sapCode}|${materialCode}|${fecha}`, parsed);
+
+    const key = `${sapCode}|${materialCode}`;
+    const existing = latestByKey.get(key);
+    if (existing && existing.fecha >= fecha) continue; // ya hay una fila más reciente para esta llave
+
+    latestByKey.set(key, parsed);
   }
 
+  const filas = Array.from(todasLasFilas.values());
   const valid = Array.from(latestByKey.values());
   if (valid.length === 0 && errors.length === 0) {
     errors.push({ row: 0, field: "datos", message: "No se encontraron filas de datos en el reporte." });
   }
 
-  return { valid, errors, fechas: Array.from(fechasSet.values()) };
+  return { valid, errors, fechas: Array.from(fechasSet.values()), filas };
 }
 
 // ════════════════════════════════════════════════════════════════

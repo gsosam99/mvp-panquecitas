@@ -198,6 +198,13 @@ export interface SapRadarParseResult {
   // cliente). Ver tabla radar_ventas_fechas. Opcional: los returns de error
   // temprano no lo traen.
   fechas?: { sap_code: string; material_code: string; fecha: string }[];
+  // TODAS las filas del archivo SIN colapsar, con su kg y su fecha. `valid` se
+  // queda con el último corte por cliente+material, que sirve para el acumulado
+  // del MES en curso pero pierde los meses anteriores — inservible para un
+  // reporte de varios meses. La carga "Radar últimos 3 Meses" usa esto para
+  // poder sumar el acumulado de cada mes. Opcional: los returns de error
+  // temprano no lo traen.
+  filas?: ParsedSapRadarRow[];
 }
 
 // ════════════════════════════════════════════════════════════════
@@ -250,6 +257,11 @@ export interface ParsedCarteraRow {
 export interface CarteraParseResult {
   valid: ParsedCarteraRow[];
   errors: ParseError[];
+  /** Encabezados crudos de la fila detectada como header. Sirve para diagnosticar
+   *  por qué no se reconoció una columna (p. ej. "Segmento de Clientes 2"). */
+  headers?: string[];
+  /** true si se reconoció la columna de segmento de cartera. */
+  segmentoDetectado?: boolean;
 }
 
 // ════════════════════════════════════════════════════════════════

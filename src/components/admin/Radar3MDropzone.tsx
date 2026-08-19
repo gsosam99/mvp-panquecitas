@@ -38,7 +38,10 @@ export function Radar3MDropzone() {
         return;
       }
       const result = parseSapRadarMhtml(buffer);
-      setRows(result.valid);
+      // `filas` (todas, sin colapsar) y NO `valid`: valid se queda con el último
+      // corte por cliente+material, que en un reporte de 3 meses deja solo el
+      // último mes y perdería los otros dos.
+      setRows(result.filas ?? result.valid);
       setErrors(result.errors);
       setState("previewing");
     } catch {
@@ -59,7 +62,13 @@ export function Radar3MDropzone() {
       const data = (await res.json()) as {
         inserted?: number;
         reemplazadas?: number;
+        clientes_en_cartera?: number;
         clientes_fuera_cartera?: number;
+        clientes_en_archivo?: number;
+        meses?: string[];
+        desde?: string;
+        hasta?: string;
+        total_kg?: number;
         error?: string;
         detail?: string;
       };
@@ -69,11 +78,20 @@ export function Radar3MDropzone() {
         return;
       }
       setState("done");
-      const fueraNote = data.clientes_fuera_cartera
-        ? ` · ${data.clientes_fuera_cartera} filas de clientes fuera de la cartera (ignoradas)`
-        : "";
-      const reemplazoNote = data.reemplazadas ? ` · ${data.reemplazadas} filas de la carga anterior reemplazadas` : "";
-      setDoneSummary(`${data.inserted} registros guardados${reemplazoNote}${fueraNote}`);
+      // Resumen detallado a propósito: el promedio de referencia del gráfico
+      // sale de estos números, así que hay que poder auditar de dónde salen.
+      const partes = [
+        `${data.inserted} registros guardados`,
+        `${data.clientes_en_cartera} clientes de la cartera (de ${data.clientes_en_archivo} en el archivo)`,
+        `${data.meses?.length ?? 0} meses: ${data.meses?.join(", ") ?? "—"}`,
+        `rango ${data.desde} → ${data.hasta}`,
+        `total ${(data.total_kg ?? 0).toLocaleString("es-VE", { maximumFractionDigits: 0 })} kg`,
+      ];
+      if (data.clientes_fuera_cartera) {
+        partes.push(`${data.clientes_fuera_cartera} clientes del archivo NO están en la cartera (ignorados)`);
+      }
+      if (data.reemplazadas) partes.push(`${data.reemplazadas} filas de la carga anterior reemplazadas`);
+      setDoneSummary(partes.join(" · "));
       toast.success("Carga completada");
     } catch {
       toast.error("Error de conexión. Intenta de nuevo.");
@@ -106,11 +124,19 @@ export function Radar3MDropzone() {
 
   if (state === "previewing" || state === "uploading") {
     const panRows = rows.length;
+    // Lo que importa revisar antes de confirmar no es el número de filas (hay
+    // una por corte diario) sino cuántos clientes y qué meses trae el archivo.
+    const clientes = new Set(rows.map((r) => r.sap_code)).size;
+    const meses = [...new Set(rows.map((r) => r.fecha.slice(0, 7)))].sort();
     return (
       <div className="space-y-4">
         <div className="flex flex-wrap items-center gap-3">
           <span className="font-medium text-slate-900">{fileName}</span>
+          <Badge variant="secondary">{clientes} clientes</Badge>
           <Badge variant="secondary">{panRows} filas</Badge>
+          <Badge variant="secondary">
+            {meses.length} {meses.length === 1 ? "mes" : "meses"}: {meses.join(", ")}
+          </Badge>
           {errors.length > 0 && <Badge variant="destructive">{errors.length} errores</Badge>}
         </div>
         <Alert>

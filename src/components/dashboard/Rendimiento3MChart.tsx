@@ -23,12 +23,23 @@ const Inner = dynamic(
       data: Rendimiento3MResult;
       showPanDiario: boolean;
     }) {
+      // Tope del eje: el mayor entre la venta diaria más alta y las referencias
+      // visibles, con 10% de aire. Sin esto la línea del promedio de PAN, que
+      // suele ser un orden de magnitud mayor, no entra en el gráfico.
+      const maxPanquecitas = data.puntos.reduce((m, p) => Math.max(m, p.panquecitasKg), 0);
+      const maxReferencia = showPanDiario ? data.promedio3M : data.meta4Pct;
+      const maxY = Math.ceil(Math.max(maxPanquecitas, maxReferencia) * 1.1);
+
       return (
         <ResponsiveContainer width="100%" height={340}>
           <ComposedChart data={data.puntos} margin={{ top: 24, right: 16, left: 10, bottom: 5 }}>
             <CartesianGrid strokeDasharray="3 3" stroke="#f1f5f9" vertical={false} />
-            <XAxis dataKey="label" tick={{ fontSize: 10, fill: "#94a3b8" }} minTickGap={16} />
-            <YAxis tick={{ fontSize: 10, fill: "#94a3b8" }} width={52} />
+            <XAxis dataKey="label" tick={{ fontSize: 11, fill: "#94a3b8" }} minTickGap={16} />
+            {/* El dominio se fuerza a incluir las líneas fijas: en automático
+                Recharts escala solo con las Panquecitas y el promedio de PAN
+                (mucho mayor) queda FUERA del área visible — por eso no se veía.
+                Eje oculto, igual que en Panquecitas vs Harina PAN. */}
+            <YAxis hide domain={[0, maxY]} />
             <Tooltip
               contentStyle={{ fontSize: 12, borderRadius: 8, border: "1px solid #e2e8f0" }}
               formatter={(value, name, item) => {
@@ -76,18 +87,20 @@ const Inner = dynamic(
                 fontSize: 10,
               }}
             />
+            {/* Suavizada y con el mismo grosor/puntos que Panquecitas vs Harina PAN. */}
             <Line
+              type="monotone"
               dataKey="panquecitasKg"
-              stroke="#1f4e79"
+              stroke="#1a65bd"
               strokeWidth={2}
-              dot={{ r: 3, fill: "#1f4e79" }}
+              dot={{ r: 3, fill: "#1a65bd" }}
               isAnimationActive={false}
             >
               <LabelList
                 dataKey="ratioPct"
                 position="top"
                 offset={6}
-                fill="#1f4e79"
+                fill="#1a65bd"
                 fontSize={9}
                 formatter={(v) => `${Number(v ?? 0)}%`}
               />
