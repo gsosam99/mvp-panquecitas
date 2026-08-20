@@ -136,9 +136,6 @@ const Inner = dynamic(
                   offset={6}
                   fill="#1e3a8a"
                   fontSize={10}
-                  stroke="#ffffff"
-                  strokeWidth={3}
-                  paintOrder="stroke"
                   formatter={(v) => `${Number(v ?? 0).toLocaleString("es-VE", { maximumFractionDigits: 0 })} kg`}
                 />
               </Bar>
@@ -150,9 +147,6 @@ const Inner = dynamic(
                   position="center"
                   fill="#2c4634"
                   fontSize={9}
-                  stroke="#ffffff"
-                  strokeWidth={3}
-                  paintOrder="stroke"
                   formatter={(v) =>
                     Number(v ?? 0) > 0
                       ? `${Number(v ?? 0).toLocaleString("es-VE", { maximumFractionDigits: 0 })} kg`
@@ -168,9 +162,6 @@ const Inner = dynamic(
                   position="center"
                   fill="#4d3c1f"
                   fontSize={9}
-                  stroke="#ffffff"
-                  strokeWidth={3}
-                  paintOrder="stroke"
                   formatter={(v) =>
                     Number(v ?? 0) > 0
                       ? `${Number(v ?? 0).toLocaleString("es-VE", { maximumFractionDigits: 0 })} kg`
@@ -190,9 +181,6 @@ const Inner = dynamic(
                   position="center"
                   fill="#1f4e79"
                   fontSize={9}
-                  stroke="#ffffff"
-                  strokeWidth={3}
-                  paintOrder="stroke"
                   formatter={(v) =>
                     Number(v ?? 0) > 0
                       ? `${Number(v ?? 0).toLocaleString("es-VE", { maximumFractionDigits: 0 })} kg`
@@ -208,9 +196,6 @@ const Inner = dynamic(
                   position="center"
                   fill="#ffffff"
                   fontSize={9}
-                  stroke="#ffffff"
-                  strokeWidth={3}
-                  paintOrder="stroke"
                   formatter={(v) =>
                     Number(v ?? 0) > 0
                       ? `${Number(v ?? 0).toLocaleString("es-VE", { maximumFractionDigits: 0 })} kg`
@@ -235,9 +220,6 @@ const Inner = dynamic(
                   offset={10}
                   fill={efectividadColor}
                   fontSize={9}
-                  stroke="#ffffff"
-                  strokeWidth={3}
-                  paintOrder="stroke"
                   formatter={(v) => `${Number(v ?? 0)}%`}
                 />
               </Line>
@@ -260,9 +242,6 @@ const Inner = dynamic(
                   offset={14}
                   fill="#4f7a5c"
                   fontSize={9}
-                  stroke="#ffffff"
-                  strokeWidth={3}
-                  paintOrder="stroke"
                   formatter={(v) => `${Number(v ?? 0)}%`}
                 />
               </Line>
@@ -285,9 +264,6 @@ const Inner = dynamic(
                   offset={24}
                   fill="#8a6d3b"
                   fontSize={9}
-                  stroke="#ffffff"
-                  strokeWidth={3}
-                  paintOrder="stroke"
                   formatter={(v) => `${Number(v ?? 0)}%`}
                 />
               </Line>
@@ -309,9 +285,6 @@ const Inner = dynamic(
                   offset={34}
                   fill="#3e7cb1"
                   fontSize={9}
-                  stroke="#ffffff"
-                  strokeWidth={3}
-                  paintOrder="stroke"
                   formatter={(v) => (v == null ? "" : `${Number(v)}%`)}
                 />
               </Line>
@@ -332,9 +305,6 @@ const Inner = dynamic(
                   offset={26}
                   fill="#1f4e79"
                   fontSize={9}
-                  stroke="#ffffff"
-                  strokeWidth={3}
-                  paintOrder="stroke"
                   formatter={(v) => (v == null ? "" : `${Number(v)}%`)}
                 />
               </Line>
@@ -357,9 +327,6 @@ const Inner = dynamic(
                   offset={48}
                   fill="#3e7cb1"
                   fontSize={9}
-                  stroke="#ffffff"
-                  strokeWidth={3}
-                  paintOrder="stroke"
                   formatter={(v) => (v == null ? "" : `${Number(v)}%`)}
                 />
               </Line>
@@ -381,9 +348,6 @@ const Inner = dynamic(
                   offset={40}
                   fill="#1f4e79"
                   fontSize={9}
-                  stroke="#ffffff"
-                  strokeWidth={3}
-                  paintOrder="stroke"
                   formatter={(v) => (v == null ? "" : `${Number(v)}%`)}
                 />
               </Line>
