@@ -62,14 +62,52 @@ const Inner = dynamic(
       // Con cualquier desglose de barras prendido (modelo o ciudad) se oculta la
       // barra del total, para no sumar dos veces el mismo volumen.
       const hayDesglose = showVentasDirecto || showVentasIndirecto || showVentasCumana || showVentasCabudare;
+
+      // ── Bandas separadas para que ningún texto tape a otro ─────────────
+      // El problema no era de legibilidad sino de ESPACIO: barras y líneas viven
+      // en ejes distintos y se repartían la misma altura, así que los kg y los %
+      // terminaban escritos uno encima del otro.
+      //
+      // La solución es darle a cada uno su franja: se estiran los dominios de
+      // los dos ejes para que las barras ocupen solo la mitad de abajo y las
+      // líneas de % solo el tercio de arriba. Ningún valor se mueve de su sitio
+      // relativo — lo único que cambia es cuánto del alto usa cada serie.
+      const alturaBarra = (d: CarteraTotalDiaChartPoint) => {
+        if (!hayDesglose) return d.radarKgDia;
+        const modelo =
+          (showVentasDirecto ? d.radarKgDiaDirecto : 0) + (showVentasIndirecto ? d.radarKgDiaIndirecto : 0);
+        const ciudad =
+          (showVentasCumana ? d.radarKgDiaCumana ?? 0 : 0) + (showVentasCabudare ? d.radarKgDiaCabudare ?? 0 : 0);
+        return Math.max(modelo, ciudad);
+      };
+      const maxKg = data.reduce((m, d) => Math.max(m, alturaBarra(d)), 0);
+      // Tope del eje al doble del pico: las barras nunca pasan de la mitad.
+      const kgDomain: [number, number] = [0, Math.max(maxKg * 1.95, 1)];
+
+      // Rango real de los porcentajes visibles. El piso del eje se hunde muy por
+      // debajo del mínimo para empujar las líneas hacia arriba.
+      const pctVisibles: number[] = [];
+      for (const d of data) {
+        if (showEfectividad) pctVisibles.push(d.efectividad);
+        if (showDirecto) pctVisibles.push(d.efectividadDirecto);
+        if (showIndirecto) pctVisibles.push(d.efectividadIndirecto);
+        if (showCiudadAcum && showCumana && d.efectCumanaAcum != null) pctVisibles.push(d.efectCumanaAcum);
+        if (showCiudadAcum && showCabudare && d.efectCabudareAcum != null) pctVisibles.push(d.efectCabudareAcum);
+        if (showCiudadDia && showCumana && d.efectCumanaDia != null) pctVisibles.push(d.efectCumanaDia);
+        if (showCiudadDia && showCabudare && d.efectCabudareDia != null) pctVisibles.push(d.efectCabudareDia);
+      }
+      const pctHi = pctVisibles.length > 0 ? Math.max(...pctVisibles) : 100;
+      const pctLo = pctVisibles.length > 0 ? Math.min(...pctVisibles) : 0;
+      const pctRango = Math.max(pctHi - pctLo, 1);
+      const pctDomain: [number, number] = [pctLo - pctRango * 2.2, pctHi + pctRango * 0.35];
       return (
         <ResponsiveContainer width="100%" height={400}>
           <ComposedChart data={data} margin={{ top: 32, right: 12, left: 10, bottom: 5 }}>
             <CartesianGrid strokeDasharray="3 3" stroke="#f1f5f9" vertical={false} />
             <XAxis dataKey="label" tick={{ fontSize: 10, fill: "#94a3b8" }} minTickGap={16} />
             {/* Ejes ocultos: escalan las series pero no muestran números. */}
-            <YAxis yAxisId="kg" hide />
-            <YAxis yAxisId="pct" hide domain={[0, 100]} />
+            <YAxis yAxisId="kg" hide domain={kgDomain} allowDataOverflow />
+            <YAxis yAxisId="pct" hide domain={pctDomain} allowDataOverflow />
             <Tooltip
               contentStyle={{ fontSize: 12, borderRadius: 8, border: "1px solid #e2e8f0" }}
               formatter={(value, name) => {
@@ -281,7 +319,7 @@ const Inner = dynamic(
                 <LabelList
                   dataKey="efectividadIndirecto"
                   position="top"
-                  offset={28}
+                  offset={24}
                   fill="#8a6d3b"
                   fontSize={9}
                   stroke="#ffffff"
@@ -305,7 +343,7 @@ const Inner = dynamic(
                 <LabelList
                   dataKey="efectCumanaAcum"
                   position="top"
-                  offset={46}
+                  offset={34}
                   fill="#3e7cb1"
                   fontSize={9}
                   stroke="#ffffff"
@@ -328,7 +366,7 @@ const Inner = dynamic(
                 <LabelList
                   dataKey="efectCabudareAcum"
                   position="bottom"
-                  offset={32}
+                  offset={26}
                   fill="#1f4e79"
                   fontSize={9}
                   stroke="#ffffff"
@@ -353,7 +391,7 @@ const Inner = dynamic(
                 <LabelList
                   dataKey="efectCumanaDia"
                   position="top"
-                  offset={64}
+                  offset={48}
                   fill="#3e7cb1"
                   fontSize={9}
                   stroke="#ffffff"
@@ -377,7 +415,7 @@ const Inner = dynamic(
                 <LabelList
                   dataKey="efectCabudareDia"
                   position="bottom"
-                  offset={50}
+                  offset={40}
                   fill="#1f4e79"
                   fontSize={9}
                   stroke="#ffffff"
