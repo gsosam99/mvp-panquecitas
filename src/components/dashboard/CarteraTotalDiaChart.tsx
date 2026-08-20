@@ -254,10 +254,13 @@ const Inner = dynamic(
             )}
             {showVentasCabudare && (
               <Bar yAxisId="kg" dataKey="radarKgDiaCabudare" stackId="ciudad" fill="#5a89b8" radius={[2, 2, 0, 0]}>
+                {/* Texto OSCURO, no blanco: el halo de las etiquetas es blanco y
+                    un relleno blanco encima de un contorno blanco desaparecía —
+                    las barras de Cabudare se veían con un borrón en vez del kg. */}
                 <LabelList
                   dataKey="radarKgDiaCabudare"
                   position="center"
-                  fill="#ffffff"
+                  fill="#12365c"
                   fontSize={9}
                   stroke="#ffffff"
                   strokeWidth={3}
