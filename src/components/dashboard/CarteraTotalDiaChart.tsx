@@ -63,9 +63,70 @@ const Inner = dynamic(
       // barra del total, para no sumar dos veces el mismo volumen.
       const hayDesglose = showVentasDirecto || showVentasIndirecto || showVentasCumana || showVentasCabudare;
 
+      // Margen superior del gráfico: hace falta para reconstruir dónde cae cada
+      // ratio en píxeles (ver etiquetaKgEnExtremoLibre).
+      const MARGEN_TOP = 32;
+
+      /**
+       * Dibuja los kg de una barra en el extremo — arriba o abajo — que quede
+       * más lejos de los ratios de ese día.
+       *
+       * Los % viven en el eje 0–100 y los kg en el suyo, así que la distancia
+       * entre ambos cambia día a día: no hay posición fija que sirva siempre.
+       * Acá se convierte cada ratio visible a su píxel y se elige el extremo de
+       * la barra cuya distancia al ratio más cercano sea mayor.
+       */
+      function etiquetaKgEnExtremoLibre(props: unknown) {
+        const { x, y, width, height, index, value } = props as {
+          x: number;
+          y: number;
+          width: number;
+          height: number;
+          index: number;
+          value: number;
+        };
+        if (!value) return null;
+
+        const punto = data[index];
+        const base = y + height; // la base de la barra ES la línea del eje X
+        const altoArea = Math.max(base - MARGEN_TOP, 1);
+        const pixelDeRatio = (pct: number) => base - (pct / 100) * altoArea;
+
+        const ratios: number[] = [];
+        if (showEfectividad) ratios.push(punto.efectividad);
+        if (showDirecto) ratios.push(punto.efectividadDirecto);
+        if (showIndirecto) ratios.push(punto.efectividadIndirecto);
+        if (showCiudadAcum && showCumana && punto.efectCumanaAcum != null) ratios.push(punto.efectCumanaAcum);
+        if (showCiudadAcum && showCabudare && punto.efectCabudareAcum != null) ratios.push(punto.efectCabudareAcum);
+        if (showCiudadDia && showCumana && punto.efectCumanaDia != null) ratios.push(punto.efectCumanaDia);
+        if (showCiudadDia && showCabudare && punto.efectCabudareDia != null) ratios.push(punto.efectCabudareDia);
+
+        const yArriba = y + 12;
+        const yAbajo = base - 6;
+        // Sin ratios visibles no hay nada que esquivar: se deja arriba.
+        const holgura = (yTexto: number) =>
+          ratios.length === 0 ? Infinity : Math.min(...ratios.map((r) => Math.abs(pixelDeRatio(r) - yTexto)));
+        const yTexto = holgura(yArriba) >= holgura(yAbajo) ? yArriba : yAbajo;
+
+        return (
+          <text
+            x={x + width / 2}
+            y={yTexto}
+            textAnchor="middle"
+            fill="#1e3a8a"
+            fontSize={10}
+            stroke="#ffffff"
+            strokeWidth={3}
+            paintOrder="stroke"
+          >
+            {`${Number(value).toLocaleString("es-VE", { maximumFractionDigits: 0 })} kg`}
+          </text>
+        );
+      }
+
       return (
         <ResponsiveContainer width="100%" height={400}>
-          <ComposedChart data={data} margin={{ top: 32, right: 12, left: 10, bottom: 5 }}>
+          <ComposedChart data={data} margin={{ top: MARGEN_TOP, right: 12, left: 10, bottom: 5 }}>
             <CartesianGrid strokeDasharray="3 3" stroke="#f1f5f9" vertical={false} />
             <XAxis dataKey="label" tick={{ fontSize: 10, fill: "#94a3b8" }} minTickGap={16} />
             {/* Ejes ocultos: escalan las series pero no muestran números. */}
@@ -125,22 +186,12 @@ const Inner = dynamic(
                 Fragment) para que Recharts detecte los Bar. */}
             {!hayDesglose && (
               <Bar yAxisId="kg" dataKey="radarKgDia" fill="#bfdbfe" radius={[3, 3, 0, 0]}>
-                {/* Los kg van DENTRO de la barra, no encima: las barras están en el
-                    eje de kg y las líneas de % en otro, así que sus posiciones son
-                    independientes y arriba de la barra los dos textos se pisaban
-                    cuando el ratio caía cerca. Dejando el espacio de arriba solo
-                    para los %, ya no compiten por el mismo lugar. */}
-                <LabelList
-                  dataKey="radarKgDia"
-                  position="insideTop"
-                  offset={6}
-                  fill="#1e3a8a"
-                  fontSize={10}
-                  stroke="#ffffff"
-                  strokeWidth={3}
-                  paintOrder="stroke"
-                  formatter={(v) => `${Number(v ?? 0).toLocaleString("es-VE", { maximumFractionDigits: 0 })} kg`}
-                />
+                {/* Los kg se colocan en el extremo de la barra que le deje espacio
+                    al ratio, decidido punto por punto (ver etiquetaKgEnExtremoLibre).
+                    Una posición fija no sirve: los % viven en otro eje, así que en
+                    unos días caen cerca del tope de la barra y en otros cerca de la
+                    base — el 17 de agosto tapaban el ratio del modelo. */}
+                <LabelList dataKey="radarKgDia" content={etiquetaKgEnExtremoLibre} />
               </Bar>
             )}
             {showVentasDirecto && (
