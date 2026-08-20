@@ -64,8 +64,8 @@ const Inner = dynamic(
       const hayDesglose = showVentasDirecto || showVentasIndirecto || showVentasCumana || showVentasCabudare;
 
       return (
-        <ResponsiveContainer width="100%" height={400}>
-          <ComposedChart data={data} margin={{ top: 32, right: 12, left: 10, bottom: 5 }}>
+        <ResponsiveContainer width="100%" height={340}>
+          <ComposedChart data={data} margin={{ top: 24, right: 12, left: 10, bottom: 5 }} barCategoryGap="6%" barGap={2}>
             <CartesianGrid strokeDasharray="3 3" stroke="#f1f5f9" vertical={false} />
             <XAxis dataKey="label" tick={{ fontSize: 10, fill: "#94a3b8" }} minTickGap={16} />
             {/* Ejes ocultos: escalan las series pero no muestran números. */}
@@ -361,7 +361,7 @@ const Inner = dynamic(
   },
   {
     ssr: false,
-    loading: () => <div className="h-[400px] bg-slate-50 rounded-lg animate-pulse" />,
+    loading: () => <div className="h-[340px] bg-slate-50 rounded-lg animate-pulse" />,
   }
 );
 
