@@ -1207,8 +1207,8 @@ export function DiennDashboardClient({
                 según la métrica seleccionada — <span style={{ color: efectividadColor }} className="font-medium">
                 {carteraMetrica === "activos" ? "Radar (rojo)" : carteraMetrica === "facturados" ? "Facturado (azul marino)" : "Pedidos (naranja)"}
                 </span>. Series opcionales: activación por Radar del modelo{" "}
-                <span className="font-medium text-green-600">Directo</span> y{" "}
-                <span className="font-medium text-violet-600">Indirecto</span>. Con los botones{" "}
+                <span className="font-medium text-[#5a7d63]">Directo</span> y{" "}
+                <span className="font-medium text-[#77698c]">Indirecto</span>. Con los botones{" "}
                 <span className="font-medium">Efectividad</span> y <span className="font-medium">Modelos</span> alternas
                 cada línea entre el valor del período (Día) y el{" "}
                 <span className="font-medium">acumulado</span> (activos ÷ cartera total). Las barras se pueden desglosar
@@ -1262,7 +1262,7 @@ export function DiennDashboardClient({
                   onClick={() => setShowDirectoTotal((v) => !v)}
                   className={`px-3 py-1.5 rounded-lg border text-xs font-medium transition-colors ${
                     showDirectoTotal
-                      ? "border-green-600 bg-green-600 text-white"
+                      ? "border-[#5a7d63] bg-[#5a7d63] text-white"
                       : "border-slate-200 bg-white text-slate-500 hover:bg-slate-50"
                   }`}
                 >
@@ -1272,7 +1272,7 @@ export function DiennDashboardClient({
                   onClick={() => setShowIndirectoTotal((v) => !v)}
                   className={`px-3 py-1.5 rounded-lg border text-xs font-medium transition-colors ${
                     showIndirectoTotal
-                      ? "border-violet-600 bg-violet-600 text-white"
+                      ? "border-[#77698c] bg-[#77698c] text-white"
                       : "border-slate-200 bg-white text-slate-500 hover:bg-slate-50"
                   }`}
                 >
@@ -1307,7 +1307,7 @@ export function DiennDashboardClient({
                   title="Muestra las barras de volumen Radar del período del modelo Directo"
                   className={`px-3 py-1.5 rounded-lg border text-xs font-medium transition-colors ${
                     ventasDirecto
-                      ? "border-green-600 bg-green-600 text-white"
+                      ? "border-[#5a7d63] bg-[#5a7d63] text-white"
                       : "border-slate-200 bg-white text-slate-500 hover:bg-slate-50"
                   }`}
                 >
@@ -1318,7 +1318,7 @@ export function DiennDashboardClient({
                   title="Muestra las barras de volumen Radar del período del modelo Indirecto"
                   className={`px-3 py-1.5 rounded-lg border text-xs font-medium transition-colors ${
                     ventasIndirecto
-                      ? "border-violet-600 bg-violet-600 text-white"
+                      ? "border-[#77698c] bg-[#77698c] text-white"
                       : "border-slate-200 bg-white text-slate-500 hover:bg-slate-50"
                   }`}
                 >

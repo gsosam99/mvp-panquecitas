@@ -63,8 +63,8 @@ const Inner = dynamic(
       // barra del total, para no sumar dos veces el mismo volumen.
       const hayDesglose = showVentasDirecto || showVentasIndirecto || showVentasCumana || showVentasCabudare;
       return (
-        <ResponsiveContainer width="100%" height={340}>
-          <ComposedChart data={data} margin={{ top: 24, right: 12, left: 10, bottom: 5 }}>
+        <ResponsiveContainer width="100%" height={400}>
+          <ComposedChart data={data} margin={{ top: 32, right: 12, left: 10, bottom: 5 }}>
             <CartesianGrid strokeDasharray="3 3" stroke="#f1f5f9" vertical={false} />
             <XAxis dataKey="label" tick={{ fontSize: 10, fill: "#94a3b8" }} minTickGap={16} />
             {/* Ejes ocultos: escalan las series pero no muestran números. */}
@@ -124,24 +124,28 @@ const Inner = dynamic(
                 Fragment) para que Recharts detecte los Bar. */}
             {!hayDesglose && (
               <Bar yAxisId="kg" dataKey="radarKgDia" fill="#bfdbfe" radius={[3, 3, 0, 0]}>
-                {/* Kg del período, visibles sobre cada barra. */}
+                {/* Los kg van DENTRO de la barra, no encima: las barras están en el
+                    eje de kg y las líneas de % en otro, así que sus posiciones son
+                    independientes y arriba de la barra los dos textos se pisaban
+                    cuando el ratio caía cerca. Dejando el espacio de arriba solo
+                    para los %, ya no compiten por el mismo lugar. */}
                 <LabelList
                   dataKey="radarKgDia"
-                  position="top"
-                  offset={4}
-                  fill="#1e40af"
-                  fontSize={9}
+                  position="insideTop"
+                  offset={6}
+                  fill="#1e3a8a"
+                  fontSize={10}
                   formatter={(v) => `${Number(v ?? 0).toLocaleString("es-VE", { maximumFractionDigits: 0 })} kg`}
                 />
               </Bar>
             )}
             {showVentasDirecto && (
-              <Bar yAxisId="kg" dataKey="radarKgDiaDirecto" stackId="modelo" fill="#86efac" radius={[2, 2, 0, 0]}>
+              <Bar yAxisId="kg" dataKey="radarKgDiaDirecto" stackId="modelo" fill="#a8c0ac" radius={[2, 2, 0, 0]}>
                 <LabelList
                   dataKey="radarKgDiaDirecto"
                   position="center"
-                  fill="#166534"
-                  fontSize={8}
+                  fill="#2f4a37"
+                  fontSize={9}
                   formatter={(v) =>
                     Number(v ?? 0) > 0
                       ? `${Number(v ?? 0).toLocaleString("es-VE", { maximumFractionDigits: 0 })} kg`
@@ -151,12 +155,12 @@ const Inner = dynamic(
               </Bar>
             )}
             {showVentasIndirecto && (
-              <Bar yAxisId="kg" dataKey="radarKgDiaIndirecto" stackId="modelo" fill="#c4b5fd" radius={[2, 2, 0, 0]}>
+              <Bar yAxisId="kg" dataKey="radarKgDiaIndirecto" stackId="modelo" fill="#bcb4c8" radius={[2, 2, 0, 0]}>
                 <LabelList
                   dataKey="radarKgDiaIndirecto"
                   position="center"
-                  fill="#5b21b6"
-                  fontSize={8}
+                  fill="#453a55"
+                  fontSize={9}
                   formatter={(v) =>
                     Number(v ?? 0) > 0
                       ? `${Number(v ?? 0).toLocaleString("es-VE", { maximumFractionDigits: 0 })} kg`
@@ -175,7 +179,7 @@ const Inner = dynamic(
                   dataKey="radarKgDiaCumana"
                   position="center"
                   fill="#1f4e79"
-                  fontSize={8}
+                  fontSize={9}
                   formatter={(v) =>
                     Number(v ?? 0) > 0
                       ? `${Number(v ?? 0).toLocaleString("es-VE", { maximumFractionDigits: 0 })} kg`
@@ -190,7 +194,7 @@ const Inner = dynamic(
                   dataKey="radarKgDiaCabudare"
                   position="center"
                   fill="#ffffff"
-                  fontSize={8}
+                  fontSize={9}
                   formatter={(v) =>
                     Number(v ?? 0) > 0
                       ? `${Number(v ?? 0).toLocaleString("es-VE", { maximumFractionDigits: 0 })} kg`
@@ -212,7 +216,7 @@ const Inner = dynamic(
                 <LabelList
                   dataKey="efectividad"
                   position="top"
-                  offset={6}
+                  offset={10}
                   fill={efectividadColor}
                   fontSize={9}
                   formatter={(v) => `${Number(v ?? 0)}%`}
@@ -224,18 +228,18 @@ const Inner = dynamic(
               <Line
                 yAxisId="pct"
                 dataKey="efectividadDirecto"
-                stroke="#16a34a"
+                stroke="#5a7d63"
                 strokeWidth={2}
                 strokeDasharray="5 3"
-                dot={{ r: 3, fill: "#16a34a" }}
+                dot={{ r: 3, fill: "#5a7d63" }}
                 isAnimationActive={false}
               >
                 {/* Etiqueta debajo del punto para no solaparse con la efectividad. */}
                 <LabelList
                   dataKey="efectividadDirecto"
                   position="bottom"
-                  offset={8}
-                  fill="#16a34a"
+                  offset={14}
+                  fill="#5a7d63"
                   fontSize={9}
                   formatter={(v) => `${Number(v ?? 0)}%`}
                 />
@@ -246,18 +250,18 @@ const Inner = dynamic(
               <Line
                 yAxisId="pct"
                 dataKey="efectividadIndirecto"
-                stroke="#7c3aed"
+                stroke="#77698c"
                 strokeWidth={2}
                 strokeDasharray="2 3"
-                dot={{ r: 3, fill: "#7c3aed" }}
+                dot={{ r: 3, fill: "#77698c" }}
                 isAnimationActive={false}
               >
                 {/* Etiqueta más arriba para separarla de las otras dos series. */}
                 <LabelList
                   dataKey="efectividadIndirecto"
                   position="top"
-                  offset={20}
-                  fill="#7c3aed"
+                  offset={28}
+                  fill="#77698c"
                   fontSize={9}
                   formatter={(v) => `${Number(v ?? 0)}%`}
                 />
@@ -277,7 +281,7 @@ const Inner = dynamic(
                 <LabelList
                   dataKey="efectCumanaAcum"
                   position="top"
-                  offset={6}
+                  offset={46}
                   fill="#3e7cb1"
                   fontSize={9}
                   formatter={(v) => (v == null ? "" : `${Number(v)}%`)}
@@ -297,7 +301,7 @@ const Inner = dynamic(
                 <LabelList
                   dataKey="efectCabudareAcum"
                   position="bottom"
-                  offset={6}
+                  offset={32}
                   fill="#1f4e79"
                   fontSize={9}
                   formatter={(v) => (v == null ? "" : `${Number(v)}%`)}
@@ -319,7 +323,7 @@ const Inner = dynamic(
                 <LabelList
                   dataKey="efectCumanaDia"
                   position="top"
-                  offset={16}
+                  offset={64}
                   fill="#3e7cb1"
                   fontSize={9}
                   formatter={(v) => (v == null ? "" : `${Number(v)}%`)}
@@ -340,7 +344,7 @@ const Inner = dynamic(
                 <LabelList
                   dataKey="efectCabudareDia"
                   position="bottom"
-                  offset={16}
+                  offset={50}
                   fill="#1f4e79"
                   fontSize={9}
                   formatter={(v) => (v == null ? "" : `${Number(v)}%`)}
@@ -356,7 +360,7 @@ const Inner = dynamic(
   },
   {
     ssr: false,
-    loading: () => <div className="h-[340px] bg-slate-50 rounded-lg animate-pulse" />,
+    loading: () => <div className="h-[400px] bg-slate-50 rounded-lg animate-pulse" />,
   }
 );
 
