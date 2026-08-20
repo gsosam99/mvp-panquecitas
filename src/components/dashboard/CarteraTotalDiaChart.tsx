@@ -135,17 +135,23 @@ const Inner = dynamic(
                   offset={6}
                   fill="#1e3a8a"
                   fontSize={10}
+                  stroke="#ffffff"
+                  strokeWidth={3}
+                  paintOrder="stroke"
                   formatter={(v) => `${Number(v ?? 0).toLocaleString("es-VE", { maximumFractionDigits: 0 })} kg`}
                 />
               </Bar>
             )}
             {showVentasDirecto && (
-              <Bar yAxisId="kg" dataKey="radarKgDiaDirecto" stackId="modelo" fill="#a8c0ac" radius={[2, 2, 0, 0]}>
+              <Bar yAxisId="kg" dataKey="radarKgDiaDirecto" stackId="modelo" fill="#9db99f" radius={[2, 2, 0, 0]}>
                 <LabelList
                   dataKey="radarKgDiaDirecto"
                   position="center"
-                  fill="#2f4a37"
+                  fill="#2c4634"
                   fontSize={9}
+                  stroke="#ffffff"
+                  strokeWidth={3}
+                  paintOrder="stroke"
                   formatter={(v) =>
                     Number(v ?? 0) > 0
                       ? `${Number(v ?? 0).toLocaleString("es-VE", { maximumFractionDigits: 0 })} kg`
@@ -155,12 +161,15 @@ const Inner = dynamic(
               </Bar>
             )}
             {showVentasIndirecto && (
-              <Bar yAxisId="kg" dataKey="radarKgDiaIndirecto" stackId="modelo" fill="#bcb4c8" radius={[2, 2, 0, 0]}>
+              <Bar yAxisId="kg" dataKey="radarKgDiaIndirecto" stackId="modelo" fill="#cbb894" radius={[2, 2, 0, 0]}>
                 <LabelList
                   dataKey="radarKgDiaIndirecto"
                   position="center"
-                  fill="#453a55"
+                  fill="#4d3c1f"
                   fontSize={9}
+                  stroke="#ffffff"
+                  strokeWidth={3}
+                  paintOrder="stroke"
                   formatter={(v) =>
                     Number(v ?? 0) > 0
                       ? `${Number(v ?? 0).toLocaleString("es-VE", { maximumFractionDigits: 0 })} kg`
@@ -180,6 +189,9 @@ const Inner = dynamic(
                   position="center"
                   fill="#1f4e79"
                   fontSize={9}
+                  stroke="#ffffff"
+                  strokeWidth={3}
+                  paintOrder="stroke"
                   formatter={(v) =>
                     Number(v ?? 0) > 0
                       ? `${Number(v ?? 0).toLocaleString("es-VE", { maximumFractionDigits: 0 })} kg`
@@ -195,6 +207,9 @@ const Inner = dynamic(
                   position="center"
                   fill="#ffffff"
                   fontSize={9}
+                  stroke="#ffffff"
+                  strokeWidth={3}
+                  paintOrder="stroke"
                   formatter={(v) =>
                     Number(v ?? 0) > 0
                       ? `${Number(v ?? 0).toLocaleString("es-VE", { maximumFractionDigits: 0 })} kg`
@@ -210,7 +225,7 @@ const Inner = dynamic(
                 dataKey="efectividad"
                 stroke={efectividadColor}
                 strokeWidth={2}
-                dot={{ r: 3, fill: efectividadColor }}
+                dot={{ r: 2, fill: efectividadColor }}
                 isAnimationActive={false}
               >
                 <LabelList
@@ -219,6 +234,9 @@ const Inner = dynamic(
                   offset={10}
                   fill={efectividadColor}
                   fontSize={9}
+                  stroke="#ffffff"
+                  strokeWidth={3}
+                  paintOrder="stroke"
                   formatter={(v) => `${Number(v ?? 0)}%`}
                 />
               </Line>
@@ -228,10 +246,10 @@ const Inner = dynamic(
               <Line
                 yAxisId="pct"
                 dataKey="efectividadDirecto"
-                stroke="#5a7d63"
+                stroke="#4f7a5c"
                 strokeWidth={2}
                 strokeDasharray="5 3"
-                dot={{ r: 3, fill: "#5a7d63" }}
+                dot={{ r: 2, fill: "#4f7a5c" }}
                 isAnimationActive={false}
               >
                 {/* Etiqueta debajo del punto para no solaparse con la efectividad. */}
@@ -239,8 +257,11 @@ const Inner = dynamic(
                   dataKey="efectividadDirecto"
                   position="bottom"
                   offset={14}
-                  fill="#5a7d63"
+                  fill="#4f7a5c"
                   fontSize={9}
+                  stroke="#ffffff"
+                  strokeWidth={3}
+                  paintOrder="stroke"
                   formatter={(v) => `${Number(v ?? 0)}%`}
                 />
               </Line>
@@ -250,10 +271,10 @@ const Inner = dynamic(
               <Line
                 yAxisId="pct"
                 dataKey="efectividadIndirecto"
-                stroke="#77698c"
+                stroke="#8a6d3b"
                 strokeWidth={2}
                 strokeDasharray="2 3"
-                dot={{ r: 3, fill: "#77698c" }}
+                dot={{ r: 2, fill: "#8a6d3b" }}
                 isAnimationActive={false}
               >
                 {/* Etiqueta más arriba para separarla de las otras dos series. */}
@@ -261,8 +282,11 @@ const Inner = dynamic(
                   dataKey="efectividadIndirecto"
                   position="top"
                   offset={28}
-                  fill="#77698c"
+                  fill="#8a6d3b"
                   fontSize={9}
+                  stroke="#ffffff"
+                  strokeWidth={3}
+                  paintOrder="stroke"
                   formatter={(v) => `${Number(v ?? 0)}%`}
                 />
               </Line>
@@ -284,6 +308,9 @@ const Inner = dynamic(
                   offset={46}
                   fill="#3e7cb1"
                   fontSize={9}
+                  stroke="#ffffff"
+                  strokeWidth={3}
+                  paintOrder="stroke"
                   formatter={(v) => (v == null ? "" : `${Number(v)}%`)}
                 />
               </Line>
@@ -304,6 +331,9 @@ const Inner = dynamic(
                   offset={32}
                   fill="#1f4e79"
                   fontSize={9}
+                  stroke="#ffffff"
+                  strokeWidth={3}
+                  paintOrder="stroke"
                   formatter={(v) => (v == null ? "" : `${Number(v)}%`)}
                 />
               </Line>
@@ -326,6 +356,9 @@ const Inner = dynamic(
                   offset={64}
                   fill="#3e7cb1"
                   fontSize={9}
+                  stroke="#ffffff"
+                  strokeWidth={3}
+                  paintOrder="stroke"
                   formatter={(v) => (v == null ? "" : `${Number(v)}%`)}
                 />
               </Line>
@@ -347,6 +380,9 @@ const Inner = dynamic(
                   offset={50}
                   fill="#1f4e79"
                   fontSize={9}
+                  stroke="#ffffff"
+                  strokeWidth={3}
+                  paintOrder="stroke"
                   formatter={(v) => (v == null ? "" : `${Number(v)}%`)}
                 />
               </Line>
