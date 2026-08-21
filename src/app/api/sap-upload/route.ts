@@ -114,13 +114,16 @@ export async function POST(req: Request) {
   }
 }
 
-// ── Reporte "Radar" (Harina PAN + Panquecitas) — acumulado del mes ─────────
-// Cada fila trae "Venta Acumulada": lo real DESPACHADO acumulado en lo que
-// va del mes para ese cliente+material. Si se vuelve a subir un radar más
-// adelante dentro del mismo mes, el número siempre es mayor o igual al
-// anterior — así que la fila existente para ese cliente+producto+
-// presentación+MES se REEMPLAZA con el nuevo acumulado (y su fecha), nunca
-// se suma ni se descarta. Un mes nuevo simplemente crea una fila nueva.
+// ── Reporte "Radar" (Harina PAN + Panquecitas) — una fila por día ──────────
+// Cada fila del reporte es la venta real DESPACHADA de UN cliente + material
+// en UN día. `sap_sell_in_records` guarda una fila por cliente + producto +
+// presentación + MES, así que la carga suma los días del archivo (ver paso 3).
+//
+// El archivo trae el mes completo, de modo que esa suma es el total del mes:
+// si se vuelve a subir un radar más adelante dentro del mismo mes, la fila
+// existente se REEMPLAZA con la nueva suma (y con la fecha más reciente del
+// archivo), nunca se acumula encima. Volver a subir el mismo archivo es
+// idempotente. Un mes nuevo simplemente crea una fila nueva.
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 async function handleRadarUpload(supabase: any, rows: ParsedSapRadarRow[], batchId: string, fechas: RadarFecha[]) {
   // ── 1. Resolver clientes contra la cartera ya cargada (no se crean nuevos) ──
@@ -177,12 +180,38 @@ async function handleRadarUpload(supabase: any, rows: ParsedSapRadarRow[], batch
     }, { status: 422 });
   }
 
-  // ── 3. Colapsar por cliente+producto+presentación+MES — se queda la fecha más reciente ──
-  const byKey = new Map<string, (typeof sellInRows)[number]>();
+  // ── 3. Colapsar por cliente+producto+presentación+MES — SUMANDO los días ──
+  //
+  // Antes esto se quedaba solo con la fila de fecha más reciente del mes,
+  // porque se asumía que cada fila traía el acumulado del mes y las demás
+  // eran snapshots intermedios. El reporte real (N7_V_SD88_WEB_001) NO es
+  // así: trae UNA FILA POR CLIENTE + MATERIAL + DÍA, cada una con la venta
+  // de ESE día. Verificado sobre el export del 21-08-2026: 787 filas de
+  // Panquecitas y 787 llaves cliente|material|día distintas, ninguna
+  // repetida. Quedarse con la última descartaba 1,21 de 5,42 toneladas —
+  // el cliente 36959 tenía 1,20 kg el 13-08 y 0,80 kg el 18-08, y solo se
+  // guardaba 0,80.
+  //
+  // Se colapsa primero por DÍA (defensivo: si un export llegara a repetir
+  // el mismo cliente+material+día, sumarlo lo duplicaría) y recién después
+  // se suma el mes. La fecha que se guarda es la más reciente del mes, que
+  // es la que usa el paso 4 para decidir si el archivo es más nuevo que lo
+  // ya guardado.
+  const byDay = new Map<string, (typeof sellInRows)[number]>();
   for (const r of sellInRows) {
+    byDay.set(dedupeKey(r.location_id, r.product_id, r.variant_id, r.date_of_sale), r);
+  }
+
+  const byKey = new Map<string, (typeof sellInRows)[number]>();
+  for (const r of byDay.values()) {
     const key = dedupeKey(r.location_id, r.product_id, r.variant_id, monthKey(r.date_of_sale));
     const existing = byKey.get(key);
-    if (!existing || r.date_of_sale > existing.date_of_sale) byKey.set(key, r);
+    if (!existing) {
+      byKey.set(key, { ...r });
+      continue;
+    }
+    existing.quantity_kg += r.quantity_kg;
+    if (r.date_of_sale > existing.date_of_sale) existing.date_of_sale = r.date_of_sale;
   }
 
   // ── 4. Reemplazar el acumulado existente o insertar si es la primera vez ──

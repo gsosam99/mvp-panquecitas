@@ -27,7 +27,14 @@ type UploadState = "idle" | "parsing" | "previewing" | "uploading" | "done";
 type ParsedData =
   | {
       format: "radar";
+      /** Colapsado a un día por cliente+material — solo para la vista previa. */
       valid: ParsedSapRadarRow[];
+      /**
+       * TODAS las filas del archivo (cliente + material + día) sin colapsar.
+       * Es lo que se envía a guardar: `valid` se queda con el último día de
+       * cada cliente+material y descarta el resto del volumen del mes.
+       */
+      filas: ParsedSapRadarRow[];
       errors: ParseError[];
       fechas: { sap_code: string; material_code: string; fecha: string }[];
     }
@@ -69,7 +76,15 @@ export function SapDropzone({ mode, onCommitSuccess }: SapDropzoneProps) {
 
       if (mode === "radar") {
         const result = parseSapRadarMhtml(buffer);
-        setParsed({ format: "radar", valid: result.valid, errors: result.errors, fechas: result.fechas ?? [] });
+        setParsed({
+          format: "radar",
+          valid: result.valid,
+          // Sin colapsar. El fallback a `valid` solo aplica a los returns de
+          // error temprano del parser, que no traen `filas`.
+          filas: result.filas ?? result.valid,
+          errors: result.errors,
+          fechas: result.fechas ?? [],
+        });
       } else {
         const result = parseSapFacturacionMhtml(buffer);
         setParsed({ format: "facturacion", valid: result.valid, errors: result.errors });
@@ -103,7 +118,11 @@ export function SapDropzone({ mode, onCommitSuccess }: SapDropzoneProps) {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           format: parsed.format,
-          rows: parsed.valid,
+          // Radar: se manda TODA fila cliente+material+día y la ruta suma el
+          // mes. Antes se mandaba `valid`, que el parser deja con un solo día
+          // por cliente+material — en el export del 21-08-2026 eso descartaba
+          // 1,21 de 5,42 toneladas antes de llegar al servidor.
+          rows: parsed.format === "radar" ? parsed.filas : parsed.valid,
           batchId,
           ...(parsed.format === "radar" ? { fechas: parsed.fechas } : {}),
         }),
