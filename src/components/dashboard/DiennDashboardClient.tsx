@@ -652,7 +652,7 @@ export function DiennDashboardClient({
               primera hasta la última fecha cargada.{" "}
               {panPoblacion === "clientes"
                 ? "Solo clientes con Radar > 0 de Panquecitas."
-                : "Los 358 clientes del universo del piloto, hayan comprado Panquecitas o no."}
+                : "Todos los clientes del universo del piloto vigente en cada fecha, hayan comprado Panquecitas o no."}
             </p>
           </div>
           <div className="flex flex-wrap items-center gap-2 print:hidden">
@@ -941,7 +941,8 @@ export function DiennDashboardClient({
             <p className="text-xs text-slate-400 mt-1">
               Barras: venta acumulada (Radar). Líneas (eje derecho, %): tasa de recompra —{" "}
               <span className="font-medium">clientes con 2 o más fechas de compra ÷ clientes que compraron</span>, un
-              conteo de clientes únicos — y % de activación de clientes sobre la cartera fija de 358.
+              conteo de clientes únicos — y % de activación de clientes sobre la cartera vigente en cada período (la
+              cartera se amplió el 14 y el 24 de agosto; cada punto usa la cartera que existía en esa fecha).
             </p>
           </div>
           <div className="flex flex-wrap items-center gap-2 print:hidden">

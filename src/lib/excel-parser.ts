@@ -85,6 +85,18 @@ const CARTERA_HEADER_ALIASES: Record<keyof CarteraColumnMap, string[]> = {
   // Modelo de atención — columna "Directo o Indirecto" de la cartera (valores
   // Directo / Indirecto / Mixto). Es la fuente autoritativa del modelo.
   esquema_atencion: ["directooindirect", "directooindirecto", "directoindirecto", "modelo", "esquema", "esquemadeatencion"],
+  // Override opcional de la fecha de incorporación al piloto. Normalmente NO
+  // viene en el archivo: la fecha se deriva de la regla por grupo vendedor
+  // (ver src/lib/cohortes.ts). Existe para el cliente suelto que se incorpora
+  // en una fecha propia y no encaja en ninguna tanda.
+  fecha_incorporacion: [
+    "fechaincorporacion",
+    "fechadeincorporacion",
+    "fechaingreso",
+    "fechadeingreso",
+    "fechaalta",
+    "fechadealta",
+  ],
 };
 
 interface CarteraColumnMap {
@@ -100,6 +112,7 @@ interface CarteraColumnMap {
   asesor_encargado: number;
   fuente_sell_out: number;
   esquema_atencion: number;
+  fecha_incorporacion: number;
 }
 
 export async function parseCarteraExcel(buffer: ArrayBuffer): Promise<CarteraParseResult> {
@@ -195,6 +208,9 @@ export async function parseCarteraExcel(buffer: ArrayBuffer): Promise<CarteraPar
       fuente_sell_out: fuenteRaw.includes("B2B") || fuenteRaw.includes("REPORTADO") ? "Reportado_B2B" : undefined,
       esquema_atencion: String(col.esquema_atencion ? row.getCell(col.esquema_atencion).value ?? "" : "").trim(),
       segmento_cliente: String(col.segmento_cliente ? row.getCell(col.segmento_cliente).value ?? "" : "").trim(),
+      fecha_incorporacion: col.fecha_incorporacion
+        ? parseDateCell(row.getCell(col.fecha_incorporacion).value)
+        : null,
     });
   });
 

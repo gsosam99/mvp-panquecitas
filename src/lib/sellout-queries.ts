@@ -1,7 +1,8 @@
 import { createSupabaseServiceClient } from "@/lib/supabase/server";
 import { PRODUCT_IDS } from "@/data/catalog";
 import { VISIT_ROUNDS } from "@/data/visit-rounds";
-import { getUniverseLocations } from "@/lib/universe";
+import { getUniverseLocations, vigentesAl } from "@/lib/universe";
+import { todayISO } from "@/lib/date-buckets";
 import { sectorGroup } from "@/lib/sectors";
 import {
   presentacionFromVariant,
@@ -31,7 +32,9 @@ import {
 
 export async function computeSellOut(): Promise<SellOutRecord[]> {
   const supabase = createSupabaseServiceClient();
-  const universo = await getUniverseLocations();
+  // Cartera vigente hoy: los clientes de una tanda con fecha de incorporación
+  // futura no entran a este corte. Ver src/lib/cohortes.ts.
+  const universo = vigentesAl(await getUniverseLocations(), todayISO());
   if (universo.length === 0) return [];
 
   const locationIds = universo.map((l) => l.id);
@@ -253,7 +256,9 @@ export async function computeSellOut(): Promise<SellOutRecord[]> {
 // SellOutClienteDiffRow en sellout-utils.
 export async function getSellOutPorClienteDiff(): Promise<SellOutClienteDiffRow[]> {
   const supabase = createSupabaseServiceClient();
-  const universo = await getUniverseLocations();
+  // Cartera vigente hoy: los clientes de una tanda con fecha de incorporación
+  // futura no entran a este corte. Ver src/lib/cohortes.ts.
+  const universo = vigentesAl(await getUniverseLocations(), todayISO());
   if (universo.length === 0) return [];
   const locationIds = universo.map((l) => l.id);
 

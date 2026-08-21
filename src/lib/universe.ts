@@ -1,5 +1,5 @@
 import { createSupabaseServiceClient } from "@/lib/supabase/server";
-import { LOCATION_COLUMNS, LOCATION_COLUMNS_CON_SEGMENTO } from "@/lib/location-columns";
+import { LOCATION_COLUMNS, LOCATION_COLUMNS_COMPLETO } from "@/lib/location-columns";
 import type { Location } from "@/types";
 
 // Sectores de venta piloto evaluados por DIENN para el modelo de escalamiento
@@ -25,13 +25,40 @@ export {
 
 import { sectorGroup as _sectorGroup, isExcludedDistribuidor as _isExcludedDistribuidor } from "@/lib/sectors";
 
-/** Universo total seleccionado de PDVs (k): locations en los sectores piloto. */
+// El universo tiene además dimensión de TIEMPO: cada cliente cuenta desde su
+// fecha_incorporacion (migration 020). getUniverseLocations() devuelve la
+// cartera completa de hoy; para cualquier cálculo por período hay que
+// recortarla con vigentesAl(universo, cierreDelBucket) — si no, los clientes
+// incorporados después entran a semanas en las que todavía no existían y
+// hunden las tasas hacia atrás. Ver src/lib/cohortes.ts.
+export {
+  COHORTES,
+  COHORTE_PILOTO_ORIGINAL,
+  COHORTES_NUEVAS,
+  PILOTO_INICIO,
+  cohorteParaClienteNuevo,
+  cohortePorNombre,
+  estabaIncorporado,
+  vigentesAl,
+  type Cohorte,
+} from "@/lib/cohortes";
+
+/**
+ * Universo total seleccionado de PDVs (k): locations en los sectores piloto.
+ *
+ * Es la cartera COMPLETA, sin recortar por fecha — el consumidor decide a qué
+ * corte la acota con vigentesAl(). Para las tarjetas de "ahora mismo" el corte
+ * es hoy, así que la lista completa ya es la correcta; para las series
+ * temporales hay que recortar bucket por bucket.
+ */
 export async function getUniverseLocations(): Promise<Location[]> {
   const supabase = createSupabaseServiceClient();
 
-  // segmento_cliente es columna nueva (migration 016). Si todavía no se corrió,
-  // la query falla completa y el dashboard se queda sin datos, así que se
-  // reintenta sin ella en vez de devolver vacío.
+  // segmento_cliente (migration 016) y fecha_incorporacion/cohorte (020) son
+  // columnas nuevas. Si alguna todavía no se corrió, la query falla completa y
+  // el dashboard se queda sin datos, así que se reintenta con la lista base en
+  // vez de devolver vacío. Sin fecha_incorporacion todos quedan vigentes desde
+  // siempre, o sea el comportamiento anterior al migration 020.
   //
   // El acumulador va como unknown[] a propósito: supabase-js deriva el tipo de
   // la fila del string del .select(), así que los dos intentos devuelven formas
@@ -39,9 +66,9 @@ export async function getUniverseLocations(): Promise<Location[]> {
   // sí. El cast a Location[] de abajo es el mismo que ya se hacía.
   let rows: unknown[] | null = null;
 
-  const conSegmento = await supabase.from("locations").select(LOCATION_COLUMNS_CON_SEGMENTO);
-  if (conSegmento.data) {
-    rows = conSegmento.data;
+  const completo = await supabase.from("locations").select(LOCATION_COLUMNS_COMPLETO);
+  if (completo.data) {
+    rows = completo.data;
   } else {
     const base = await supabase.from("locations").select(LOCATION_COLUMNS);
     rows = base.data;

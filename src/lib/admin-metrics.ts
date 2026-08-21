@@ -5,7 +5,8 @@
 
 import { isPvpDeviated } from "@/data/pvp-thresholds";
 import { sectorGroup, SECTOR_LABELS, type Sector } from "@/lib/sectors";
-import { bucketKeyFor, bucketLabelFor, type TimeGranularity } from "@/lib/date-buckets";
+import { bucketEndDate, bucketKeyFor, bucketLabelFor, type TimeGranularity } from "@/lib/date-buckets";
+import { estabaIncorporado } from "@/lib/cohortes";
 import { CAMPAIGN_WEEKS } from "@/lib/campaign-weeks";
 import type { Location } from "@/types";
 
@@ -355,8 +356,7 @@ export function computeActivacionSemanal(
   rows: AdminPdvRow[],
   granularity: TimeGranularity = "week"
 ): ActivacionPoint[] {
-  const total = rows.length;
-  if (total === 0) return [];
+  if (rows.length === 0) return [];
 
   const conFecha = rows.filter((r): r is AdminPdvRow & { primeraCompra: string } => r.primeraCompra !== null);
   if (conFecha.length === 0) return [];
@@ -364,7 +364,17 @@ export function computeActivacionSemanal(
   const buckets = Array.from(new Set(conFecha.map((r) => bucketKeyFor(r.primeraCompra, granularity)))).sort();
 
   return buckets.map((bucket) => {
-    const count = conFecha.filter((r) => bucketKeyFor(r.primeraCompra, granularity) <= bucket).length;
+    // Denominador vigente al cierre del bucket, no la cartera de hoy: la
+    // cartera se amplió el 14-08 y el 24-08-2026, y con un total fijo las
+    // semanas anteriores se dividirían entre clientes que todavía no
+    // existían. Ver src/lib/cohortes.ts.
+    const cierre = bucketEndDate(bucket);
+    const total = rows.filter((r) => estabaIncorporado(r.location.fecha_incorporacion, cierre)).length;
+    const count = conFecha.filter(
+      (r) =>
+        bucketKeyFor(r.primeraCompra, granularity) <= bucket &&
+        estabaIncorporado(r.location.fecha_incorporacion, cierre)
+    ).length;
     return { bucket, label: bucketLabelFor(bucket, granularity), pct: pct(count, total), count };
   });
 }

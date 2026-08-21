@@ -58,6 +58,16 @@ const EXCLUDED_DISTRIBUIDOR_SAP_CODES = new Set<string>([
   "22403639", // DISTRIBUIDORA D'AVALLGAR, C.A.
   "22405578", // DISTRIBUIDORA KATAO, C.A
   "22406035", // DISTRIBUIDORA ANTONELLI F&G, C.A
+  // Franquiciadas del modelo indirecto de Cumaná, incorporado el 14-08-2026
+  // (Alejandro, 21-08-2026). Mismo tratamiento que las de arriba: no son
+  // población, solo se leen para lo facturado y lo pedido. Los PDV reales
+  // que abastecen SÍ son cartera y se distinguen por los grupos vendedores
+  // U27/U28 — ver COHORTES_NUEVAS en src/lib/cohortes.ts.
+  "22401000", // COMERCIAL VELIZ SUCRE, C.A.
+  "22403226", // KEYKA, C.A.
+  "22403689", // DISTRIBUIDORA NURCARLYS, C.A.
+  "22405444", // DISTRIBUIDORA RCY 85, C.A.
+  "22405792", // INVERSIONES C.C., C.A.
 ]);
 
 export function isExcludedDistribuidor(sapCode: string | null | undefined): boolean {

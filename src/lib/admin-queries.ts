@@ -1,6 +1,7 @@
 import { createSupabaseServiceClient } from "@/lib/supabase/server";
 import { PRODUCT_IDS } from "@/data/catalog";
-import { getUniverseLocations } from "@/lib/universe";
+import { getUniverseLocations, vigentesAl } from "@/lib/universe";
+import { todayISO } from "@/lib/date-buckets";
 import { sectorGroup } from "@/lib/sectors";
 import { PVP_TARGETS } from "@/data/pvp-thresholds";
 import { desviado400, desviado800, type AdminPdvRow, type AdminVisitSnapshot } from "@/lib/admin-metrics";
@@ -43,7 +44,9 @@ interface VisitRow {
 
 export async function getAdminExecutionSnapshot(): Promise<AdminPdvRow[]> {
   const supabase = createSupabaseServiceClient();
-  const universo = await getUniverseLocations();
+  // Cartera vigente hoy: los clientes de una tanda con fecha de incorporación
+  // futura no entran a este corte. Ver src/lib/cohortes.ts.
+  const universo = vigentesAl(await getUniverseLocations(), todayISO());
   if (universo.length === 0) return [];
 
   const locationIds = universo.map((l) => l.id);
@@ -169,7 +172,9 @@ export async function getAdminExecutionSnapshot(): Promise<AdminPdvRow[]> {
 
 export async function getAdminVisitHistory(): Promise<AdminVisitSnapshot[]> {
   const supabase = createSupabaseServiceClient();
-  const universo = await getUniverseLocations();
+  // Cartera vigente hoy: los clientes de una tanda con fecha de incorporación
+  // futura no entran a este corte. Ver src/lib/cohortes.ts.
+  const universo = vigentesAl(await getUniverseLocations(), todayISO());
   if (universo.length === 0) return [];
   const locationIds = universo.map((l) => l.id);
 

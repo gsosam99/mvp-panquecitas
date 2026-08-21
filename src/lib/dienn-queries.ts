@@ -12,6 +12,8 @@ import {
   type Sector,
 } from "@/lib/universe";
 import {
+  bucketEndDate,
+  todayISO,
   bucketKeyFor,
   bucketLabelFor,
   panBucketKeyFor,
@@ -19,6 +21,7 @@ import {
   type PanComparisonGranularity,
   type TimeGranularity,
 } from "@/lib/date-buckets";
+import { estabaIncorporado, vigentesAl } from "@/lib/cohortes";
 import type { Location, LocationType } from "@/types";
 
 export type { PanComparisonGranularity, TimeGranularity };
@@ -38,7 +41,9 @@ export type { PanComparisonGranularity, TimeGranularity };
 async function getUniverseLocationIds(sector?: Sector): Promise<Set<string>> {
   const universo = await getUniverseLocations();
   const filtered = sector ? universo.filter((l) => sectorGroup(l.oficina_venta) === sector) : universo;
-  return new Set(filtered.map((l) => l.id));
+  // Scope de "ahora mismo": los clientes de una tanda con fecha de
+  // incorporación futura todavía no son cartera. Ver src/lib/cohortes.ts.
+  return new Set(vigentesAl(filtered, todayISO()).map((l) => l.id));
 }
 
 /**
@@ -406,10 +411,15 @@ export async function getMixProducto(sector?: Sector): Promise<MixProductoTonPoi
 // dejan de ser comparables (ver decisión con Alejandro, 08-08-2026). Dos
 // poblaciones:
 //   - "clientes": solo PDV que sí tienen Radar > 0 de Panquecitas.
-//   - "universo": los 358 clientes del piloto (incluye 0 Panquecitas).
+//   - "universo": la cartera del piloto vigente en cada fecha (incluye 0
+//     Panquecitas). La cartera creció en agosto — ver src/lib/cohortes.ts.
 
-/** Población global fija del piloto — denominador de % Penetración en TOTAL. */
-const UNIVERSAL_CLIENTES_PILOTO = 358;
+// El denominador del piloto era una constante fija (358) porque la cartera se
+// asumía inmutable. Ya no lo es: se amplió el 14-08-2026 (indirecto Cumaná) y
+// el 24-08-2026 (resto de la cartera consolidada). Ahora sale de contar los
+// clientes VIGENTES a la fecha de corte — todayISO() para las tarjetas, el
+// cierre del bucket para cada punto de una serie. Ver src/lib/cohortes.ts y
+// migration 020_fecha_incorporacion.sql.
 
 export type PanComparisonPoblacion = "clientes" | "universo";
 
@@ -420,14 +430,21 @@ export interface PanVsHarinaPanPoint {
   harinaPanKg: number;
 }
 
+/**
+ * location_id → fecha_incorporacion de la población elegida. Devuelve el mapa
+ * y no un Set porque el filtrado no es solo "¿pertenece?" sino "¿pertenecía YA
+ * en la fecha de esta venta?" — un cliente incorporado el 24-08 tiene
+ * histórico de Harina PAN de antes, y contarlo en los buckets previos infla
+ * la línea de HPM de semanas en las que ese cliente no era del piloto.
+ */
 async function getPanVsHarinaPanUniverse(
   sector: Sector | undefined,
   poblacion: PanComparisonPoblacion
-): Promise<Set<string>> {
+): Promise<Map<string, string | null>> {
   const universo = await getUniverseLocations();
   const universoFiltrado = sector ? universo.filter((l) => sectorGroup(l.oficina_venta) === sector) : universo;
-  const ids = new Set(universoFiltrado.map((l) => l.id));
-  if (poblacion === "universo" || ids.size === 0) return ids;
+  const porId = new Map(universoFiltrado.map((l) => [l.id, l.fecha_incorporacion ?? null]));
+  if (poblacion === "universo" || porId.size === 0) return porId;
 
   const supabase = createSupabaseServiceClient();
   const { data } = await supabase
@@ -437,7 +454,7 @@ async function getPanVsHarinaPanUniverse(
     .gt("quantity_kg", 0);
 
   const compradorIds = new Set((data ?? []).map((r: { location_id: string }) => r.location_id));
-  return new Set([...ids].filter((id) => compradorIds.has(id)));
+  return new Map([...porId].filter(([id]) => compradorIds.has(id)));
 }
 
 function computePanVsHarinaPanPoints(
@@ -473,8 +490,8 @@ export async function getPanVsHarinaPan(
   poblacion: PanComparisonPoblacion
 ): Promise<Record<PanComparisonGranularity, PanVsHarinaPanPoint[]>> {
   const empty = { day: [], week: [], month: [], quarter: [] };
-  const ids = await getPanVsHarinaPanUniverse(sector, poblacion);
-  if (ids.size === 0) return empty;
+  const incorporacionPorId = await getPanVsHarinaPanUniverse(sector, poblacion);
+  if (incorporacionPorId.size === 0) return empty;
 
   const supabase = createSupabaseServiceClient();
   const { data } = await supabase
@@ -483,7 +500,9 @@ export async function getPanVsHarinaPan(
     .in("product_id", [PRODUCT_IDS.PANQUECITAS, PRODUCT_IDS.HARINA_PAN]);
 
   const rows = ((data ?? []) as { location_id: string; product_id: string; quantity_kg: number; date_of_sale: string }[])
-    .filter((r) => ids.has(r.location_id))
+    .filter((r) => incorporacionPorId.has(r.location_id))
+    // Solo las ventas posteriores a la incorporación del cliente al piloto.
+    .filter((r) => estabaIncorporado(incorporacionPorId.get(r.location_id), r.date_of_sale.slice(0, 10)))
     // HPM solo cuenta desde HPM_RADAR_DESDE; Panquecitas, completo.
     .filter((r) => esHpmVigente(r.product_id, r.date_of_sale))
     .map((r) => ({ product_id: r.product_id, date: r.date_of_sale, kg: r.quantity_kg }));
@@ -500,7 +519,7 @@ export async function getPanVsHarinaPan(
 
 // ── 4b. Comparativa de Penetración: Radar Panquecitas vs. HPM ──────
 // Contrasta, sobre la MISMA lista objetivo de clientes (el universo del
-// piloto — 358 en TOTAL, o el universo del sector con filtro), cuántos
+// piloto vigente HOY, o el del sector con filtro), cuántos
 // tienen Radar de Panquecitas > 0 contra cuántos tienen Radar de Harina
 // PAN (HPM) > 0. Ambas penetraciones usan el MISMO denominador (la lista
 // completa), de modo que el denominador de HPM incluye a los clientes que
@@ -516,15 +535,20 @@ export interface PenetracionRadarVsHpm {
   hpmPct: number;
   clientesPanquecitas: number;
   clientesHpm: number;
-  /** Tamaño del denominador (lista objetivo): 358 en TOTAL o el universo del sector. */
+  /** Tamaño del denominador: clientes de la lista objetivo incorporados a la fecha. */
   universo: number;
 }
 
 export async function getPenetracionRadarVsHpm(sector?: Sector): Promise<PenetracionRadarVsHpm> {
   const universoTotal = await getUniverseLocations();
-  const universo = sector ? universoTotal.filter((l) => sectorGroup(l.oficina_venta) === sector) : universoTotal;
+  const delSector = sector ? universoTotal.filter((l) => sectorGroup(l.oficina_venta) === sector) : universoTotal;
+  // Tarjeta de "ahora mismo": la lista objetivo son los clientes ya
+  // incorporados hoy. Una tanda con fecha futura (la Ampliación arranca el
+  // 24-08-2026) no entra al denominador hasta que llega su fecha, así que la
+  // penetración no se diluye antes de que esos clientes puedan comprar.
+  const universo = vigentesAl(delSector, todayISO());
   const ids = new Set(universo.map((l) => l.id));
-  const denom = sector ? universo.length : UNIVERSAL_CLIENTES_PILOTO;
+  const denom = universo.length;
 
   const [panqTotals, hmpTotals] = await Promise.all([
     getSellInTotalsByLocation(PRODUCT_IDS.PANQUECITAS),
@@ -553,8 +577,11 @@ export async function getPenetracionRadarVsHpm(sector?: Sector): Promise<Penetra
 //     distintas de venta Radar (tabla radar_ventas_fechas) ÷ clientes con al
 //     menos una. Conteo de clientes únicos, no de ventas.
 //     Necesita el migration 013 y re-cargar los reportes de Radar.
-//   - activacionPct (línea): clientes activados (Radar>0) / cartera fija
-//     (358 en TOTAL, o el universo del sector con filtro).
+//   - activacionPct (línea): clientes activados (Radar>0) / cartera VIGENTE
+//     al cierre de ese bucket (no una cartera fija). La cartera creció el
+//     14-08 y el 24-08-2026; con un denominador fijo, las semanas anteriores
+//     a esas fechas se dividirían entre clientes que todavía no existían y la
+//     serie histórica entera se hundiría. Ver src/lib/cohortes.ts.
 
 export interface VentaRecompraActivacionPoint {
   bucket: string;
@@ -562,15 +589,17 @@ export interface VentaRecompraActivacionPoint {
   ventaAcumuladaKg: number;
   recompraPct: number;
   activacionPct: number;
+  /** Cartera vigente al cierre del bucket — denominador de activacionPct. */
+  universo: number;
 }
 
 function computeVentaRecompraActivacionPoints(
   rows: { location_id: string; date_of_sale: string; quantity_kg: number }[],
   fechasRows: { location_id: string; fecha: string }[],
-  universoSize: number,
+  universoSizeAt: (cierre: string) => number,
   granularity: TimeGranularity
 ): VentaRecompraActivacionPoint[] {
-  if (rows.length === 0 || universoSize === 0) return [];
+  if (rows.length === 0) return [];
   const buckets = Array.from(new Set(rows.map((r) => bucketKeyFor(r.date_of_sale, granularity)))).sort();
 
   const points: VentaRecompraActivacionPoint[] = [];
@@ -600,13 +629,20 @@ function computeVentaRecompraActivacionPoints(
       if (set.size >= 2) clientesRecurrentes += 1;
     }
 
+    // Cartera vigente al CIERRE de este bucket. Se recalcula punto a punto:
+    // los buckets anteriores al 14-08 dividen entre los 358 originales y los
+    // posteriores entre la cartera ampliada, así que ampliar el piloto no
+    // reescribe hacia atrás la activación ya reportada.
+    const universoSize = universoSizeAt(bucketEndDate(bucket));
+
     points.push({
       bucket,
       label: bucketLabelFor(bucket, granularity),
       ventaAcumuladaKg: Math.round(ventaAcumuladaKg * 10) / 10,
       recompraPct:
         clientesConVenta > 0 ? Math.round((clientesRecurrentes / clientesConVenta) * 1000) / 10 : 0,
-      activacionPct: Math.round((activados / universoSize) * 1000) / 10,
+      activacionPct: universoSize > 0 ? Math.round((activados / universoSize) * 1000) / 10 : 0,
+      universo: universoSize,
     });
   }
 
@@ -620,8 +656,12 @@ export async function getVentaRecompraActivacion(
   const universo = await getUniverseLocations();
   const universoFiltrado = sector ? universo.filter((l) => sectorGroup(l.oficina_venta) === sector) : universo;
   if (universoFiltrado.length === 0) return empty;
-  const ids = new Set(universoFiltrado.map((l) => l.id));
-  const universoSize = sector ? universoFiltrado.length : UNIVERSAL_CLIENTES_PILOTO;
+  const incorporacionPorId = new Map(universoFiltrado.map((l) => [l.id, l.fecha_incorporacion ?? null]));
+
+  // Denominador dinámico: cuántos clientes de la cartera había incorporados a
+  // una fecha dada. Se recorre la lista completa en cada llamada porque son
+  // cientos de filas y unas decenas de buckets — no vale la pena indexar.
+  const universoSizeAt = (cierre: string) => vigentesAl(universoFiltrado, cierre).length;
 
   const supabase = createSupabaseServiceClient();
   const { data } = await supabase
@@ -631,8 +671,14 @@ export async function getVentaRecompraActivacion(
     .gt("quantity_kg", 0)
     .order("date_of_sale");
 
-  const rows = ((data ?? []) as { location_id: string; date_of_sale: string; quantity_kg: number }[]).filter((r) =>
-    ids.has(r.location_id)
+  // Numerador con el mismo criterio que el denominador: una venta anterior a
+  // la incorporación del cliente no cuenta. Si contara, un cliente de la
+  // tanda del 24-08 con histórico previo aparecería "activado" en semanas en
+  // las que no estaba en el denominador, y la tasa pasaría del 100%.
+  const rows = ((data ?? []) as { location_id: string; date_of_sale: string; quantity_kg: number }[]).filter(
+    (r) =>
+      incorporacionPorId.has(r.location_id) &&
+      estabaIncorporado(incorporacionPorId.get(r.location_id), r.date_of_sale.slice(0, 10))
   );
   if (rows.length === 0) return empty;
 
@@ -643,14 +689,16 @@ export async function getVentaRecompraActivacion(
     .from("radar_ventas_fechas")
     .select("location_id, fecha")
     .eq("product_id", PRODUCT_IDS.PANQUECITAS);
-  const fechasRows = ((fechasData ?? []) as { location_id: string; fecha: string }[]).filter((r) =>
-    ids.has(r.location_id)
+  const fechasRows = ((fechasData ?? []) as { location_id: string; fecha: string }[]).filter(
+    (r) =>
+      incorporacionPorId.has(r.location_id) &&
+      estabaIncorporado(incorporacionPorId.get(r.location_id), r.fecha.slice(0, 10))
   );
 
   return {
-    day: computeVentaRecompraActivacionPoints(rows, fechasRows, universoSize, "day"),
-    week: computeVentaRecompraActivacionPoints(rows, fechasRows, universoSize, "week"),
-    month: computeVentaRecompraActivacionPoints(rows, fechasRows, universoSize, "month"),
+    day: computeVentaRecompraActivacionPoints(rows, fechasRows, universoSizeAt, "day"),
+    week: computeVentaRecompraActivacionPoints(rows, fechasRows, universoSizeAt, "week"),
+    month: computeVentaRecompraActivacionPoints(rows, fechasRows, universoSizeAt, "month"),
   };
 }
 
@@ -667,7 +715,7 @@ export async function getVentaRecompraActivacion(
 //
 // El filtro de población cambia QUÉ clientes entran en el promedio de PAN:
 //   - "clientes": solo los que tienen Panquecitas (Radar > 0).
-//   - "universo": los 358 del piloto.
+//   - "universo": la cartera del piloto vigente a la fecha.
 
 // El comportamiento diario se grafica desde el 03-08-2026 en adelante
 // (decisión con DIENN, 18-08-2026). El reporte de 3 meses hacia atrás NO se
@@ -727,7 +775,9 @@ export async function getRendimiento3M(
   sector?: Sector
 ): Promise<Rendimiento3MResult> {
   const universoTotal = await getUniverseLocations();
-  const universo = sector ? universoTotal.filter((l) => sectorGroup(l.oficina_venta) === sector) : universoTotal;
+  const delSector = sector ? universoTotal.filter((l) => sectorGroup(l.oficina_venta) === sector) : universoTotal;
+  // Cartera vigente hoy: una tanda con fecha futura no entra al promedio.
+  const universo = vigentesAl(delSector, todayISO());
   if (universo.length === 0) return RENDIMIENTO_3M_VACIO;
   const idsUniverso = new Set(universo.map((l) => l.id));
 
@@ -784,7 +834,7 @@ export async function getRendimiento3M(
   const panq = panqData.filter((r) => idsUniverso.has(r.location_id));
 
   // Población del promedio de PAN — ambas acotadas a la CARTERA (decisión de
-  // DIENN, 18-08-2026: "PAN Universo son los 358 clientes de la cartera"):
+  // DIENN, 18-08-2026: "PAN Universo son los clientes de la cartera"):
   //   - "universo": todos los PDV de la cartera del corte activo, hayan
   //     comprado Panquecitas o no.
   //   - "clientes": solo los que además compran Panquecitas.
@@ -865,7 +915,7 @@ export interface CoberturaComunicacionPoint {
 function computeCoberturaComunicacionPoints(
   relevantRows: { location_id: string; created_at: string; pop_present: boolean }[],
   sectorByLocation: Map<string, Sector | null>,
-  universoBySector: Map<Sector, number>,
+  universoBySectorAt: (sector: Sector, cierre: string) => number,
   compradorIds: Set<string>,
   granularity: TimeGranularity
 ): CoberturaComunicacionPoint[] {
@@ -877,12 +927,15 @@ function computeCoberturaComunicacionPoints(
     const rowsUpToBucket = relevantRows.filter((r) => bucketKeyFor(r.created_at.slice(0, 10), granularity) <= bucket);
 
     const point: CoberturaComunicacionPoint = { bucket, label: bucketLabelFor(bucket, granularity) };
+    const cierre = bucketEndDate(bucket);
     for (const sector of ["cumana", "barquisimeto_este"] as Sector[]) {
       const sectorRows = rowsUpToBucket.filter((r) => sectorByLocation.get(r.location_id) === sector);
 
-      // Cobertura: visitados sobre la cartera TOTAL de la zona.
+      // Cobertura: visitados sobre la cartera de la zona VIGENTE al cierre del
+      // bucket. Con la cartera de hoy, las semanas previas a la ampliación
+      // mostrarían una cobertura hundida por PDV que aún no había que visitar.
       const visitados = new Set(sectorRows.map((r) => r.location_id));
-      const universoSector = universoBySector.get(sector) ?? 0;
+      const universoSector = universoBySectorAt(sector, cierre);
       point[`${sector}_cobertura`] = universoSector > 0 ? Math.round((visitados.size / universoSector) * 1000) / 10 : 0;
 
       // Comunicación (material POP): solo sobre los visitados que ADEMÁS tienen
@@ -910,10 +963,17 @@ export async function getCoberturaComunicacionPorSector(): Promise<Record<TimeGr
   // decisión con Alejandro (11-08-2026). Ver computeCoberturaComunicacionPoints.
   const compradorIds = await getCompradorLocationIds();
 
-  const universoBySector = new Map<Sector, number>();
+  // Cartera por zona, pero evaluada a una fecha: el denominador de cobertura
+  // crece cuando entra una tanda nueva y no antes. Ver src/lib/cohortes.ts.
+  const universoPorSector = new Map<Sector, Location[]>();
   for (const sector of ["cumana", "barquisimeto_este"] as Sector[]) {
-    universoBySector.set(sector, universo.filter((l) => sectorGroup(l.oficina_venta) === sector).length);
+    universoPorSector.set(
+      sector,
+      universo.filter((l) => sectorGroup(l.oficina_venta) === sector)
+    );
   }
+  const universoBySectorAt = (sector: Sector, cierre: string) =>
+    vigentesAl(universoPorSector.get(sector) ?? [], cierre).length;
   const sectorByLocation = new Map(universo.map((l) => [l.id, sectorGroup(l.oficina_venta)]));
 
   const supabase = createSupabaseServiceClient();
@@ -923,13 +983,21 @@ export async function getCoberturaComunicacionPorSector(): Promise<Record<TimeGr
     .order("created_at");
 
   const rows = (data ?? []) as { location_id: string; created_at: string; pop_present: boolean }[];
-  const relevantRows = rows.filter((r) => sectorByLocation.has(r.location_id));
+  // Mismo criterio que el denominador: una visita anterior a la incorporación
+  // del cliente no cuenta como cobertura de un período en el que ese PDV
+  // todavía no era cartera.
+  const incorporacionPorId = new Map(universo.map((l) => [l.id, l.fecha_incorporacion ?? null]));
+  const relevantRows = rows.filter(
+    (r) =>
+      sectorByLocation.has(r.location_id) &&
+      estabaIncorporado(incorporacionPorId.get(r.location_id), r.created_at.slice(0, 10))
+  );
   if (relevantRows.length === 0) return empty;
 
   return {
-    day: computeCoberturaComunicacionPoints(relevantRows, sectorByLocation, universoBySector, compradorIds, "day"),
-    week: computeCoberturaComunicacionPoints(relevantRows, sectorByLocation, universoBySector, compradorIds, "week"),
-    month: computeCoberturaComunicacionPoints(relevantRows, sectorByLocation, universoBySector, compradorIds, "month"),
+    day: computeCoberturaComunicacionPoints(relevantRows, sectorByLocation, universoBySectorAt, compradorIds, "day"),
+    week: computeCoberturaComunicacionPoints(relevantRows, sectorByLocation, universoBySectorAt, compradorIds, "week"),
+    month: computeCoberturaComunicacionPoints(relevantRows, sectorByLocation, universoBySectorAt, compradorIds, "month"),
   };
 }
 
@@ -989,7 +1057,8 @@ export interface RankingSegmentoRow {
 
 export async function getRankingVolumenPorSegmento(sector?: Sector): Promise<RankingSegmentoRow[]> {
   const universoTotal = await getUniverseLocations();
-  const universo = sector ? universoTotal.filter((l) => sectorGroup(l.oficina_venta) === sector) : universoTotal;
+  const delSector = sector ? universoTotal.filter((l) => sectorGroup(l.oficina_venta) === sector) : universoTotal;
+  const universo = vigentesAl(delSector, todayISO());
   if (universo.length === 0) return [];
 
   const panqRadarTotals = await getSellInTotalsByLocation(PRODUCT_IDS.PANQUECITAS);
@@ -1038,7 +1107,9 @@ export async function getRankingVolumenPorSegmento(sector?: Sector): Promise<Ran
 
 export async function getDetalleClientesPorSegmento(sector?: Sector): Promise<DetalleSegmentoRow[]> {
   const universoTotal = await getUniverseLocations();
-  const universo = sector ? universoTotal.filter((l) => sectorGroup(l.oficina_venta) === sector) : universoTotal;
+  const delSector = sector ? universoTotal.filter((l) => sectorGroup(l.oficina_venta) === sector) : universoTotal;
+  // Tabla de "ahora mismo": solo los clientes ya incorporados a la fecha.
+  const universo = vigentesAl(delSector, todayISO());
   if (universo.length === 0) return [];
 
   // Penetración: clientes con Radar > 0 (Carga Radar — no Pedidos y
@@ -1047,7 +1118,7 @@ export async function getDetalleClientesPorSegmento(sector?: Sector): Promise<De
   const panqRadarTotals = await getSellInTotalsByLocation(PRODUCT_IDS.PANQUECITAS);
   const panqPedidoTotals = await getCantidadPedidoTotalsByLocation(PRODUCT_IDS.PANQUECITAS);
   const hmpTotals = await getSellInTotalsByLocation(PRODUCT_IDS.HARINA_PAN);
-  const denomPenetracion = sector ? universo.length : UNIVERSAL_CLIENTES_PILOTO;
+  const denomPenetracion = universo.length;
 
   const supabase = createSupabaseServiceClient();
   const { data } = await supabase
@@ -1090,7 +1161,7 @@ export async function getDetalleClientesPorSegmento(sector?: Sector): Promise<De
 
     rows.push({
       segmento,
-      // % Penetración = clientes con Radar > 0 del segmento / universo (358 en TOTAL)
+      // % Penetración = clientes con Radar > 0 del segmento / universo vigente
       penetracionPct:
         denomPenetracion > 0 ? Math.round((facturados.length / denomPenetracion) * 1000) / 10 : 0,
       // Tasa de Recompra = repetidores / clientes con ≥1 compra confirmada por Radar
@@ -1267,7 +1338,8 @@ function formatUbicacionProducto(loc: string[] | null, other: string | null): st
 export async function getStockOut(sector?: Sector): Promise<StockOutResult> {
   const empty: StockOutResult = { enStockOut: 0, universo: 0, clientes: [] };
   const universo = await getUniverseLocations();
-  const universoFiltrado = sector ? universo.filter((l) => sectorGroup(l.oficina_venta) === sector) : universo;
+  const delSector = sector ? universo.filter((l) => sectorGroup(l.oficina_venta) === sector) : universo;
+  const universoFiltrado = vigentesAl(delSector, todayISO());
   const ids = new Set(universoFiltrado.map((l) => l.id));
   if (ids.size === 0) return empty;
 
@@ -1575,7 +1647,7 @@ function clasificarPrecio(observado: number, target: number): EstadoPrecio {
 }
 
 export async function getPrecioCorrecto(): Promise<PrecioCorrectoRow[]> {
-  const universo = await getUniverseLocations();
+  const universo = vigentesAl(await getUniverseLocations(), todayISO());
   if (universo.length === 0) return [];
 
   const supabase = createSupabaseServiceClient();
@@ -1665,8 +1737,8 @@ export interface CarteraSegmentoPunto {
   ciudad: string;
   modelo: string; // Directo / Indirecto / Mixto (columna "Directo o Indirecto" de la cartera)
   radarKg: number;
-  cartera: number; // total de clientes del segmento (estático)
-  programados: number; // clientes que tocaba visitar en el bucket (denominador)
+  cartera: number; // clientes del segmento incorporados al cierre del bucket
+  programados: number; // clientes incorporados que tocaba visitar en el bucket (denominador)
   activos: number;
   facturados: number;
   pedidos: number;
@@ -1731,7 +1803,11 @@ export async function getCarteraPorSegmento(): Promise<CarteraSegmentoResult> {
   const universo = await getUniverseLocations();
   if (universo.length === 0) return empty;
 
-  type Cli = { locId: string; segKey: string; plan: Set<number> };
+  // fecha_incorporacion viaja con cada cliente: es lo que permite responder
+  // "¿este cliente ya era cartera en este bucket?" tanto para el denominador
+  // (a visitar / cartera total) como para el numerador (activos, facturados,
+  // pedidos). Ver src/lib/cohortes.ts.
+  type Cli = { locId: string; segKey: string; plan: Set<number>; fecha_incorporacion: string | null };
   const clientes: Cli[] = [];
   const segMeta = new Map<string, { ciudad: string; modelo: string }>();
   const carteraCount = new Map<string, number>();
@@ -1743,7 +1819,12 @@ export async function getCarteraPorSegmento(): Promise<CarteraSegmentoResult> {
     // como Directo (decisión con Alejandro): solo Indirecto vs Directo.
     const modelo = esModeloIndirecto(l) ? "Indirecto" : "Directo";
     const segKey = `${sector}|${modelo}`;
-    const cli: Cli = { locId: l.id, segKey, plan: planSet(l.dias_visita) };
+    const cli: Cli = {
+      locId: l.id,
+      segKey,
+      plan: planSet(l.dias_visita),
+      fecha_incorporacion: l.fecha_incorporacion ?? null,
+    };
     clientes.push(cli);
     segMeta.set(segKey, { ciudad: CIUDAD_POR_SECTOR[sector], modelo });
     carteraCount.set(segKey, (carteraCount.get(segKey) ?? 0) + 1);
@@ -1754,6 +1835,7 @@ export async function getCarteraPorSegmento(): Promise<CarteraSegmentoResult> {
 
   const segByLoc = new Map(clientes.map((c) => [c.locId, c.segKey]));
   const locSet = new Set(clientes.map((c) => c.locId));
+  const incorporacionPorLoc = new Map(clientes.map((c) => [c.locId, c.fecha_incorporacion]));
 
   const supabase = createSupabaseServiceClient();
   const { data: radarData } = await supabase
@@ -1771,12 +1853,21 @@ export async function getCarteraPorSegmento(): Promise<CarteraSegmentoResult> {
     .eq("product_id", PRODUCT_IDS.PANQUECITAS)
     .gt("cantidad_pedido_kg", 0);
 
+  // Además de pertenecer a la cartera, la venta tiene que ser POSTERIOR a la
+  // incorporación del cliente: si no, un cliente de una tanda nueva con
+  // histórico previo aparecería activo en buckets donde no está en el
+  // denominador, y la efectividad podría pasar del 100%.
+  const yaEraCartera = (locId: string, fecha: string) =>
+    locSet.has(locId) && estabaIncorporado(incorporacionPorLoc.get(locId), fecha.slice(0, 10));
+
   const radar = ((radarData ?? []) as { location_id: string; quantity_kg: number; date_of_sale: string }[]).filter(
-    (r) => locSet.has(r.location_id)
+    (r) => yaEraCartera(r.location_id, r.date_of_sale)
   );
-  const fact = ((factData ?? []) as { location_id: string; fecha: string }[]).filter((r) => locSet.has(r.location_id));
+  const fact = ((factData ?? []) as { location_id: string; fecha: string }[]).filter((r) =>
+    yaEraCartera(r.location_id, r.fecha)
+  );
   const pedido = ((pedidoData ?? []) as { location_id: string; fecha: string }[]).filter((r) =>
-    locSet.has(r.location_id)
+    yaEraCartera(r.location_id, r.fecha)
   );
 
   // Segmentos ordenados: por ciudad y luego Directo antes que Indirecto.
@@ -1787,8 +1878,15 @@ export async function getCarteraPorSegmento(): Promise<CarteraSegmentoResult> {
   });
 
   const pct = (n: number, d: number) => (d > 0 ? Math.round((n / d) * 1000) / 10 : 0);
-  const programadosEn = (clis: Cli[], covered: Set<number>) =>
-    clis.filter((c) => [...c.plan].some((w) => covered.has(w)));
+  // "A visitar" en un bucket = clientes con día de visita programado dentro
+  // del período Y ya incorporados a la cartera al cierre de ese período. Sin
+  // la segunda condición, los clientes de las tandas nuevas contarían como
+  // "tocaba visitarlos y no se visitaron" en semanas en las que ni siquiera
+  // eran clientes, hundiendo la efectividad histórica.
+  const programadosEn = (clis: Cli[], covered: Set<number>, cierre: string) =>
+    clis.filter(
+      (c) => [...c.plan].some((w) => covered.has(w)) && estabaIncorporado(c.fecha_incorporacion, cierre)
+    );
 
   // ── Gráficos por segmento (barras Radar del bucket; efectividad acumulada) ──
   function buildSegmentos(granularity: TimeGranularity): CarteraSegmentoBucket[] {
@@ -1829,9 +1927,10 @@ export async function getCarteraPorSegmento(): Promise<CarteraSegmentoResult> {
       for (const locId of pedidoByBucket.get(b) ?? []) pedidoCum.add(locId);
       // día → solo ese día de la semana; semana/mes → cualquier día programado.
       const covered = granularity === "day" ? new Set([isoWeekday(b)]) : TODOS_LOS_DIAS;
+      const cierre = bucketEndDate(b);
       const puntos: CarteraSegmentoPunto[] = segKeys.map((key) => {
         const meta = segMeta.get(key)!;
-        const prog = programadosEn(clientesBySeg.get(key) ?? [], covered);
+        const prog = programadosEn(clientesBySeg.get(key) ?? [], covered, cierre);
         const activos = prog.filter((c) => radarCum.has(c.locId)).length;
         const facturados = prog.filter((c) => factCum.has(c.locId)).length;
         const pedidos = prog.filter((c) => pedidoCum.has(c.locId)).length;
@@ -1840,7 +1939,9 @@ export async function getCarteraPorSegmento(): Promise<CarteraSegmentoResult> {
           ciudad: meta.ciudad,
           modelo: meta.modelo,
           radarKg: Math.round((radarKgSeg.get(key) ?? 0) * 10) / 10,
-          cartera: carteraCount.get(key) ?? 0,
+          // Cartera del segmento vigente al cierre del bucket, no el total de
+          // hoy: si no, un bucket de agosto mostraría la cartera ampliada.
+          cartera: vigentesAl(clientesBySeg.get(key) ?? [], cierre).length,
           programados: prog.length,
           activos,
           facturados,
@@ -1888,18 +1989,16 @@ export async function getCarteraPorSegmento(): Promise<CarteraSegmentoResult> {
     const buckets = Array.from(
       new Set([...radarByBucket.keys(), ...factByBucket.keys(), ...pedidoByBucket.keys()])
     ).sort();
-    // Cartera total del scope (denominador del modo "acumulado": clientes
-    // activos acumulados ÷ cartera total, IGUAL que la tarjeta de activación de
-    // cliente). En TOTAL son los 358 del piloto (UNIVERSAL_CLIENTES_PILOTO); por
-    // ciudad, el universo de ese sector. Así la línea acumulada aterriza justo
-    // en el % de la tarjeta (ej. 58% en el total).
+    // Cartera del scope (denominador del modo "acumulado": clientes activos
+    // acumulados ÷ cartera, IGUAL que la tarjeta de activación de cliente).
+    // Ya no es un número fijo: se evalúa al cierre de cada bucket, porque la
+    // cartera creció el 14-08 y el 24-08-2026. Así la línea acumulada sigue
+    // aterrizando en el % de la tarjeta, pero sin reescribir hacia atrás los
+    // puntos de las semanas en que la cartera era más chica.
     const clientesScopeDir = clientesScope.filter((c) => c.segKey.endsWith("|Directo"));
     const clientesScopeInd = clientesScope.filter((c) => c.segKey.endsWith("|Indirecto"));
     // Modelo por cliente del scope, para separar el volumen Radar del período.
     const esDirectoLoc = new Map(clientesScope.map((c) => [c.locId, c.segKey.endsWith("|Directo")]));
-    const carteraTotal = sector ? clientesScope.length : UNIVERSAL_CLIENTES_PILOTO;
-    const carteraDir = clientesScopeDir.length;
-    const carteraInd = clientesScopeInd.length;
     const radarCum = new Set<string>();
     const factCum = new Set<string>();
     const pedidoCum = new Set<string>();
@@ -1919,7 +2018,8 @@ export async function getCarteraPorSegmento(): Promise<CarteraSegmentoResult> {
       for (const locId of pedidoByBucket.get(b) ?? []) pedidoCum.add(locId);
       // día → solo ese día de la semana; semana/mes → cualquier día programado.
       const covered = granularity === "day" ? new Set([isoWeekday(b)]) : TODOS_LOS_DIAS;
-      const prog = programadosEn(clientesScope, covered);
+      const cierre = bucketEndDate(b);
+      const prog = programadosEn(clientesScope, covered, cierre);
       const activos = prog.filter((c) => radarCum.has(c.locId)).length;
       const facturados = prog.filter((c) => factCum.has(c.locId)).length;
       const pedidos = prog.filter((c) => pedidoCum.has(c.locId)).length;
@@ -1928,13 +2028,18 @@ export async function getCarteraPorSegmento(): Promise<CarteraSegmentoResult> {
       const progInd = prog.filter((c) => c.segKey.endsWith("|Indirecto"));
       const activosDir = progDir.filter((c) => radarCum.has(c.locId)).length;
       const activosInd = progInd.filter((c) => radarCum.has(c.locId)).length;
-      // Modo "acumulado": clientes activos acumulados ÷ cartera total del scope
-      // (todos los clientes, no solo los programados). Numerador acumulado.
-      const activosAcum = clientesScope.filter((c) => radarCum.has(c.locId)).length;
-      const facturadosAcum = clientesScope.filter((c) => factCum.has(c.locId)).length;
-      const pedidosAcum = clientesScope.filter((c) => pedidoCum.has(c.locId)).length;
-      const activosDirAcum = clientesScopeDir.filter((c) => radarCum.has(c.locId)).length;
-      const activosIndAcum = clientesScopeInd.filter((c) => radarCum.has(c.locId)).length;
+      // Modo "acumulado": clientes activos acumulados ÷ cartera del scope
+      // (todos los clientes, no solo los programados). Numerador y denominador
+      // se recortan a los clientes ya incorporados al cierre del bucket.
+      const scopeVigente = vigentesAl(clientesScope, cierre);
+      const carteraTotal = scopeVigente.length;
+      const carteraDir = vigentesAl(clientesScopeDir, cierre).length;
+      const carteraInd = vigentesAl(clientesScopeInd, cierre).length;
+      const activosAcum = scopeVigente.filter((c) => radarCum.has(c.locId)).length;
+      const facturadosAcum = scopeVigente.filter((c) => factCum.has(c.locId)).length;
+      const pedidosAcum = scopeVigente.filter((c) => pedidoCum.has(c.locId)).length;
+      const activosDirAcum = vigentesAl(clientesScopeDir, cierre).filter((c) => radarCum.has(c.locId)).length;
+      const activosIndAcum = vigentesAl(clientesScopeInd, cierre).filter((c) => radarCum.has(c.locId)).length;
       return {
         dia: b,
         label: bucketLabelFor(b, granularity),

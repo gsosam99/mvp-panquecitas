@@ -71,6 +71,8 @@ export function CarteraDropzone({ onCommitSuccess }: CarteraDropzoneProps) {
         locations_upserted?: number;
         sin_sector?: number;
         con_segmento?: number;
+        nuevos_por_cohorte?: Record<string, number>;
+        fechas_sobrescritas?: number;
         error?: string;
       };
       if (!res.ok) {
@@ -93,6 +95,21 @@ export function CarteraDropzone({ onCommitSuccess }: CarteraDropzoneProps) {
       if (!data.con_segmento) {
         toast.warning(
           'Ninguna fila traía "Segmento de Clientes 2": el Ranking de Volumen por Segmento de DIENN saldrá vacío.'
+        );
+      }
+      // Clientes NUEVOS por tanda de incorporación. Hay que poder verificarlo
+      // en el momento: si "Indirecto Cumaná" sale en 0 es que el archivo no
+      // trae los grupos vendedores U27/U28, y esos PDV habrían entrado con la
+      // fecha equivocada — lo que desplaza los indicadores de todo agosto.
+      const nuevos = Object.entries(data.nuevos_por_cohorte ?? {});
+      if (nuevos.length > 0) {
+        toast.info(
+          `Clientes nuevos por tanda: ${nuevos.map(([tanda, n]) => `${tanda} ${n}`).join(" · ")}`
+        );
+      }
+      if (data.fechas_sobrescritas) {
+        toast.warning(
+          `${data.fechas_sobrescritas} clientes cambiaron de fecha de incorporación por la columna de fecha del archivo. Los indicadores históricos de esos clientes se recalculan.`
         );
       }
     } catch {

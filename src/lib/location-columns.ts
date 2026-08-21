@@ -9,13 +9,17 @@
 export const LOCATION_COLUMNS =
   "id, name, type, sap_code, address, region, centro_poblado, municipio, tipo_cliente, oficina_venta, grupo_vendedor, esquema_atencion, dias_visita, zona_venta, asesor_encargado, fuente_sell_out, lat, lng";
 
-// Igual que la anterior más `segmento_cliente` (migration 016), que solo
-// necesita el ranking por segmento de DIENN.
+// Igual que la anterior más las columnas que agregaron migrations posteriores:
+// `segmento_cliente` (016), para el ranking por segmento de DIENN, y
+// `fecha_incorporacion` / `cohorte` (020), para que el universo tenga
+// dimensión de tiempo.
 //
 // Va aparte a propósito: si se pide una columna que la base todavía no tiene,
 // Supabase falla la query ENTERA y quien la use se queda sin datos — el
 // dashboard sin universo y las apps de campo sin lista de PDV. Dejando la
-// lista base como la de siempre, un deploy anterior a correr el migration solo
-// afecta al ranking por segmento, y getUniverseLocations() ni siquiera eso
-// porque reintenta con la lista base.
-export const LOCATION_COLUMNS_CON_SEGMENTO = `${LOCATION_COLUMNS}, segmento_cliente`;
+// lista base como la de siempre, un deploy anterior a correr los migrations
+// degrada en vez de romper: getUniverseLocations() reintenta con la lista
+// base, y sin fecha_incorporacion todos los clientes se consideran vigentes
+// desde siempre, que es exactamente el comportamiento previo (ver
+// estabaIncorporado() en src/lib/cohortes.ts).
+export const LOCATION_COLUMNS_COMPLETO = `${LOCATION_COLUMNS}, segmento_cliente, fecha_incorporacion, cohorte`;

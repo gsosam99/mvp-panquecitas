@@ -62,6 +62,14 @@ export interface Location {
   zona_venta: string | null;
   asesor_encargado: string | null;
   fuente_sell_out: FuenteSellOut;
+  /**
+   * Desde cuándo el cliente cuenta en el universo del piloto ("YYYY-MM-DD").
+   * null = todavía sin cohorte asignada, o migration 020 sin correr: en ambos
+   * casos se trata como vigente desde siempre (ver estabaIncorporado()).
+   */
+  fecha_incorporacion: string | null;
+  /** Tanda de incorporación ("Piloto original", "Indirecto Cumaná", "Ampliación"). */
+  cohorte: string | null;
   lat: number | null;
   lng: number | null;
 }
@@ -255,6 +263,14 @@ export interface ParsedCarteraRow {
   esquema_atencion: string;
   /** "Segmento de Clientes 2" de la Cartera Consolidada. "" si la columna no está. */
   segmento_cliente: string;
+  /**
+   * Fecha de incorporación explícita del archivo ("YYYY-MM-DD"), si el archivo
+   * trae la columna. Es un OVERRIDE opcional: normalmente la fecha se deriva
+   * de la regla por grupo vendedor (ver src/lib/cohortes.ts), y esta columna
+   * solo existe para casos puntuales que no encajen en la regla. null = usar
+   * la regla.
+   */
+  fecha_incorporacion: string | null;
 }
 
 export interface CarteraParseResult {
