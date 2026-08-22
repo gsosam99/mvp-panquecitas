@@ -157,20 +157,20 @@ export function SapDropzone({ mode, onCommitSuccess }: SapDropzoneProps) {
         );
         toast.success("Carga completada");
       } else {
-        const updatedNote = data.updated ? ` · ${data.updated} acumulados actualizados` : "";
-        const staleNote = data.stale_skipped ? ` · ${data.stale_skipped} filas obsoletas ignoradas` : "";
-        const deletedNote = data.deleted ? ` · ${data.deleted} acumulados eliminados (crédito/devolución dejó el mes en 0)` : "";
-        const nonPositiveNote = data.non_positive_skipped ? ` · ${data.non_positive_skipped} filas en 0 o negativo sin acumulado previo` : "";
-        // El Radar se exporta con todo el período: las fechas de recompra de
-        // cargas anteriores se REEMPLAZAN, no se suman (ver handleRadarUpload).
+        // El Radar se guarda con una fila por cliente + material + DÍA, y la
+        // carga reemplaza los meses que trae el archivo: `inserted` son las
+        // ventas diarias del archivo y `deleted` las que se reemplazaron. Al
+        // recargar el mismo archivo los dos números coinciden.
+        const deletedNote = data.deleted ? ` · ${data.deleted} reemplazadas de cargas anteriores` : "";
+        const nonPositiveNote = data.non_positive_skipped ? ` · ${data.non_positive_skipped} filas en 0 o negativo omitidas` : "";
         const fechasNote = data.fechas_eliminadas
           ? ` · ${data.fechas_eliminadas} fechas de cargas anteriores reemplazadas`
           : "";
-        onCommitSuccess(batchId, (data.inserted ?? 0) + (data.updated ?? 0), data.locations_upserted ?? 0);
+        onCommitSuccess(batchId, data.inserted ?? 0, data.locations_upserted ?? 0);
         setDoneSummary(
-          `${data.inserted} registros nuevos${updatedNote}${staleNote}${deletedNote}${nonPositiveNote}${fechasNote} · ${data.locations_upserted} localidades actualizadas${foraCarteraNote}`
+          `${data.inserted} ventas diarias${deletedNote}${nonPositiveNote}${fechasNote} · ${data.locations_upserted} localidades actualizadas${foraCarteraNote}`
         );
-        toast.success(`${data.inserted} registros nuevos${updatedNote}${foraCarteraNote}`);
+        toast.success(`${data.inserted} ventas diarias cargadas${foraCarteraNote}`);
       }
     } catch {
       toast.error("Error de conexión. Intenta de nuevo.");

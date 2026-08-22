@@ -1,5 +1,4 @@
 import { createSupabaseServiceClient } from "@/lib/supabase/server";
-import { fetchAllRows } from "@/lib/supabase/fetch-all";
 import { hasDashboardSession } from "@/lib/session";
 import {
   PRODUCT_IDS,
@@ -130,14 +129,14 @@ export async function POST(req: Request) {
 
 // ── Reporte "Radar" (Harina PAN + Panquecitas) — una fila por día ──────────
 // Cada fila del reporte es la venta real DESPACHADA de UN cliente + material
-// en UN día. `sap_sell_in_records` guarda una fila por cliente + producto +
-// presentación + MES, así que la carga suma los días del archivo (ver paso 3).
+// en UN día, y así se guarda en `sap_sell_in_records`: mismo grano que el
+// reporte. El total de un mes es la suma de sus días.
 //
-// El archivo trae el mes completo, de modo que esa suma es el total del mes:
-// si se vuelve a subir un radar más adelante dentro del mismo mes, la fila
-// existente se REEMPLAZA con la nueva suma (y con la fecha más reciente del
-// archivo), nunca se acumula encima. Volver a subir el mismo archivo es
-// idempotente. Un mes nuevo simplemente crea una fila nueva.
+// El archivo trae el período completo, así que la carga REEMPLAZA los meses
+// que trae (para los clientes y productos que aparecen en él) en vez de
+// actualizar fila por fila: se borra y se reinserta. Volver a subir el mismo
+// archivo es idempotente, y una corrección queda reflejada en vez de convivir
+// con el dato viejo.
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 async function handleRadarUpload(supabase: any, rows: ParsedSapRadarRow[], batchId: string, fechas: RadarFecha[]) {
   // ── 1. Resolver clientes contra la cartera ya cargada (no se crean nuevos) ──
@@ -194,131 +193,97 @@ async function handleRadarUpload(supabase: any, rows: ParsedSapRadarRow[], batch
     }, { status: 422 });
   }
 
-  // ── 3. Colapsar por cliente+producto+presentación+MES — SUMANDO los días ──
+  // ── 3. Una fila por cliente + producto + presentación + DÍA ──────────
   //
-  // Antes esto se quedaba solo con la fila de fecha más reciente del mes,
-  // porque se asumía que cada fila traía el acumulado del mes y las demás
-  // eran snapshots intermedios. El reporte real (N7_V_SD88_WEB_001) NO es
-  // así: trae UNA FILA POR CLIENTE + MATERIAL + DÍA, cada una con la venta
-  // de ESE día. Verificado sobre el export del 21-08-2026: 787 filas de
-  // Panquecitas y 787 llaves cliente|material|día distintas, ninguna
-  // repetida. Quedarse con la última descartaba 1,21 de 5,42 toneladas —
-  // el cliente 36959 tenía 1,20 kg el 13-08 y 0,80 kg el 18-08, y solo se
-  // guardaba 0,80.
+  // El grano de `sap_sell_in_records` es el DÍA, igual que el del reporte
+  // (N7_V_SD88_WEB_001 trae una fila por cliente + material + día, con la
+  // venta de ESE día: 787 filas y 787 llaves distintas en el export del
+  // 21-08-2026).
   //
-  // Se colapsa primero por DÍA (defensivo: si un export llegara a repetir
-  // el mismo cliente+material+día, sumarlo lo duplicaría) y recién después
-  // se suma el mes. La fecha que se guarda es la más reciente del mes, que
-  // es la que usa el paso 4 para decidir si el archivo es más nuevo que lo
-  // ya guardado.
+  // Antes se guardaba una fila por MES. Primero con el kg del último día,
+  // que descartaba 1,21 de 5,42 toneladas. Después con la suma del mes pero
+  // fechada en el último día: el total quedaba bien y el reparto por día
+  // mal, porque TODO el volumen mensual de un cliente aterrizaba en la
+  // fecha de su última compra. Cumaná mostraba 659,20 kg el 21-08 contra
+  // los 390,40 reales, y el gráfico de rendimiento diario vs. promedio 3M
+  // salía deformado.
+  //
+  // Guardar por día arregla las dos cosas: el total del mes es la suma de
+  // sus días y la serie diaria es la real. De paso, la "primera compra" del
+  // perfil Admin pasa a ser la fecha real y no el último día del mes.
+  //
+  // Si un export repitiera cliente+material+día gana la última fila: no se
+  // suma, porque sería el mismo dato dos veces.
   const byDay = new Map<string, (typeof sellInRows)[number]>();
+  let nonPositiveSkipped = 0;
   for (const r of sellInRows) {
+    // sap_sell_in_records exige quantity_kg > 0 (ver schema.sql). Una fila
+    // en cero o negativa (crédito/devolución) no se inserta; como el paso 4
+    // borra el mes antes de reinsertar, eso equivale a eliminarla.
+    if (r.quantity_kg <= 0) {
+      nonPositiveSkipped++;
+      continue;
+    }
     byDay.set(dedupeKey(r.location_id, r.product_id, r.variant_id, r.date_of_sale), r);
   }
+  const filasNuevas = [...byDay.values()];
 
-  const byKey = new Map<string, (typeof sellInRows)[number]>();
-  for (const r of byDay.values()) {
-    const key = dedupeKey(r.location_id, r.product_id, r.variant_id, monthKey(r.date_of_sale));
-    const existing = byKey.get(key);
-    if (!existing) {
-      byKey.set(key, { ...r });
-      continue;
-    }
-    existing.quantity_kg += r.quantity_kg;
-    if (r.date_of_sale > existing.date_of_sale) existing.date_of_sale = r.date_of_sale;
-  }
-
-  // ── 4. Reemplazar el acumulado existente o insertar si es la primera vez ──
+  // ── 4. Reemplazar los MESES que trae el archivo ──────────────────────
   //
-  // Por lotes de clientes y paginado dentro de cada lote: con la cartera
-  // ampliada esta consulta pasa holgadamente las 1000 filas (cientos de
-  // clientes × 2 productos × 2 presentaciones × varios meses), y PostgREST
-  // corta ahí sin avisar. Una fila existente que no aparezca acá se trata
-  // como nueva y se INSERTA, duplicando el acumulado de ese mes.
-  type ExistingRow = {
-    id: string;
-    location_id: string;
-    product_id: string;
-    variant_id: string | null;
-    date_of_sale: string;
-  };
-  const locationIds = [...new Set([...byKey.values()].map((r) => r.location_id))];
+  // El export del Radar trae el período completo, así que para los clientes
+  // y productos que aparecen en él es la única verdad: se borran sus filas
+  // de esos meses y se insertan las del archivo. Volver a subir el mismo
+  // archivo es idempotente, y una corrección (una venta anulada, un kg
+  // distinto) queda reflejada en vez de convivir con el dato viejo.
+  //
+  // El borrado se acota a las combinaciones (producto, mes) que el archivo
+  // realmente trae, y dentro de cada una solo a los clientes que aparecen
+  // con ese producto en ese mes. Así, subir un Radar filtrado a Panquecitas
+  // no borra la Harina PAN de nadie, y subir uno de septiembre no toca
+  // agosto.
   const LOTE_CLIENTES = 200;
-  const existingRows: ExistingRow[] = [];
 
-  for (let i = 0; i < locationIds.length; i += LOTE_CLIENTES) {
-    const lote = locationIds.slice(i, i + LOTE_CLIENTES);
-    const pagina = await fetchAllRows<ExistingRow>(() =>
-      supabase
+  const porProductoMes = new Map<string, Set<string>>();
+  for (const r of filasNuevas) {
+    const clave = `${r.product_id}|${monthKey(r.date_of_sale)}`;
+    if (!porProductoMes.has(clave)) porProductoMes.set(clave, new Set());
+    porProductoMes.get(clave)!.add(r.location_id);
+  }
+
+  let deleted = 0;
+  for (const [clave, locations] of porProductoMes) {
+    const [productId, mes] = clave.split("|");
+    const [anio, mm] = mes.split("-").map(Number);
+    const desde = `${mes}-01`;
+    // Día 0 del mes siguiente = último día de este.
+    const hasta = new Date(Date.UTC(anio, mm, 0)).toISOString().slice(0, 10);
+
+    const ids = [...locations];
+    for (let i = 0; i < ids.length; i += LOTE_CLIENTES) {
+      const { data, error } = await supabase
         .from("sap_sell_in_records")
-        .select("id, location_id, product_id, variant_id, date_of_sale")
-        .in("location_id", lote)
-        .in("product_id", [PRODUCT_IDS.PANQUECITAS, PRODUCT_IDS.HARINA_PAN])
-    );
-    existingRows.push(...pagina);
-  }
-
-  const existingByKey = new Map<string, { id: string; date_of_sale: string }>();
-  for (const r of existingRows) {
-    existingByKey.set(dedupeKey(r.location_id, r.product_id, r.variant_id, monthKey(r.date_of_sale)), {
-      id: r.id,
-      date_of_sale: r.date_of_sale,
-    });
-  }
-
-  const toInsert: (typeof sellInRows) = [];
-  const toUpdate: { id: string; quantity_kg: number; date_of_sale: string }[] = [];
-  const toDelete: string[] = [];
-  let staleSkipped = 0;
-  let nonPositiveSkipped = 0;
-  for (const [key, r] of byKey) {
-    const existing = existingByKey.get(key);
-
-    // sap_sell_in_records exige quantity_kg > 0 (ver schema.sql). Un
-    // acumulado <= 0 en el archivo (créditos/devoluciones que dejan el mes
-    // en cero o negativo) no se puede guardar tal cual: si ya había un
-    // acumulado positivo guardado para esa llave, se elimina en vez de
-    // dejarlo desactualizado; si no había nada, simplemente no se inserta.
-    if (r.quantity_kg <= 0) {
-      if (existing && r.date_of_sale >= existing.date_of_sale) {
-        toDelete.push(existing.id);
-      } else {
-        nonPositiveSkipped++;
-      }
-      continue;
-    }
-
-    if (!existing) {
-      toInsert.push(r);
-    } else if (r.date_of_sale >= existing.date_of_sale) {
-      toUpdate.push({ id: existing.id, quantity_kg: r.quantity_kg, date_of_sale: r.date_of_sale });
-    } else {
-      staleSkipped++; // el archivo trae una fecha más vieja que el acumulado ya guardado
+        .delete()
+        .eq("product_id", productId)
+        .in("location_id", ids.slice(i, i + LOTE_CLIENTES))
+        .gte("date_of_sale", desde)
+        .lte("date_of_sale", hasta)
+        .select("id");
+      if (error) throw error;
+      deleted += (data ?? []).length;
     }
   }
 
-  if (toInsert.length > 0) {
-    const { error: insertError } = await supabase.from("sap_sell_in_records").insert(
-      toInsert.map((r) => ({ uploaded_by: null, upload_batch_id: batchId, ...r }))
-    );
+  // Insert por lotes: un solo insert con miles de filas puede pasarse del
+  // límite de tamaño del request.
+  const LOTE_INSERT = 500;
+  let inserted = 0;
+  for (let i = 0; i < filasNuevas.length; i += LOTE_INSERT) {
+    const lote = filasNuevas.slice(i, i + LOTE_INSERT);
+    const { error: insertError } = await supabase
+      .from("sap_sell_in_records")
+      .insert(lote.map((r) => ({ uploaded_by: null, upload_batch_id: batchId, ...r })));
     if (insertError) throw insertError;
-  }
-  if (toUpdate.length > 0) {
-    const results = await Promise.all(
-      toUpdate.map((u) =>
-        supabase
-          .from("sap_sell_in_records")
-          .update({ quantity_kg: u.quantity_kg, date_of_sale: u.date_of_sale, upload_batch_id: batchId })
-          .eq("id", u.id)
-      )
-    );
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    const failed = results.find((r: any) => r.error);
-    if (failed) throw failed.error;
-  }
-  if (toDelete.length > 0) {
-    const { error: deleteError } = await supabase.from("sap_sell_in_records").delete().in("id", toDelete);
-    if (deleteError) throw deleteError;
+    inserted += lote.length;
   }
 
   // ── 5. Fechas de venta Radar (para la recompra) → radar_ventas_fechas ──
@@ -377,12 +342,14 @@ async function handleRadarUpload(supabase: any, rows: ParsedSapRadarRow[], batch
 
   return Response.json({
     format: "radar",
-    inserted: toInsert.length,
+    // `inserted` son las filas diarias del archivo; `deleted`, las que se
+    // reemplazaron de esos mismos meses. En una recarga del mismo archivo los
+    // dos números son iguales. Ya no hay `updated` ni `stale_skipped`: el mes
+    // se reemplaza entero, no se actualiza fila por fila.
+    inserted,
+    deleted,
     fechas_registradas: fechasInserted,
     fechas_eliminadas: fechasEliminadas,
-    updated: toUpdate.length,
-    deleted: toDelete.length,
-    stale_skipped: staleSkipped,
     non_positive_skipped: nonPositiveSkipped,
     clientes_fuera_cartera: clientesFueraCartera,
     locations_upserted: locationsUpdated,
