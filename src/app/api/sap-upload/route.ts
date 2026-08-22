@@ -1,4 +1,5 @@
 import { createSupabaseServiceClient } from "@/lib/supabase/server";
+import { fetchAllRows } from "@/lib/supabase/fetch-all";
 import { hasDashboardSession } from "@/lib/session";
 import {
   PRODUCT_IDS,
@@ -81,9 +82,22 @@ async function fetchExistingRecords(
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 async function resolveKnownLocationIds(supabase: any, sapCodes: string[]): Promise<Map<string, string>> {
   if (!sapCodes.length) return new Map();
-  const { data, error } = await supabase.from("locations").select("id, sap_code").in("sap_code", sapCodes);
-  if (error) throw error;
-  return new Map((data as { id: string; sap_code: string }[]).map((l) => [l.sap_code, l.id]));
+
+  // Por lotes, no de una: un `.in()` con cientos de códigos arma una URL
+  // enorme (PostgREST filtra por querystring) y además la respuesta se corta
+  // en 1000 filas. Cualquiera de las dos cosas deja clientes sin resolver, y
+  // un cliente sin resolver se ignora en silencio — su volumen no se guarda.
+  const LOTE = 200;
+  const out = new Map<string, string>();
+
+  for (let i = 0; i < sapCodes.length; i += LOTE) {
+    const lote = sapCodes.slice(i, i + LOTE);
+    const { data, error } = await supabase.from("locations").select("id, sap_code").in("sap_code", lote);
+    if (error) throw error;
+    for (const l of data as { id: string; sap_code: string }[]) out.set(l.sap_code, l.id);
+  }
+
+  return out;
 }
 
 export async function POST(req: Request) {
@@ -215,18 +229,34 @@ async function handleRadarUpload(supabase: any, rows: ParsedSapRadarRow[], batch
   }
 
   // ── 4. Reemplazar el acumulado existente o insertar si es la primera vez ──
+  //
+  // Por lotes de clientes y paginado dentro de cada lote: con la cartera
+  // ampliada esta consulta pasa holgadamente las 1000 filas (cientos de
+  // clientes × 2 productos × 2 presentaciones × varios meses), y PostgREST
+  // corta ahí sin avisar. Una fila existente que no aparezca acá se trata
+  // como nueva y se INSERTA, duplicando el acumulado de ese mes.
+  type ExistingRow = {
+    id: string;
+    location_id: string;
+    product_id: string;
+    variant_id: string | null;
+    date_of_sale: string;
+  };
   const locationIds = [...new Set([...byKey.values()].map((r) => r.location_id))];
-  const existingRows = locationIds.length
-    ? await (async () => {
-        const { data, error } = await supabase
-          .from("sap_sell_in_records")
-          .select("id, location_id, product_id, variant_id, date_of_sale")
-          .in("location_id", locationIds)
-          .in("product_id", [PRODUCT_IDS.PANQUECITAS, PRODUCT_IDS.HARINA_PAN]);
-        if (error) throw error;
-        return data as { id: string; location_id: string; product_id: string; variant_id: string | null; date_of_sale: string }[];
-      })()
-    : [];
+  const LOTE_CLIENTES = 200;
+  const existingRows: ExistingRow[] = [];
+
+  for (let i = 0; i < locationIds.length; i += LOTE_CLIENTES) {
+    const lote = locationIds.slice(i, i + LOTE_CLIENTES);
+    const pagina = await fetchAllRows<ExistingRow>(() =>
+      supabase
+        .from("sap_sell_in_records")
+        .select("id, location_id, product_id, variant_id, date_of_sale")
+        .in("location_id", lote)
+        .in("product_id", [PRODUCT_IDS.PANQUECITAS, PRODUCT_IDS.HARINA_PAN])
+    );
+    existingRows.push(...pagina);
+  }
 
   const existingByKey = new Map<string, { id: string; date_of_sale: string }>();
   for (const r of existingRows) {

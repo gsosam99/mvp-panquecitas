@@ -1,4 +1,5 @@
 import { createSupabaseServiceClient } from "@/lib/supabase/server";
+import { fetchAllRows, fetchAllRowsChunked } from "@/lib/supabase/fetch-all";
 import { PRODUCT_IDS, VARIANT_IDS } from "@/data/catalog";
 import { PVP_TARGETS, PVP_TOLERANCE } from "@/data/pvp-thresholds";
 import { DIAS_HABILES_POR_SEMANA, contarDiasHabiles } from "@/lib/business-days";
@@ -58,8 +59,12 @@ async function getUniverseLocationIds(sector?: Sector): Promise<Set<string>> {
  */
 async function getPedidosFacturadosLocationIds(sector?: Sector): Promise<Set<string>> {
   const supabase = createSupabaseServiceClient();
-  const { data } = await supabase.from("locations").select("id, oficina_venta");
-  const filtered = ((data ?? []) as { id: string; oficina_venta: string | null }[]).filter((l) =>
+  // Paginado: `locations` pasó las 1000 filas con la cartera ampliada y
+  // PostgREST corta ahí en silencio (ver fetch-all.ts).
+  const data = await fetchAllRows<{ id: string; oficina_venta: string | null }>(() =>
+    supabase.from("locations").select("id, oficina_venta")
+  );
+  const filtered = data.filter((l) =>
     sector ? sectorGroup(l.oficina_venta) === sector : sectorGroup(l.oficina_venta) !== null
   );
   return new Set(filtered.map((l) => l.id));
@@ -73,11 +78,13 @@ async function getPedidosFacturadosLocationIds(sector?: Sector): Promise<Set<str
  */
 async function getCompradorLocationIds(): Promise<Set<string>> {
   const supabase = createSupabaseServiceClient();
-  const { data } = await supabase
-    .from("sap_sell_in_records")
-    .select("location_id")
-    .eq("product_id", PRODUCT_IDS.PANQUECITAS)
-    .gt("quantity_kg", 0);
+  const data = await fetchAllRows<unknown>(() =>
+    supabase
+      .from("sap_sell_in_records")
+      .select("location_id")
+      .eq("product_id", PRODUCT_IDS.PANQUECITAS)
+      .gt("quantity_kg", 0)
+  );
   return new Set(((data ?? []) as { location_id: string }[]).map((r) => r.location_id));
 }
 
@@ -108,11 +115,13 @@ async function getVentasPorPresentacion(sector?: Sector): Promise<VentasPorPrese
   const supabase = createSupabaseServiceClient();
   const ids = await getPedidosFacturadosLocationIds(sector);
 
-  const { data } = await supabase
-    .from("sap_pedidos_facturados")
-    .select("cantidad_pedido_kg, cantidad_facturada_kg, location_id, variant_id")
-    .eq("product_id", PRODUCT_IDS.PANQUECITAS)
-    .not("variant_id", "is", null);
+  const data = await fetchAllRows<unknown>(() =>
+    supabase
+      .from("sap_pedidos_facturados")
+      .select("cantidad_pedido_kg, cantidad_facturada_kg, location_id, variant_id")
+      .eq("product_id", PRODUCT_IDS.PANQUECITAS)
+      .not("variant_id", "is", null)
+  );
 
   const facturadaKgByVariant: Record<PresentacionMix, number> = { "400g": 0, "800g": 0 };
   const pedidaKgByVariant: Record<PresentacionMix, number> = { "400g": 0, "800g": 0 };
@@ -147,10 +156,12 @@ export async function getTotalToneladas(sector?: Sector): Promise<number> {
 export async function getTotalToneladasPedidas(sector?: Sector): Promise<number> {
   const ids = await getPedidosFacturadosLocationIds(sector);
   const supabase = createSupabaseServiceClient();
-  const { data } = await supabase
-    .from("sap_pedidos_facturados")
-    .select("cantidad_pedido_kg, location_id")
-    .eq("product_id", PRODUCT_IDS.PANQUECITAS);
+  const data = await fetchAllRows<unknown>(() =>
+    supabase
+      .from("sap_pedidos_facturados")
+      .select("cantidad_pedido_kg, location_id")
+      .eq("product_id", PRODUCT_IDS.PANQUECITAS)
+  );
 
   let pedidaKgTotal = 0;
   for (const r of (data ?? []) as { cantidad_pedido_kg: number; location_id: string }[]) {
@@ -169,10 +180,12 @@ export async function getTotalToneladasPedidas(sector?: Sector): Promise<number>
  */
 export async function getTotalFacturadoToneladas(sector?: Sector): Promise<number> {
   const supabase = createSupabaseServiceClient();
-  const { data } = await supabase
-    .from("sap_pedidos_facturados")
-    .select("cantidad_facturada_kg, location_id")
-    .eq("product_id", PRODUCT_IDS.PANQUECITAS);
+  const data = await fetchAllRows<unknown>(() =>
+    supabase
+      .from("sap_pedidos_facturados")
+      .select("cantidad_facturada_kg, location_id")
+      .eq("product_id", PRODUCT_IDS.PANQUECITAS)
+  );
   const rows = (data ?? []) as { cantidad_facturada_kg: number; location_id: string }[];
 
   const ids = sector ? await getPedidosFacturadosLocationIds(sector) : null;
@@ -207,10 +220,12 @@ export interface VolumenRadarAcumulado {
 export async function getVolumenRadarAcumulado(sector?: Sector): Promise<VolumenRadarAcumulado> {
   const ids = await getUniverseLocationIds(sector);
   const supabase = createSupabaseServiceClient();
-  const { data } = await supabase
-    .from("sap_sell_in_records")
-    .select("quantity_kg, location_id, product_id, date_of_sale")
-    .in("product_id", [PRODUCT_IDS.PANQUECITAS, PRODUCT_IDS.HARINA_PAN]);
+  const data = await fetchAllRows<unknown>(() =>
+    supabase
+      .from("sap_sell_in_records")
+      .select("quantity_kg, location_id, product_id, date_of_sale")
+      .in("product_id", [PRODUCT_IDS.PANQUECITAS, PRODUCT_IDS.HARINA_PAN])
+  );
 
   let panquecitasKg = 0;
   let harinaPanKg = 0;
@@ -252,10 +267,12 @@ async function getInventarioDepositoKg(sector?: Sector): Promise<number> {
   const ids = await getUniverseLocationIds(sector);
 
   // Última visita (con acceso a depósito) por PDV.
-  const { data: visitsData } = await supabase
-    .from("mercaderista_visits")
-    .select("id, location_id, created_at, deposit_access")
-    .order("created_at", { ascending: false });
+  const visitsData = await fetchAllRows<unknown>(() =>
+    supabase
+      .from("mercaderista_visits")
+      .select("id, location_id, created_at, deposit_access")
+      .order("created_at", { ascending: false })
+  );
 
   const lastVisitByLocation = new Map<string, string>();
   for (const v of (visitsData ?? []) as { id: string; location_id: string; deposit_access: boolean }[]) {
@@ -266,11 +283,16 @@ async function getInventarioDepositoKg(sector?: Sector): Promise<number> {
   const visitIds = Array.from(lastVisitByLocation.values());
   if (visitIds.length === 0) return 0;
 
-  const { data: auditsData } = await supabase
-    .from("inventory_audits")
-    .select("visit_id, variant_id, quantity, zone")
-    .eq("zone", "BODEGA")
-    .in("visit_id", visitIds);
+  const auditsData = await fetchAllRowsChunked<unknown>(
+    (lote) =>
+    supabase
+      .from("inventory_audits")
+      .select("visit_id, variant_id, quantity, zone")
+      .eq("zone", "BODEGA")
+        .in("visit_id", lote)
+      ,
+    visitIds
+  );
 
   const { data: variantsData } = await supabase.from("variants").select("id, presentation_kg, units_per_bulk");
   const kgPerUnit = new Map(
@@ -296,11 +318,13 @@ const SEMANAS_POR_MES = 4.345;
 export async function getRunningVentas(sector?: Sector): Promise<RunningVentasResult> {
   const supabase = createSupabaseServiceClient();
   const ids = await getUniverseLocationIds(sector);
-  const { data } = await supabase
-    .from("sap_sell_in_records")
-    .select("quantity_kg, date_of_sale, location_id")
-    .eq("product_id", PRODUCT_IDS.PANQUECITAS)
-    .order("date_of_sale");
+  const data = await fetchAllRows<unknown>(() =>
+    supabase
+      .from("sap_sell_in_records")
+      .select("quantity_kg, date_of_sale, location_id")
+      .eq("product_id", PRODUCT_IDS.PANQUECITAS)
+      .order("date_of_sale")
+  );
 
   const rowsAll = ((data ?? []) as { quantity_kg: number; date_of_sale: string; location_id: string }[]).filter((r) =>
     ids.has(r.location_id)
@@ -375,11 +399,13 @@ async function getRadarKgByPresentacion(sector?: Sector): Promise<Record<Present
   const supabase = createSupabaseServiceClient();
   const ids = await getUniverseLocationIds(sector);
 
-  const { data } = await supabase
-    .from("sap_sell_in_records")
-    .select("quantity_kg, location_id, variant_id")
-    .eq("product_id", PRODUCT_IDS.PANQUECITAS)
-    .not("variant_id", "is", null);
+  const data = await fetchAllRows<unknown>(() =>
+    supabase
+      .from("sap_sell_in_records")
+      .select("quantity_kg, location_id, variant_id")
+      .eq("product_id", PRODUCT_IDS.PANQUECITAS)
+      .not("variant_id", "is", null)
+  );
 
   const byVariant: Record<PresentacionMix, number> = { "400g": 0, "800g": 0 };
   for (const r of (data ?? []) as { quantity_kg: number; location_id: string; variant_id: string }[]) {
@@ -447,11 +473,13 @@ async function getPanVsHarinaPanUniverse(
   if (poblacion === "universo" || porId.size === 0) return porId;
 
   const supabase = createSupabaseServiceClient();
-  const { data } = await supabase
-    .from("sap_sell_in_records")
-    .select("location_id")
-    .eq("product_id", PRODUCT_IDS.PANQUECITAS)
-    .gt("quantity_kg", 0);
+  const data = await fetchAllRows<unknown>(() =>
+    supabase
+      .from("sap_sell_in_records")
+      .select("location_id")
+      .eq("product_id", PRODUCT_IDS.PANQUECITAS)
+      .gt("quantity_kg", 0)
+  );
 
   const compradorIds = new Set((data ?? []).map((r: { location_id: string }) => r.location_id));
   return new Map([...porId].filter(([id]) => compradorIds.has(id)));
@@ -494,10 +522,12 @@ export async function getPanVsHarinaPan(
   if (incorporacionPorId.size === 0) return empty;
 
   const supabase = createSupabaseServiceClient();
-  const { data } = await supabase
-    .from("sap_sell_in_records")
-    .select("location_id, product_id, quantity_kg, date_of_sale")
-    .in("product_id", [PRODUCT_IDS.PANQUECITAS, PRODUCT_IDS.HARINA_PAN]);
+  const data = await fetchAllRows<unknown>(() =>
+    supabase
+      .from("sap_sell_in_records")
+      .select("location_id, product_id, quantity_kg, date_of_sale")
+      .in("product_id", [PRODUCT_IDS.PANQUECITAS, PRODUCT_IDS.HARINA_PAN])
+  );
 
   const rows = ((data ?? []) as { location_id: string; product_id: string; quantity_kg: number; date_of_sale: string }[])
     .filter((r) => incorporacionPorId.has(r.location_id))
@@ -664,12 +694,14 @@ export async function getVentaRecompraActivacion(
   const universoSizeAt = (cierre: string) => vigentesAl(universoFiltrado, cierre).length;
 
   const supabase = createSupabaseServiceClient();
-  const { data } = await supabase
-    .from("sap_sell_in_records")
-    .select("location_id, date_of_sale, quantity_kg")
-    .eq("product_id", PRODUCT_IDS.PANQUECITAS)
-    .gt("quantity_kg", 0)
-    .order("date_of_sale");
+  const data = await fetchAllRows<unknown>(() =>
+    supabase
+      .from("sap_sell_in_records")
+      .select("location_id, date_of_sale, quantity_kg")
+      .eq("product_id", PRODUCT_IDS.PANQUECITAS)
+      .gt("quantity_kg", 0)
+      .order("date_of_sale")
+  );
 
   // Numerador con el mismo criterio que el denominador: una venta anterior a
   // la incorporación del cliente no cuenta. Si contara, un cliente de la
@@ -685,10 +717,12 @@ export async function getVentaRecompraActivacion(
   // Fechas de venta Radar (para la recompra por fechas distintas). Si la tabla
   // no existe todavía (falta el migration 013) o la consulta falla, `data` es
   // null → sin fechas → recompra 0 hasta re-cargar los reportes.
-  const { data: fechasData } = await supabase
-    .from("radar_ventas_fechas")
-    .select("location_id, fecha")
-    .eq("product_id", PRODUCT_IDS.PANQUECITAS);
+  const fechasData = await fetchAllRows<unknown>(() =>
+    supabase
+      .from("radar_ventas_fechas")
+      .select("location_id, fecha")
+      .eq("product_id", PRODUCT_IDS.PANQUECITAS)
+  );
   const fechasRows = ((fechasData ?? []) as { location_id: string; fecha: string }[]).filter(
     (r) =>
       incorporacionPorId.has(r.location_id) &&
@@ -977,10 +1011,12 @@ export async function getCoberturaComunicacionPorSector(): Promise<Record<TimeGr
   const sectorByLocation = new Map(universo.map((l) => [l.id, sectorGroup(l.oficina_venta)]));
 
   const supabase = createSupabaseServiceClient();
-  const { data } = await supabase
-    .from("mercaderista_visits")
-    .select("location_id, created_at, pop_present")
-    .order("created_at");
+  const data = await fetchAllRows<unknown>(() =>
+    supabase
+      .from("mercaderista_visits")
+      .select("location_id, created_at, pop_present")
+      .order("created_at")
+  );
 
   const rows = (data ?? []) as { location_id: string; created_at: string; pop_present: boolean }[];
   // Mismo criterio que el denominador: una visita anterior a la incorporación
@@ -1008,10 +1044,12 @@ export async function getCoberturaComunicacionPorSector(): Promise<Record<TimeGr
 /** Cantidad Pedido (kg) por PDV, cruda de Pedidos y Facturado (no de Carga Radar). */
 async function getCantidadPedidoTotalsByLocation(productId: string): Promise<Map<string, number>> {
   const supabase = createSupabaseServiceClient();
-  const { data } = await supabase
-    .from("sap_pedidos_facturados")
-    .select("location_id, cantidad_pedido_kg")
-    .eq("product_id", productId);
+  const data = await fetchAllRows<unknown>(() =>
+    supabase
+      .from("sap_pedidos_facturados")
+      .select("location_id, cantidad_pedido_kg")
+      .eq("product_id", productId)
+  );
 
   const totals = new Map<string, number>();
   for (const row of (data ?? []) as { location_id: string; cantidad_pedido_kg: number }[]) {
@@ -1067,13 +1105,15 @@ export async function getRankingVolumenPorSegmento(sector?: Sector): Promise<Ran
   // gráfico de rendimiento diario) hasta la última fecha con Radar de
   // Panquecitas. Hábiles porque el producto se despacha de lunes a viernes.
   const supabase = createSupabaseServiceClient();
-  const { data: fechasData } = await supabase
-    .from("sap_sell_in_records")
-    .select("date_of_sale")
-    .eq("product_id", PRODUCT_IDS.PANQUECITAS)
-    .gt("quantity_kg", 0)
-    .gte("date_of_sale", RENDIMIENTO_DIARIO_DESDE)
-    .order("date_of_sale", { ascending: true });
+  const fechasData = await fetchAllRows<unknown>(() =>
+    supabase
+      .from("sap_sell_in_records")
+      .select("date_of_sale")
+      .eq("product_id", PRODUCT_IDS.PANQUECITAS)
+      .gt("quantity_kg", 0)
+      .gte("date_of_sale", RENDIMIENTO_DIARIO_DESDE)
+      .order("date_of_sale", { ascending: true })
+  );
 
   const fechas = ((fechasData ?? []) as { date_of_sale: string }[]).map((r) => r.date_of_sale.slice(0, 10));
   const diasPeriodo =
@@ -1121,11 +1161,13 @@ export async function getDetalleClientesPorSegmento(sector?: Sector): Promise<De
   const denomPenetracion = universo.length;
 
   const supabase = createSupabaseServiceClient();
-  const { data } = await supabase
-    .from("sap_sell_in_records")
-    .select("location_id, date_of_sale")
-    .eq("product_id", PRODUCT_IDS.PANQUECITAS)
-    .gt("quantity_kg", 0);
+  const data = await fetchAllRows<unknown>(() =>
+    supabase
+      .from("sap_sell_in_records")
+      .select("location_id, date_of_sale")
+      .eq("product_id", PRODUCT_IDS.PANQUECITAS)
+      .gt("quantity_kg", 0)
+  );
 
   const salesRows = (data ?? []) as { location_id: string; date_of_sale: string }[];
   // Recompra de esta tabla (Detalle por segmento) = clientes con Radar en ≥2
@@ -1259,15 +1301,19 @@ export async function getDemandaInsatisfecha(sector?: Sector): Promise<Record<Ti
   if (pedidoFacturadoIds.size === 0 && radarIds.size === 0) return empty;
 
   const supabase = createSupabaseServiceClient();
-  const [{ data: pedidoFacturadoData }, { data: radarData }] = await Promise.all([
-    supabase
-      .from("sap_pedidos_facturados")
-      .select("location_id, cantidad_pedido_kg, cantidad_facturada_kg, fecha")
-      .eq("product_id", PRODUCT_IDS.PANQUECITAS),
-    supabase
-      .from("sap_sell_in_records")
-      .select("location_id, quantity_kg, date_of_sale")
-      .eq("product_id", PRODUCT_IDS.PANQUECITAS),
+  const [pedidoFacturadoData, radarData] = await Promise.all([
+    fetchAllRows<unknown>(() =>
+      supabase
+        .from("sap_pedidos_facturados")
+        .select("location_id, cantidad_pedido_kg, cantidad_facturada_kg, fecha")
+        .eq("product_id", PRODUCT_IDS.PANQUECITAS)
+    ),
+    fetchAllRows<unknown>(() =>
+      supabase
+        .from("sap_sell_in_records")
+        .select("location_id, quantity_kg, date_of_sale")
+        .eq("product_id", PRODUCT_IDS.PANQUECITAS)
+    ),
   ]);
 
   const pedidoFacturadoRows = ((pedidoFacturadoData ?? []) as {
@@ -1346,21 +1392,25 @@ export async function getStockOut(sector?: Sector): Promise<StockOutResult> {
   const supabase = createSupabaseServiceClient();
 
   // Compradores = Radar de Panquecitas > 0 dentro del universo del corte.
-  const { data: sellInData } = await supabase
-    .from("sap_sell_in_records")
-    .select("location_id")
-    .eq("product_id", PRODUCT_IDS.PANQUECITAS)
-    .gt("quantity_kg", 0);
+  const sellInData = await fetchAllRows<unknown>(() =>
+    supabase
+      .from("sap_sell_in_records")
+      .select("location_id")
+      .eq("product_id", PRODUCT_IDS.PANQUECITAS)
+      .gt("quantity_kg", 0)
+  );
   const compradorIds = new Set(
     ((sellInData ?? []) as { location_id: string }[]).map((r) => r.location_id).filter((id) => ids.has(id))
   );
   if (compradorIds.size === 0) return empty;
 
   // Última visita por PDV comprador.
-  const { data: visitsData } = await supabase
-    .from("mercaderista_visits")
-    .select("id, location_id, created_at, deposit_access, total_units_anaquel, product_location, product_location_other")
-    .order("created_at", { ascending: false });
+  const visitsData = await fetchAllRows<unknown>(() =>
+    supabase
+      .from("mercaderista_visits")
+      .select("id, location_id, created_at, deposit_access, total_units_anaquel, product_location, product_location_other")
+      .order("created_at", { ascending: false })
+  );
 
   type Visita = {
     id: string;
@@ -1384,11 +1434,16 @@ export async function getStockOut(sector?: Sector): Promise<StockOutResult> {
     const unitsPerBulk = new Map(
       ((variantsData ?? []) as { id: string; units_per_bulk: number }[]).map((v) => [v.id, v.units_per_bulk])
     );
-    const { data: auditsData } = await supabase
-      .from("inventory_audits")
-      .select("visit_id, variant_id, quantity")
-      .eq("zone", "BODEGA")
-      .in("visit_id", visitIds);
+    const auditsData = await fetchAllRowsChunked<unknown>(
+      (lote) =>
+      supabase
+        .from("inventory_audits")
+        .select("visit_id, variant_id, quantity")
+        .eq("zone", "BODEGA")
+          .in("visit_id", lote)
+        ,
+      visitIds
+    );
     for (const a of (auditsData ?? []) as { visit_id: string; variant_id: string; quantity: number }[]) {
       const unidades = a.quantity * (unitsPerBulk.get(a.variant_id) ?? 1);
       unidadesDepositoByVisit.set(a.visit_id, (unidadesDepositoByVisit.get(a.visit_id) ?? 0) + unidades);
@@ -1439,10 +1494,12 @@ export async function getMaterialPopPreciador(sector?: Sector): Promise<Material
   const compradorIds = await getCompradorLocationIds();
 
   const supabase = createSupabaseServiceClient();
-  const { data: visitsData } = await supabase
-    .from("mercaderista_visits")
-    .select("location_id, created_at, pop_price_tag")
-    .order("created_at", { ascending: false });
+  const visitsData = await fetchAllRows<unknown>(() =>
+    supabase
+      .from("mercaderista_visits")
+      .select("location_id, created_at, pop_price_tag")
+      .order("created_at", { ascending: false })
+  );
 
   type Visita = { location_id: string; pop_price_tag: boolean | null };
   const lastVisit = new Map<string, Visita>();
@@ -1517,10 +1574,12 @@ export async function getPosicionPdv(sector?: Sector): Promise<PosicionPdvPoint[
   if (ids.size === 0) return [];
 
   const supabase = createSupabaseServiceClient();
-  const { data: visitsData } = await supabase
-    .from("mercaderista_visits")
-    .select("location_id, created_at, product_present, product_location, product_location_other")
-    .order("created_at", { ascending: false });
+  const visitsData = await fetchAllRows<unknown>(() =>
+    supabase
+      .from("mercaderista_visits")
+      .select("location_id, created_at, product_present, product_location, product_location_other")
+      .order("created_at", { ascending: false })
+  );
 
   type Visita = {
     location_id: string;
@@ -1574,10 +1633,12 @@ export interface PosicionClienteRow {
 
 export async function getPosicionPorCliente(): Promise<PosicionClienteRow[]> {
   const supabase = createSupabaseServiceClient();
-  const { data: visitsData } = await supabase
-    .from("mercaderista_visits")
-    .select("location_id, created_at, product_present, product_location, product_location_other")
-    .order("created_at", { ascending: false });
+  const visitsData = await fetchAllRows<unknown>(() =>
+    supabase
+      .from("mercaderista_visits")
+      .select("location_id, created_at, product_present, product_location, product_location_other")
+      .order("created_at", { ascending: false })
+  );
 
   type Visita = {
     location_id: string;
@@ -1651,10 +1712,12 @@ export async function getPrecioCorrecto(): Promise<PrecioCorrectoRow[]> {
   if (universo.length === 0) return [];
 
   const supabase = createSupabaseServiceClient();
-  const { data: visitsData } = await supabase
-    .from("mercaderista_visits")
-    .select("location_id, created_at, price_400, price_400_na, price_800, price_800_na")
-    .order("created_at", { ascending: false });
+  const visitsData = await fetchAllRows<unknown>(() =>
+    supabase
+      .from("mercaderista_visits")
+      .select("location_id, created_at, price_400, price_400_na, price_800, price_800_na")
+      .order("created_at", { ascending: false })
+  );
 
   type Visita = {
     location_id: string;
@@ -1838,20 +1901,26 @@ export async function getCarteraPorSegmento(): Promise<CarteraSegmentoResult> {
   const incorporacionPorLoc = new Map(clientes.map((c) => [c.locId, c.fecha_incorporacion]));
 
   const supabase = createSupabaseServiceClient();
-  const { data: radarData } = await supabase
-    .from("sap_sell_in_records")
-    .select("location_id, quantity_kg, date_of_sale")
-    .eq("product_id", PRODUCT_IDS.PANQUECITAS);
-  const { data: factData } = await supabase
-    .from("sap_pedidos_facturados")
-    .select("location_id, fecha")
-    .eq("product_id", PRODUCT_IDS.PANQUECITAS)
-    .gt("cantidad_facturada_kg", 0);
-  const { data: pedidoData } = await supabase
-    .from("sap_pedidos_facturados")
-    .select("location_id, fecha")
-    .eq("product_id", PRODUCT_IDS.PANQUECITAS)
-    .gt("cantidad_pedido_kg", 0);
+  const radarData = await fetchAllRows<unknown>(() =>
+    supabase
+      .from("sap_sell_in_records")
+      .select("location_id, quantity_kg, date_of_sale")
+      .eq("product_id", PRODUCT_IDS.PANQUECITAS)
+  );
+  const factData = await fetchAllRows<unknown>(() =>
+    supabase
+      .from("sap_pedidos_facturados")
+      .select("location_id, fecha")
+      .eq("product_id", PRODUCT_IDS.PANQUECITAS)
+      .gt("cantidad_facturada_kg", 0)
+  );
+  const pedidoData = await fetchAllRows<unknown>(() =>
+    supabase
+      .from("sap_pedidos_facturados")
+      .select("location_id, fecha")
+      .eq("product_id", PRODUCT_IDS.PANQUECITAS)
+      .gt("cantidad_pedido_kg", 0)
+  );
 
   // Además de pertenecer a la cartera, la venta tiene que ser POSTERIOR a la
   // incorporación del cliente: si no, un cliente de una tanda nueva con

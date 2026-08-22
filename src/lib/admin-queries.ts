@@ -1,4 +1,5 @@
 import { createSupabaseServiceClient } from "@/lib/supabase/server";
+import { fetchAllRowsChunked } from "@/lib/supabase/fetch-all";
 import { PRODUCT_IDS } from "@/data/catalog";
 import { getUniverseLocations, vigentesAl } from "@/lib/universe";
 import { todayISO } from "@/lib/date-buckets";
@@ -58,13 +59,18 @@ export async function getAdminExecutionSnapshot(): Promise<AdminPdvRow[]> {
   // venta publicada en el Radar de Panquecitas contra la cartera de los
   // 358 clientes. Pedidos y Facturado NO cuenta aquí (puede traer
   // distribuidoras que no son puntos de venta reales).
-  const { data: sellInData } = await supabase
-    .from("sap_sell_in_records")
-    .select("location_id, date_of_sale")
-    .eq("product_id", PRODUCT_IDS.PANQUECITAS)
-    .gt("quantity_kg", 0)
-    .in("location_id", locationIds)
-    .order("date_of_sale", { ascending: true });
+  const sellInData = await fetchAllRowsChunked<unknown>(
+    (lote) =>
+    supabase
+      .from("sap_sell_in_records")
+      .select("location_id, date_of_sale")
+      .eq("product_id", PRODUCT_IDS.PANQUECITAS)
+      .gt("quantity_kg", 0)
+        .in("location_id", lote)
+        .order("date_of_sale", { ascending: true })
+    ,
+    locationIds
+  );
 
   const compradorIds = new Set<string>();
   const primeraCompraByLocation = new Map<string, string>();
@@ -81,13 +87,17 @@ export async function getAdminExecutionSnapshot(): Promise<AdminPdvRow[]> {
   }
 
   // 2. Última visita de mercaderista por PDV.
-  const { data: visitsData } = await supabase
-    .from("mercaderista_visits")
-    .select(
-      "id, location_id, created_at, pop_present, product_present, price_400, price_400_na, price_800, price_800_na, total_units_anaquel, front_faces, deposit_access"
-    )
-    .in("location_id", locationIds)
-    .order("created_at", { ascending: false });
+  const visitsData = await fetchAllRowsChunked<unknown>(
+    (lote) =>
+      supabase
+        .from("mercaderista_visits")
+        .select(
+          "id, location_id, created_at, pop_present, product_present, price_400, price_400_na, price_800, price_800_na, total_units_anaquel, front_faces, deposit_access"
+        )
+        .in("location_id", lote)
+        .order("created_at", { ascending: false }),
+    locationIds
+  );
 
   const lastVisitByLocation = new Map<string, VisitRow>();
   for (const v of (visitsData ?? []) as VisitRow[]) {
@@ -110,11 +120,16 @@ export async function getAdminExecutionSnapshot(): Promise<AdminPdvRow[]> {
       ((variantsData ?? []) as { id: string; units_per_bulk: number }[]).map((v) => [v.id, v.units_per_bulk])
     );
 
-    const { data: auditsData } = await supabase
-      .from("inventory_audits")
-      .select("visit_id, variant_id, quantity")
-      .eq("zone", "BODEGA")
-      .in("visit_id", visitIds);
+    const auditsData = await fetchAllRowsChunked<unknown>(
+      (lote) =>
+      supabase
+        .from("inventory_audits")
+        .select("visit_id, variant_id, quantity")
+        .eq("zone", "BODEGA")
+          .in("visit_id", lote)
+        ,
+      visitIds
+    );
 
     for (const a of (auditsData ?? []) as { visit_id: string; variant_id: string; quantity: number }[]) {
       const unidades = a.quantity * (unitsPerBulk.get(a.variant_id) ?? 1);
@@ -178,13 +193,17 @@ export async function getAdminVisitHistory(): Promise<AdminVisitSnapshot[]> {
   if (universo.length === 0) return [];
   const locationIds = universo.map((l) => l.id);
 
-  const { data: visitsData } = await supabase
-    .from("mercaderista_visits")
-    .select(
-      "id, location_id, created_at, pop_present, price_400, price_400_na, price_800, price_800_na, total_units_anaquel, deposit_access"
-    )
-    .in("location_id", locationIds)
-    .order("created_at", { ascending: true });
+  const visitsData = await fetchAllRowsChunked<unknown>(
+    (lote) =>
+      supabase
+        .from("mercaderista_visits")
+        .select(
+          "id, location_id, created_at, pop_present, price_400, price_400_na, price_800, price_800_na, total_units_anaquel, deposit_access"
+        )
+        .in("location_id", lote)
+        .order("created_at", { ascending: true }),
+    locationIds
+  );
 
   const visits = (visitsData ?? []) as {
     id: string;
@@ -208,11 +227,16 @@ export async function getAdminVisitHistory(): Promise<AdminVisitSnapshot[]> {
     ((variantsData ?? []) as { id: string; units_per_bulk: number }[]).map((v) => [v.id, v.units_per_bulk])
   );
 
-  const { data: auditsData } = await supabase
-    .from("inventory_audits")
-    .select("visit_id, variant_id, quantity")
-    .eq("zone", "BODEGA")
-    .in("visit_id", visitIds);
+  const auditsData = await fetchAllRowsChunked<unknown>(
+    (lote) =>
+    supabase
+      .from("inventory_audits")
+      .select("visit_id, variant_id, quantity")
+      .eq("zone", "BODEGA")
+        .in("visit_id", lote)
+      ,
+    visitIds
+  );
 
   const unidadesDepositoByVisit = new Map<string, number>();
   for (const a of (auditsData ?? []) as { visit_id: string; variant_id: string; quantity: number }[]) {

@@ -1,4 +1,5 @@
 import { createSupabaseServiceClient } from "@/lib/supabase/server";
+import { fetchAllRowsChunked } from "@/lib/supabase/fetch-all";
 import { PRODUCT_IDS } from "@/data/catalog";
 import { VISIT_ROUNDS } from "@/data/visit-rounds";
 import { getUniverseLocations, vigentesAl } from "@/lib/universe";
@@ -40,11 +41,16 @@ export async function computeSellOut(): Promise<SellOutRecord[]> {
   const locationIds = universo.map((l) => l.id);
 
   // 1. Visitas de mercaderista (para inventario en anaquel/depósito por ronda)
-  const { data: visitsData } = await supabase
-    .from("mercaderista_visits")
-    .select("id, location_id, created_at, anaquel_400_units, anaquel_800_units, deposit_access")
-    .in("location_id", locationIds)
-    .order("created_at");
+  const visitsData = await fetchAllRowsChunked<unknown>(
+    (lote) =>
+    supabase
+      .from("mercaderista_visits")
+      .select("id, location_id, created_at, anaquel_400_units, anaquel_800_units, deposit_access")
+        .in("location_id", lote)
+        .order("created_at")
+    ,
+    locationIds
+  );
 
   const visitsByLocation = new Map<string, VisitRow[]>();
   for (const v of (visitsData ?? []) as VisitRow[]) {
@@ -64,11 +70,16 @@ export async function computeSellOut(): Promise<SellOutRecord[]> {
       ])
     );
 
-    const { data: auditsData } = await supabase
-      .from("inventory_audits")
-      .select("visit_id, variant_id, quantity, zone")
-      .eq("zone", "BODEGA")
-      .in("visit_id", allVisitIds);
+    const auditsData = await fetchAllRowsChunked<unknown>(
+      (lote) =>
+      supabase
+        .from("inventory_audits")
+        .select("visit_id, variant_id, quantity, zone")
+        .eq("zone", "BODEGA")
+          .in("visit_id", lote)
+        ,
+      allVisitIds
+    );
 
     for (const a of (auditsData ?? []) as { visit_id: string; variant_id: string; quantity: number }[]) {
       const presentacion = presentacionFromVariant(a.variant_id);
@@ -90,11 +101,15 @@ export async function computeSellOut(): Promise<SellOutRecord[]> {
   }
 
   // 3. Despachos SAP (fecha real) por cliente
-  const { data: dispatchesData } = await supabase
-    .from("sap_dispatches")
-    .select("location_id, variant_id, quantity, dispatch_date")
-    .in("location_id", locationIds)
-    .order("dispatch_date");
+  const dispatchesData = await fetchAllRowsChunked<unknown>(
+    (lote) =>
+      supabase
+        .from("sap_dispatches")
+        .select("location_id, variant_id, quantity, dispatch_date")
+        .in("location_id", lote)
+        .order("dispatch_date"),
+    locationIds
+  );
 
   const dispatchesByLocation = new Map<
     string,
@@ -123,10 +138,14 @@ export async function computeSellOut(): Promise<SellOutRecord[]> {
   }
 
   // 4. Sell-Out reportado por Cadenas
-  const { data: reportadoData } = await supabase
-    .from("sell_out_reportado")
-    .select("location_id, variant_id, fecha_inicio, fecha_fin, volumen")
-    .in("location_id", locationIds);
+  const reportadoData = await fetchAllRowsChunked<unknown>(
+    (lote) =>
+      supabase
+        .from("sell_out_reportado")
+        .select("location_id, variant_id, fecha_inicio, fecha_fin, volumen")
+        .in("location_id", lote),
+    locationIds
+  );
 
   const reportadoByLocation = new Map<
     string,
@@ -263,22 +282,32 @@ export async function getSellOutPorClienteDiff(): Promise<SellOutClienteDiffRow[
   const locationIds = universo.map((l) => l.id);
 
   // 1. Reporte SAP (Radar de Panquecitas) en kg por cliente.
-  const { data: radarData } = await supabase
-    .from("sap_sell_in_records")
-    .select("location_id, quantity_kg")
-    .eq("product_id", PRODUCT_IDS.PANQUECITAS)
-    .in("location_id", locationIds);
+  const radarData = await fetchAllRowsChunked<unknown>(
+    (lote) =>
+    supabase
+      .from("sap_sell_in_records")
+      .select("location_id, quantity_kg")
+      .eq("product_id", PRODUCT_IDS.PANQUECITAS)
+        .in("location_id", lote)
+      ,
+    locationIds
+  );
   const sellInByLocation = new Map<string, number>();
   for (const r of (radarData ?? []) as { location_id: string; quantity_kg: number }[]) {
     sellInByLocation.set(r.location_id, (sellInByLocation.get(r.location_id) ?? 0) + r.quantity_kg);
   }
 
   // 2. Última visita de mercaderista por cliente (inventario en PDV).
-  const { data: visitsData } = await supabase
-    .from("mercaderista_visits")
-    .select("id, location_id, created_at, anaquel_400_units, anaquel_800_units, deposit_access")
-    .in("location_id", locationIds)
-    .order("created_at", { ascending: false });
+  const visitsData = await fetchAllRowsChunked<unknown>(
+    (lote) =>
+    supabase
+      .from("mercaderista_visits")
+      .select("id, location_id, created_at, anaquel_400_units, anaquel_800_units, deposit_access")
+        .in("location_id", lote)
+        .order("created_at", { ascending: false })
+    ,
+    locationIds
+  );
   const lastVisit = new Map<string, VisitRow>();
   for (const v of (visitsData ?? []) as VisitRow[]) {
     if (!lastVisit.has(v.location_id)) lastVisit.set(v.location_id, v);
@@ -295,11 +324,16 @@ export async function getSellOutPorClienteDiff(): Promise<SellOutClienteDiffRow[
         v.presentation_kg * v.units_per_bulk,
       ])
     );
-    const { data: auditsData } = await supabase
-      .from("inventory_audits")
-      .select("visit_id, variant_id, quantity")
-      .eq("zone", "BODEGA")
-      .in("visit_id", visitIds);
+    const auditsData = await fetchAllRowsChunked<unknown>(
+      (lote) =>
+      supabase
+        .from("inventory_audits")
+        .select("visit_id, variant_id, quantity")
+        .eq("zone", "BODEGA")
+          .in("visit_id", lote)
+        ,
+      visitIds
+    );
     for (const a of (auditsData ?? []) as { visit_id: string; variant_id: string; quantity: number }[]) {
       if (!presentacionFromVariant(a.variant_id)) continue;
       const kg = a.quantity * (kgPerUnit.get(a.variant_id) ?? 0);

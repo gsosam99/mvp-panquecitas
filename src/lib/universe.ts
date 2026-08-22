@@ -1,4 +1,5 @@
 import { createSupabaseServiceClient } from "@/lib/supabase/server";
+import { fetchAllRows } from "@/lib/supabase/fetch-all";
 import { LOCATION_COLUMNS, LOCATION_COLUMNS_COMPLETO } from "@/lib/location-columns";
 import type { Location } from "@/types";
 
@@ -64,14 +65,18 @@ export async function getUniverseLocations(): Promise<Location[]> {
   // la fila del string del .select(), así que los dos intentos devuelven formas
   // distintas (una con segmento_cliente y otra sin) y no son asignables entre
   // sí. El cast a Location[] de abajo es el mismo que ya se hacía.
+  //
+  // Paginado obligatorio: `locations` superó las 1000 filas al ampliarse la
+  // cartera (1112 en agosto 2026) y PostgREST corta ahí sin avisar. Sin
+  // paginar, el dashboard calculaba sobre 1000 de 1112 clientes y el volumen
+  // de los 112 restantes desaparecía de TODAS las métricas — el total de
+  // Radar bajaba cada vez que la cartera crecía. Ver fetch-all.ts.
   let rows: unknown[] | null = null;
 
-  const completo = await supabase.from("locations").select(LOCATION_COLUMNS_COMPLETO);
-  if (completo.data) {
-    rows = completo.data;
-  } else {
-    const base = await supabase.from("locations").select(LOCATION_COLUMNS);
-    rows = base.data;
+  try {
+    rows = await fetchAllRows<unknown>(() => supabase.from("locations").select(LOCATION_COLUMNS_COMPLETO));
+  } catch {
+    rows = await fetchAllRows<unknown>(() => supabase.from("locations").select(LOCATION_COLUMNS));
   }
 
   // Filtrado en JS (no en la query) porque oficina_venta puede venir en
