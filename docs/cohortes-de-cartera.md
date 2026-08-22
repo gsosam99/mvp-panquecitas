@@ -90,6 +90,33 @@ del modelo indirecto de Cumaná:
 El volumen **Radar** de las franquiciadas sigue excluido (comportamiento previo, confirmado el
 21-08-2026): solo se leen para lo facturado y lo pedido.
 
+## Clientes fuera de cartera
+
+Los vendedores del modelo indirecto atendieron algunos PDV por fuera de la lista
+preestablecida. Aparecen vendiendo en el Radar pero no son cartera del piloto
+(Alejandro, 22-08-2026). Se marcan con `cohorte = 'Fuera de cartera'` y
+`fecha_incorporacion` en NULL.
+
+| | Población y tasas | Volumen |
+|---|---|---|
+| Cartera (las tres tandas) | ✅ | ✅ |
+| **Fuera de cartera** | ❌ | ✅ |
+| Franquiciadas | ❌ | Facturado y pedido sí, **Radar no** |
+
+Es el tratamiento inverso al de las franquiciadas en un punto: el Radar de una
+franquiciada NO suma, porque duplicaría lo que distribuye a sus propios
+clientes; el de un PDV fuera de cartera sí, porque es venta final.
+
+`getUniverseLocations()` los excluye (y con eso, todos los denominadores);
+`getVolumenLocations()` los incluye, y solo la usa `getVolumenRadarAcumulado()`.
+La tarjeta declara esas toneladas aparte, para que la diferencia contra los
+gráficos por segmento —que sí se limitan a la cartera— tenga explicación
+visible.
+
+Para sumar otro: una fila más en `locations` con ese `cohorte`. No hace falta
+tocar código. Y hay que **recargar el Radar** después de darlo de alta: la
+carga descarta en silencio los códigos que todavía no existen en `locations`.
+
 ## Numerador y denominador se recortan igual
 
 Es la parte que más fácil se rompe. Contar a un cliente en uno y no en el otro es justamente lo

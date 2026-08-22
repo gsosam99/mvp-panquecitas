@@ -35,24 +35,27 @@ import { sectorGroup as _sectorGroup, isExcludedDistribuidor as _isExcludedDistr
 export {
   COHORTES,
   COHORTE_PILOTO_ORIGINAL,
+  COHORTE_FUERA_DE_CARTERA,
   COHORTES_NUEVAS,
   PILOTO_INICIO,
   cohorteParaClienteNuevo,
   cohortePorNombre,
+  esFueraDeCartera,
   estabaIncorporado,
   vigentesAl,
   type Cohorte,
 } from "@/lib/cohortes";
 
+import { esFueraDeCartera as _esFueraDeCartera } from "@/lib/cohortes";
+
 /**
- * Universo total seleccionado de PDVs (k): locations en los sectores piloto.
+ * PDVs de los sectores piloto, SIN el filtro de cartera: incluye los marcados
+ * como "Fuera de cartera" (ver COHORTE_FUERA_DE_CARTERA en cohortes.ts).
  *
- * Es la cartera COMPLETA, sin recortar por fecha — el consumidor decide a qué
- * corte la acota con vigentesAl(). Para las tarjetas de "ahora mismo" el corte
- * es hoy, así que la lista completa ya es la correcta; para las series
- * temporales hay que recortar bucket por bucket.
+ * Solo lo usan las métricas de VOLUMEN. Para población, tasas y cualquier
+ * denominador va getUniverseLocations(), que sí los excluye.
  */
-export async function getUniverseLocations(): Promise<Location[]> {
+export async function getVolumenLocations(): Promise<Location[]> {
   const supabase = createSupabaseServiceClient();
 
   // segmento_cliente (migration 016) y fecha_incorporacion/cohorte (020) son
@@ -86,6 +89,24 @@ export async function getUniverseLocations(): Promise<Location[]> {
   return ((rows ?? []) as Location[]).filter(
     (l) => _sectorGroup(l.oficina_venta) !== null && !_isExcludedDistribuidor(l.sap_code)
   );
+}
+
+/**
+ * Universo total seleccionado de PDVs (k): la CARTERA del piloto en los
+ * sectores piloto.
+ *
+ * Es la cartera completa, sin recortar por fecha — el consumidor decide a qué
+ * corte la acota con vigentesAl(). Para las tarjetas de "ahora mismo" el corte
+ * es hoy, así que la lista completa ya es la correcta; para las series
+ * temporales hay que recortar bucket por bucket.
+ *
+ * Deja fuera a los clientes marcados "Fuera de cartera": venden y su volumen
+ * se documenta (ver getVolumenLocations), pero no son población y no pueden
+ * entrar en ningún denominador.
+ */
+export async function getUniverseLocations(): Promise<Location[]> {
+  const locations = await getVolumenLocations();
+  return locations.filter((l) => !_esFueraDeCartera(l.cohorte));
 }
 
 interface SellInFilter {

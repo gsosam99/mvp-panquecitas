@@ -622,6 +622,16 @@ export function DiennDashboardClient({
             `Activación de cliente ${bundle.penetracionRadarVsHpm.radarPanquecitasPct}%`,
             `Proporción vs Harina PAN ${proporcionPanqVsHpm}%`,
             `Volumen facturado ${bundle.totalFacturadoToneladas.toLocaleString("es-VE", { maximumFractionDigits: 2 })} Ton`,
+            // Este total es el único que suma PDV fuera de la cartera. Se
+            // declara para que la diferencia contra los gráficos por segmento
+            // —que sí se limitan a la cartera— tenga una explicación visible.
+            ...(bundle.volumenRadarAcumulado.fueraDeCarteraTon > 0
+              ? [
+                  `Incluye ${bundle.volumenRadarAcumulado.fueraDeCarteraTon.toLocaleString("es-VE", {
+                    maximumFractionDigits: 2,
+                  })} Ton de ${bundle.volumenRadarAcumulado.fueraDeCarteraClientes} clientes fuera de cartera`,
+                ]
+              : []),
           ]}
           subtitle="Confirmado en anaquel — solo Carga Radar"
           product="panquecitas"

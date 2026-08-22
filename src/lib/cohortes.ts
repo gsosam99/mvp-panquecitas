@@ -64,6 +64,33 @@ export const COHORTES_NUEVAS: readonly Cohorte[] = [
 export const COHORTES: readonly Cohorte[] = [COHORTE_PILOTO_ORIGINAL, ...COHORTES_NUEVAS];
 
 /**
+ * Marca para clientes que aparecen vendiendo en el Radar pero NO son cartera
+ * del piloto: PDV que los vendedores del modelo indirecto atendieron por fuera
+ * de la lista preestablecida (Alejandro, 22-08-2026).
+ *
+ * No es una tanda: no tiene fecha de incorporación ni entra en COHORTES. El
+ * tratamiento es el inverso al de las franquiciadas —
+ *
+ *   - FUERA de la población: no cuentan como clientes ni en penetración,
+ *     activación, efectividad, cobertura ni ninguna tasa. Sumarlos castigaría
+ *     los indicadores con PDV que nadie se propuso atender.
+ *   - DENTRO del volumen de venta: sus toneladas son ventas reales y quedan
+ *     documentadas en la tarjeta de volumen acumulado.
+ *
+ * (A las franquiciadas les pasa al revés con el Radar: su volumen NO suma,
+ * porque duplicaría lo que distribuyen a sus propios clientes.)
+ *
+ * Para sumar uno nuevo: insertarlo en `locations` con este valor en `cohorte`
+ * y `fecha_incorporacion` en NULL. No hace falta tocar código.
+ */
+export const COHORTE_FUERA_DE_CARTERA = "Fuera de cartera";
+
+/** ¿Este cliente vende pero no es cartera del piloto? */
+export function esFueraDeCartera(cohorte: string | null | undefined): boolean {
+  return (cohorte ?? "").trim() === COHORTE_FUERA_DE_CARTERA;
+}
+
+/**
  * Tanda que le toca a un cliente que TODAVÍA no tiene fecha asignada. Solo se
  * aplica a clientes nuevos: los que ya tienen fecha_incorporacion nunca se
  * recalculan, para que volver a cargar el mismo archivo sea idempotente y no

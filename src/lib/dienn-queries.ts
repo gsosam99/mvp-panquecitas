@@ -10,6 +10,8 @@ import {
   sectorGroup,
   getSellInTotalsByLocation,
   getUniverseLocations,
+  getVolumenLocations,
+  esFueraDeCartera,
   type Sector,
 } from "@/lib/universe";
 import {
@@ -210,15 +212,35 @@ function esHpmVigente(productId: string, dateOfSale: string): boolean {
 
 // "Volumen de venta acumulada en radar" = lo despachado/facturado real que
 // trae "Carga Radar" (sap_sell_in_records) — el número real de toneladas
-// vendidas y despachadas a clientes de la cartera del piloto. Separado por
-// producto porque cada uno alimenta la tarjeta de KPI correspondiente.
+// vendidas y despachadas. Separado por producto porque cada uno alimenta la
+// tarjeta de KPI correspondiente.
+//
+// Esta es LA ÚNICA métrica que suma clientes fuera de la cartera: PDV que los
+// vendedores del modelo indirecto atendieron por fuera de la lista y que
+// venden de verdad (Alejandro, 22-08-2026). Sus toneladas quedan
+// documentadas, pero no cuentan como clientes en ninguna tasa — para eso
+// están getUniverseLocations() y el resto de los denominadores. Se devuelven
+// además por separado para poder mostrarlas explícitas en la tarjeta y que
+// nadie tenga que adivinar por qué este total no calza con los gráficos por
+// segmento. Ver COHORTE_FUERA_DE_CARTERA en cohortes.ts.
 export interface VolumenRadarAcumulado {
   panquecitasTon: number;
   harinaPanTon: number;
+  /** Parte de panquecitasTon que viene de clientes fuera de la cartera. */
+  fueraDeCarteraTon: number;
+  /** Cuántos clientes fuera de cartera aportaron ese volumen. */
+  fueraDeCarteraClientes: number;
 }
 
 export async function getVolumenRadarAcumulado(sector?: Sector): Promise<VolumenRadarAcumulado> {
-  const ids = await getUniverseLocationIds(sector);
+  const locations = await getVolumenLocations();
+  const delSector = sector ? locations.filter((l) => sectorGroup(l.oficina_venta) === sector) : locations;
+  // Los "fuera de cartera" no tienen fecha de incorporación, así que
+  // vigentesAl() los deja pasar siempre: no pertenecen a ninguna tanda.
+  const vigentes = vigentesAl(delSector, todayISO());
+  const idsCartera = new Set(vigentes.filter((l) => !esFueraDeCartera(l.cohorte)).map((l) => l.id));
+  const idsFuera = new Set(vigentes.filter((l) => esFueraDeCartera(l.cohorte)).map((l) => l.id));
+
   const supabase = createSupabaseServiceClient();
   const data = await fetchAllRows<unknown>(() =>
     supabase
@@ -229,21 +251,35 @@ export async function getVolumenRadarAcumulado(sector?: Sector): Promise<Volumen
 
   let panquecitasKg = 0;
   let harinaPanKg = 0;
+  let fueraKg = 0;
+  const clientesFuera = new Set<string>();
+
   for (const r of (data ?? []) as {
     quantity_kg: number;
     location_id: string;
     product_id: string;
     date_of_sale: string;
   }[]) {
-    if (!ids.has(r.location_id)) continue;
-    if (r.product_id === PRODUCT_IDS.PANQUECITAS) panquecitasKg += r.quantity_kg;
+    const esFuera = idsFuera.has(r.location_id);
+    if (!esFuera && !idsCartera.has(r.location_id)) continue;
+
+    if (r.product_id === PRODUCT_IDS.PANQUECITAS) {
+      panquecitasKg += r.quantity_kg;
+      if (esFuera) {
+        fueraKg += r.quantity_kg;
+        clientesFuera.add(r.location_id);
+      }
+    }
     // HPM: solo cargas a partir de HPM_RADAR_DESDE (ver nota arriba).
     else if (r.product_id === PRODUCT_IDS.HARINA_PAN && esHpmVigente(r.product_id, r.date_of_sale))
       harinaPanKg += r.quantity_kg;
   }
+
   return {
     panquecitasTon: Math.round((panquecitasKg / 1000) * 100) / 100,
     harinaPanTon: Math.round((harinaPanKg / 1000) * 100) / 100,
+    fueraDeCarteraTon: Math.round((fueraKg / 1000) * 100) / 100,
+    fueraDeCarteraClientes: clientesFuera.size,
   };
 }
 
