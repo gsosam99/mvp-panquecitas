@@ -473,7 +473,7 @@ async function getPanVsHarinaPanUniverse(
   if (poblacion === "universo" || porId.size === 0) return porId;
 
   const supabase = createSupabaseServiceClient();
-  const data = await fetchAllRows<unknown>(() =>
+  const data = await fetchAllRows<{ location_id: string }>(() =>
     supabase
       .from("sap_sell_in_records")
       .select("location_id")
@@ -481,7 +481,7 @@ async function getPanVsHarinaPanUniverse(
       .gt("quantity_kg", 0)
   );
 
-  const compradorIds = new Set((data ?? []).map((r: { location_id: string }) => r.location_id));
+  const compradorIds = new Set(data.map((r) => r.location_id));
   return new Map([...porId].filter(([id]) => compradorIds.has(id)));
 }
 
