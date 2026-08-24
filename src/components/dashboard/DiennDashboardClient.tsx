@@ -772,29 +772,9 @@ export function DiennDashboardClient({
             </p>
           </div>
           <div className="flex flex-wrap items-center gap-2">
-            {/* Ratio acumulado del corte activo. Va acá arriba —y no solo en el
-                pie— porque es la lectura de una línea: cómo viene Panquecitas
-                contra el promedio de PAN, comparado con la meta del 4%. Se
-                imprime (sin print:hidden) a diferencia de los controles. */}
-            {ratioAcumulado3M && (
-              <div
-                className="rounded-lg border border-slate-200 bg-slate-50 px-3 py-1.5"
-                title={`Promedio de los ${ratioAcumulado3M.dias} ratios diarios del período (Panquecitas del día ÷ promedio diario de Harina PAN). Misma definición que el ratio acumulado por ciudad.`}
-              >
-                <p className="text-[10px] uppercase tracking-wide text-slate-400 leading-none">
-                  Ratio acumulado
-                </p>
-                <p
-                  className={`text-sm font-semibold leading-tight ${
-                    ratioAcumulado3M.pct >= 4 ? "text-emerald-700" : "text-slate-900"
-                  }`}
-                >
-                  {ratioAcumulado3M.pct.toLocaleString("es-VE", { maximumFractionDigits: 1 })}%
-                  <span className="text-[10px] font-normal text-slate-400"> · meta 4%</span>
-                </p>
-              </div>
-            )}
-            {/* Los controles sí se ocultan al imprimir; el ratio de arriba no. */}
+            {/* El ratio acumulado ya no vive acá: va SOBRE el gráfico (ver más
+                abajo, en CardContent) para que entre en una captura del
+                gráfico sin arrastrar los botones. */}
             <div className="flex flex-wrap items-center gap-2 print:hidden">
             {/* Filtro de comparación: PAN Cliente vs PAN Universo. */}
             <div className="flex rounded-lg border border-slate-200 overflow-hidden text-xs font-medium">
@@ -876,12 +856,37 @@ export function DiennDashboardClient({
         <CardContent>
           {rendimiento3MData.puntos.length > 0 ? (
             <>
-              <Rendimiento3MChart
-                data={rendimiento3MData}
-                showPanDiario={showPanDiario}
-                ratiosCiudad={ratios3MPorCiudad}
-                showRatioCiudades={ratioPorCiudad3M}
-              />
+              {/* El ratio acumulado va SOBRE el gráfico, en su esquina superior
+                  derecha, y no en la cabecera de la tarjeta: así una captura
+                  del gráfico lo incluye sin arrastrar los botones. Cae sobre el
+                  margen superior del ComposedChart (top: 40), que está vacío.
+                  pointer-events-none para no robarle el hover al gráfico. */}
+              <div className="relative">
+                {ratioAcumulado3M && (
+                  <div
+                    className="absolute right-0 top-0 z-10 rounded-lg border border-slate-200 bg-white/90 px-3 py-1.5 pointer-events-none"
+                    title={`Promedio de los ${ratioAcumulado3M.dias} ratios diarios del período (Panquecitas del día ÷ promedio diario de Harina PAN). Misma definición que el ratio acumulado por ciudad.`}
+                  >
+                    <p className="text-[10px] uppercase tracking-wide text-slate-400 leading-none">
+                      Ratio acumulado
+                    </p>
+                    <p
+                      className={`text-sm font-semibold leading-tight ${
+                        ratioAcumulado3M.pct >= 4 ? "text-emerald-700" : "text-slate-900"
+                      }`}
+                    >
+                      {ratioAcumulado3M.pct.toLocaleString("es-VE", { maximumFractionDigits: 1 })}%
+                      <span className="text-[10px] font-normal text-slate-400"> · meta 4%</span>
+                    </p>
+                  </div>
+                )}
+                <Rendimiento3MChart
+                  data={rendimiento3MData}
+                  showPanDiario={showPanDiario}
+                  ratiosCiudad={ratios3MPorCiudad}
+                  showRatioCiudades={ratioPorCiudad3M}
+                />
+              </div>
               <p className="text-xs text-slate-400 mt-2">
                 Promedio PAN 3M:{" "}
                 <span className="font-medium text-slate-600">

@@ -65,6 +65,44 @@ const Inner = dynamic(
         ratioCabudareAcum: ratioPorDia.get(p.dia)?.ratioCabudareAcum ?? null,
       }));
 
+      // ── Dónde va el texto "Meta 4%" ───────────────────────────────────
+      //
+      // Va pegado al borde izquierdo, así que los únicos que pueden taparlo
+      // son los primeros puntos de la serie. Sus ratios se dibujan ENCIMA del
+      // punto, de modo que un punto que cae un poco por debajo de la línea
+      // punteada empuja su número justo sobre el texto de la meta.
+      //
+      // Se calcula en píxeles aproximados —posición normalizada dentro del
+      // dominio por el alto útil del área de dibujo— y si el texto choca
+      // debajo de la línea se pasa arriba. En los dos casos queda pegado a la
+      // línea punteada, que es lo que hace que se entienda a qué se refiere.
+      const ALTO_PLOT = 230; // alto del área de dibujo, sin ejes ni leyenda
+      const ALTO_ETIQUETA = 17; // alto de un texto de 15px
+      const SEPARACION_PUNTO = 8; // el offset del LabelList de los ratios
+      const PUNTOS_BAJO_TEXTO = 3; // cuántos puntos cubre el ancho del texto
+
+      const posY = (v: number) => {
+        if (escalaLog) {
+          const lo = Math.log(minLog);
+          const hi = Math.log(maxLog);
+          return hi > lo ? 1 - (Math.log(Math.max(v, minLog)) - lo) / (hi - lo) : 0.5;
+        }
+        return maxLineal > 0 ? 1 - v / maxLineal : 0.5;
+      };
+
+      const bandasCercanas = data.puntos.slice(0, PUNTOS_BAJO_TEXTO).map((p) => {
+        const yPunto = posY(p.panquecitasKg) * ALTO_PLOT;
+        return { top: yPunto - SEPARACION_PUNTO - ALTO_ETIQUETA, bottom: yPunto - SEPARACION_PUNTO };
+      });
+      const chocaEn = (topTexto: number) =>
+        bandasCercanas.some((b) => b.top < topTexto + ALTO_ETIQUETA && b.bottom > topTexto);
+
+      const yMeta = posY(data.meta4Pct) * ALTO_PLOT;
+      // Se prefiere abajo (como estaba). Solo se sube si abajo choca y arriba no.
+      const metaAbajoChoca = chocaEn(yMeta + 2);
+      const metaArribaChoca = chocaEn(yMeta - 2 - ALTO_ETIQUETA);
+      const metaPosition = metaAbajoChoca && !metaArribaChoca ? "insideTopLeft" : "insideBottomLeft";
+
       return (
         <ResponsiveContainer width="100%" height={340}>
           <ComposedChart data={chartData} margin={{ top: 40, right: 16, left: 10, bottom: 5 }}>
@@ -140,7 +178,7 @@ const Inner = dynamic(
               strokeDasharray="6 4"
               label={{
                 value: `Meta 4%: ${data.meta4Pct.toLocaleString("es-VE", { maximumFractionDigits: 0 })} kg/día`,
-                position: "insideBottomLeft",
+                position: metaPosition,
                 fill: "#15803d",
                 fontSize: 15,
                 fontWeight: 600,
