@@ -204,41 +204,44 @@ async function handleRadarUpload(supabase: any, rows: ParsedSapRadarRow[], batch
 
   // ── 4. Reemplazar los MESES que trae el archivo ──────────────────────
   //
-  // El export del Radar trae el período completo, así que para los clientes
-  // y productos que aparecen en él es la única verdad: se borran sus filas
-  // de esos meses y se insertan las del archivo. Volver a subir el mismo
-  // archivo es idempotente, y una corrección (una venta anulada, un kg
-  // distinto) queda reflejada en vez de convivir con el dato viejo.
+  // El export del Radar trae el PERÍODO COMPLETO de un producto para toda la
+  // cartera, así que es la única verdad de esos meses: se borra el mes entero
+  // de ese producto y se insertan las filas del archivo.
   //
-  // El borrado se acota a las combinaciones (producto, mes) que el archivo
-  // realmente trae, y dentro de cada una solo a los clientes que aparecen
-  // con ese producto en ese mes. Así, subir un Radar filtrado a Panquecitas
-  // no borra la Harina PAN de nadie, y subir uno de septiembre no toca
-  // agosto.
-  const LOTE_CLIENTES = 200;
-
-  const porProductoMes = new Map<string, Set<string>>();
+  // El borrado NO se acota a los clientes del archivo, y esa es la parte que
+  // importa. Antes sí lo hacía, y por eso un cliente que aparecía en una carga
+  // vieja y ya no viene en el reporte —porque su venta se anuló o se corrigió—
+  // conservaba sus filas para siempre: sobrevivía a todas las recargas y
+  // sumaba de más. El total quedaba por encima del archivo sin que nada lo
+  // explicara (5,65 ton contra 5,59 del reporte del 24-08-2026).
+  //
+  // Sigue acotado por PRODUCTO y por MES, que es lo que hace seguro el
+  // borrado: el Radar se sube en dos archivos, uno de Harina PAN y otro de
+  // Panquecitas, así que cargar uno no toca al otro; y subir septiembre no
+  // toca agosto.
+  //
+  // Supuesto explícito: el archivo cubre el mes entero. Si alguna vez se
+  // exporta un Radar recortado a unos pocos días, cargarlo borraría el resto
+  // del mes. El contador `deleted` que devuelve la carga sirve justo para
+  // notarlo: si borra mucho más de lo que inserta, algo no cuadra.
+  const mesesPorProducto = new Map<string, Set<string>>();
   for (const r of filasNuevas) {
-    const clave = `${r.product_id}|${monthKey(r.date_of_sale)}`;
-    if (!porProductoMes.has(clave)) porProductoMes.set(clave, new Set());
-    porProductoMes.get(clave)!.add(r.location_id);
+    if (!mesesPorProducto.has(r.product_id)) mesesPorProducto.set(r.product_id, new Set());
+    mesesPorProducto.get(r.product_id)!.add(monthKey(r.date_of_sale));
   }
 
   let deleted = 0;
-  for (const [clave, locations] of porProductoMes) {
-    const [productId, mes] = clave.split("|");
-    const [anio, mm] = mes.split("-").map(Number);
-    const desde = `${mes}-01`;
-    // Día 0 del mes siguiente = último día de este.
-    const hasta = new Date(Date.UTC(anio, mm, 0)).toISOString().slice(0, 10);
+  for (const [productId, meses] of mesesPorProducto) {
+    for (const mes of meses) {
+      const [anio, mm] = mes.split("-").map(Number);
+      const desde = `${mes}-01`;
+      // Día 0 del mes siguiente = último día de este.
+      const hasta = new Date(Date.UTC(anio, mm, 0)).toISOString().slice(0, 10);
 
-    const ids = [...locations];
-    for (let i = 0; i < ids.length; i += LOTE_CLIENTES) {
       const { data, error } = await supabase
         .from("sap_sell_in_records")
         .delete()
         .eq("product_id", productId)
-        .in("location_id", ids.slice(i, i + LOTE_CLIENTES))
         .gte("date_of_sale", desde)
         .lte("date_of_sale", hasta)
         .select("id");
@@ -465,25 +468,33 @@ async function handleFacturacionUpload(supabase: any, rows: ParsedSapFacturacion
   // el reporte traía 9.215,20 kg facturados y el dashboard mostraba 7.750,
   // 1,46 toneladas menos, sin ningún aviso.
   //
-  // Ahora se reemplaza: para los clientes y productos del archivo se borra
-  // el rango de fechas que cubre y se reinserta. El archivo es la verdad de
-  // su período, así que una factura corregida —o un pedido anulado— queda
-  // reflejada. Recargar el mismo archivo sigue siendo idempotente.
-  const locationIds = [...new Set(filasNuevas.map((r) => r.location_id))];
-  const fechas = filasNuevas.map((r) => r.fecha).sort();
-  const desde = fechas[0];
-  const hasta = fechas[fechas.length - 1];
+  // Ahora se reemplaza: se borran los MESES que cubre el archivo para ese
+  // producto y se reinserta. El archivo es la verdad de su período, así que
+  // una factura corregida —o un pedido anulado— queda reflejada. Recargar el
+  // mismo archivo sigue siendo idempotente.
+  //
+  // El borrado NO se acota a los clientes del archivo, por el mismo motivo
+  // que en la Carga Radar: un cliente que venía en una carga vieja y ya no
+  // aparece conservaría sus filas para siempre y sumaría de más en cada
+  // recarga. Se acota por producto y por mes, que es lo que lo hace seguro.
+  //
+  // Se borra el mes completo y no solo el rango de fechas con filas, porque
+  // si una fecha desaparece del reporte —el pedido de ese día se anuló— sus
+  // filas viejas tienen que irse también.
   const productos = [...new Set(filasNuevas.map((r) => r.product_id))];
-  const LOTE_CLIENTES = 200;
+  const meses = [...new Set(filasNuevas.map((r) => monthKey(r.fecha)))];
 
   let deleted = 0;
   for (const productId of productos) {
-    for (let i = 0; i < locationIds.length; i += LOTE_CLIENTES) {
+    for (const mes of meses) {
+      const [anio, mm] = mes.split("-").map(Number);
+      const desde = `${mes}-01`;
+      const hasta = new Date(Date.UTC(anio, mm, 0)).toISOString().slice(0, 10);
+
       const { data, error } = await supabase
         .from("sap_pedidos_facturados")
         .delete()
         .eq("product_id", productId)
-        .in("location_id", locationIds.slice(i, i + LOTE_CLIENTES))
         .gte("fecha", desde)
         .lte("fecha", hasta)
         .select("id");
@@ -507,7 +518,9 @@ async function handleFacturacionUpload(supabase: any, rows: ParsedSapFacturacion
     locations_upserted: locationsUpdated,
     inserted,
     deleted,
-    periodo: `${desde} a ${hasta}`,
+    // Los meses que se reemplazaron, que es lo que el borrado realmente
+    // abarca (no el rango de fechas con filas).
+    periodo: [...meses].sort().join(", "),
     clientes_fuera_cartera: clientesFueraCartera,
   });
 }
