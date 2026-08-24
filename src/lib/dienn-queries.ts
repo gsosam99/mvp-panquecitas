@@ -713,7 +713,11 @@ function computeVentaRecompraActivacionPoints(
     // La ACTIVACIÓN, en cambio, solo cuenta cartera: su denominador es la
     // cartera vigente, así que sumar al numerador PDV que no están en ese
     // denominador daría una tasa inflada.
-    const activados = new Set(rowsUpToBucket.filter((r) => r.esCartera).map((r) => r.location_id)).size;
+    // `quantity_kg > 0` a propósito: una devolución resta volumen pero no
+    // activa a nadie.
+    const activados = new Set(
+      rowsUpToBucket.filter((r) => r.esCartera && r.quantity_kg > 0).map((r) => r.location_id)
+    ).size;
 
     // Recompra = TASA DE CLIENTES RECURRENTES (punto 3 del documento de cambios,
     // 18-08-2026): clientes con ≥2 fechas distintas de venta Radar ÷ clientes con
@@ -769,12 +773,14 @@ export async function getVentaRecompraActivacion(
   const universoSizeAt = (cierre: string) => vigentesAl(universoFiltrado, cierre).length;
 
   const supabase = createSupabaseServiceClient();
+  // Sin filtrar por cantidad > 0: las devoluciones (kg negativos) tienen que
+  // restar del volumen. El conteo de clientes activados sí ignora las
+  // negativas — devolver no es comprar (ver computeVentaRecompraActivacionPoints).
   const data = await fetchAllRows<unknown>(() =>
     supabase
       .from("sap_sell_in_records")
       .select("location_id, date_of_sale, quantity_kg")
       .eq("product_id", PRODUCT_IDS.PANQUECITAS)
-      .gt("quantity_kg", 0)
       .order("date_of_sale")
   );
 
@@ -946,7 +952,7 @@ export async function getRendimiento3M(
       .from("sap_sell_in_records")
       .select("location_id, quantity_kg, date_of_sale")
       .eq("product_id", PRODUCT_IDS.PANQUECITAS)
-      .gt("quantity_kg", 0)
+      // Sin filtrar por cantidad > 0: una devolución resta del volumen del día.
       .order("date_of_sale", { ascending: true })
       .range(desde, desde + PAGINA - 1);
     if (!pagina || pagina.length === 0) break;
@@ -2103,7 +2109,9 @@ export async function getCarteraPorSegmento(): Promise<CarteraSegmentoResult> {
       const radarKgSeg = new Map<string, number>();
       for (const r of radarByBucket.get(b) ?? []) {
         radarKgSeg.set(segByLoc.get(r.locId)!, (radarKgSeg.get(segByLoc.get(r.locId)!) ?? 0) + r.kg);
-        radarCum.add(r.locId);
+        // Una devolucion resta kg pero no activa: solo cuenta como activo un
+        // movimiento positivo.
+        if (r.kg > 0) radarCum.add(r.locId);
       }
       for (const locId of factByBucket.get(b) ?? []) factCum.add(locId);
       for (const locId of pedidoByBucket.get(b) ?? []) pedidoCum.add(locId);
@@ -2210,7 +2218,7 @@ export async function getCarteraPorSegmento(): Promise<CarteraSegmentoResult> {
         kgBucket += r.kg;
         if (esDirectoLoc.get(r.locId)) kgBucketDir += r.kg;
         else if (esDirectoLoc.has(r.locId)) kgBucketInd += r.kg;
-        radarCum.add(r.locId);
+        if (r.kg > 0) radarCum.add(r.locId);
       }
       // Fuera de cartera: suma al total y a nada más. No tiene modelo, así
       // que la suma de Directo + Indirecto puede quedar por debajo del total.

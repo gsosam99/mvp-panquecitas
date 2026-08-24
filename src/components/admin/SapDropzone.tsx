@@ -133,7 +133,8 @@ export function SapDropzone({ mode, onCommitSuccess }: SapDropzoneProps) {
         deleted?: number;
         /** Rango de fechas que cubre el archivo (solo Pedidos y Facturado). */
         periodo?: string;
-        non_positive_skipped?: number;
+        ceros_omitidos?: number;
+        devoluciones?: number;
         fechas_eliminadas?: number;
         locations_upserted?: number;
         clientes_fuera_cartera?: number;
@@ -166,13 +167,16 @@ export function SapDropzone({ mode, onCommitSuccess }: SapDropzoneProps) {
         // ventas diarias del archivo y `deleted` las que se reemplazaron. Al
         // recargar el mismo archivo los dos números coinciden.
         const deletedNote = data.deleted ? ` · ${data.deleted} reemplazadas de cargas anteriores` : "";
-        const nonPositiveNote = data.non_positive_skipped ? ` · ${data.non_positive_skipped} filas en 0 o negativo omitidas` : "";
+        const cerosNote = data.ceros_omitidos ? ` · ${data.ceros_omitidos} filas en cero omitidas` : "";
+        // Las devoluciones (kg negativos) SI se guardan y restan. Se declaran
+        // porque hacen que el total baje respecto de la carga anterior.
+        const devolucionesNote = data.devoluciones ? ` · ${data.devoluciones} devoluciones (restan)` : "";
         const fechasNote = data.fechas_eliminadas
           ? ` · ${data.fechas_eliminadas} fechas de cargas anteriores reemplazadas`
           : "";
         onCommitSuccess(batchId, data.inserted ?? 0, data.locations_upserted ?? 0);
         setDoneSummary(
-          `${data.inserted} ventas diarias${deletedNote}${nonPositiveNote}${fechasNote} · ${data.locations_upserted} localidades actualizadas${foraCarteraNote}`
+          `${data.inserted} ventas diarias${deletedNote}${cerosNote}${devolucionesNote}${fechasNote} · ${data.locations_upserted} localidades actualizadas${foraCarteraNote}`
         );
         toast.success(`${data.inserted} ventas diarias cargadas${foraCarteraNote}`);
       }

@@ -189,15 +189,21 @@ async function handleRadarUpload(supabase: any, rows: ParsedSapRadarRow[], batch
   // Si un export repitiera cliente+material+día gana la última fila: no se
   // suma, porque sería el mismo dato dos veces.
   const byDay = new Map<string, (typeof sellInRows)[number]>();
-  let nonPositiveSkipped = 0;
+  let cerosOmitidos = 0;
+  let devoluciones = 0;
   for (const r of sellInRows) {
-    // sap_sell_in_records exige quantity_kg > 0 (ver schema.sql). Una fila
-    // en cero o negativa (crédito/devolución) no se inserta; como el paso 4
-    // borra el mes antes de reinsertar, eso equivale a eliminarla.
-    if (r.quantity_kg <= 0) {
-      nonPositiveSkipped++;
+    // Una fila en CERO no es un movimiento, es ruido del reporte.
+    if (r.quantity_kg === 0) {
+      cerosOmitidos++;
       continue;
     }
+    // Las NEGATIVAS sí se guardan: son devoluciones y tienen que restar. Antes
+    // se descartaban, porque la tabla exigía cantidades positivas — un check
+    // que tenía sentido cuando guardaba un acumulado mensual y dejó de tenerlo
+    // al pasar a un movimiento por día (ver migration 021). El efecto era que
+    // el dashboard quedaba por ENCIMA del reporte, justo en el monto devuelto,
+    // y no había forma de notarlo: el reporte no vuelve a mencionar la fila.
+    if (r.quantity_kg < 0) devoluciones++;
     byDay.set(dedupeKey(r.location_id, r.product_id, r.variant_id, r.date_of_sale), r);
   }
   const filasNuevas = [...byDay.values()];
@@ -327,7 +333,8 @@ async function handleRadarUpload(supabase: any, rows: ParsedSapRadarRow[], batch
     deleted,
     fechas_registradas: fechasInserted,
     fechas_eliminadas: fechasEliminadas,
-    non_positive_skipped: nonPositiveSkipped,
+    ceros_omitidos: cerosOmitidos,
+    devoluciones,
     clientes_fuera_cartera: clientesFueraCartera,
     locations_upserted: locationsUpdated,
   });
@@ -415,14 +422,15 @@ async function handleFacturacionUpload(supabase: any, rows: ParsedSapFacturacion
     }
     const variant_id = SAP_MATERIAL_VARIANT_MAP[row.material_code] ?? null;
 
-    // La tabla exige cantidad_pedido_kg / cantidad_facturada_kg >= 0 (CHECK
-    // de la migración 010). En el reporte SAP un valor negativo representa un
-    // dato nulo/sin cantidad, así que cuenta como 0. Insertarlo tal cual
-    // violaba el CHECK y hacía fallar TODA la carga con un 500. Se recorta a 0
-    // por columna, de forma independiente entre pedido y facturado.
-    const cantidad_pedido_kg = Math.max(0, row.cantidad_pedido_kg);
-    const cantidad_facturada_kg = Math.max(0, row.cantidad_facturada_kg);
-    if (cantidad_pedido_kg <= 0 && cantidad_facturada_kg <= 0) continue; // fila sin datos útiles
+    // Los valores NEGATIVOS son notas de crédito y tienen que restar. Antes se
+    // recortaban a 0 porque la tabla exigía cantidades >= 0 (CHECK de la
+    // migración 010, levantado en la 021): una devolución no bajaba el total,
+    // simplemente se perdía. En el export del 24-08-2026 eran dos filas por
+    // -83,20 kg, y el dashboard mostraba 9.298,40 contra 9.215,20 del reporte.
+    const cantidad_pedido_kg = row.cantidad_pedido_kg;
+    const cantidad_facturada_kg = row.cantidad_facturada_kg;
+    // Sin cantidad en ninguna de las dos columnas no hay nada que guardar.
+    if (cantidad_pedido_kg === 0 && cantidad_facturada_kg === 0) continue;
 
     pedidoFacturadoRows.push({
       upload_batch_id: batchId,
