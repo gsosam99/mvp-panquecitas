@@ -107,11 +107,20 @@ Es el tratamiento inverso al de las franquiciadas en un punto: el Radar de una
 franquiciada NO suma, porque duplicaría lo que distribuye a sus propios
 clientes; el de un PDV fuera de cartera sí, porque es venta final.
 
-`getUniverseLocations()` los excluye (y con eso, todos los denominadores);
-`getVolumenLocations()` los incluye, y solo la usa `getVolumenRadarAcumulado()`.
-La tarjeta declara esas toneladas aparte, para que la diferencia contra los
-gráficos por segmento —que sí se limitan a la cartera— tenga explicación
-visible.
+El criterio vive en `getScopeVolumen()`, que devuelve los dos conjuntos por
+separado:
+
+- **Volumen** → cartera + fuera de cartera. Alcanza a la tarjeta de volumen
+  acumulado, a la serie de venta acumulada y a la de rendimiento diario vs.
+  promedio 3M. Las tres declaran cuántos kg vienen de fuera de cartera.
+- **Clientes** → solo cartera, vía `getUniverseLocations()`. Su denominador es
+  la cartera vigente, así que sumar al numerador PDV que no están en ese
+  denominador daría una tasa inflada.
+
+Los gráficos **segmentados por cartera** (cartera por ciudad y modelo, ranking
+por segmento, detalle por segmento) los omiten a propósito: un PDV fuera de
+cartera no tiene segmento al que pertenecer, y meterlo obligaría a inventarle
+uno (decisión de Alejandro, 24-08-2026).
 
 Para sumar otro: una fila más en `locations` con ese `cohorte`. No hace falta
 tocar código. Y hay que **recargar el Radar** después de darlo de alta: la
