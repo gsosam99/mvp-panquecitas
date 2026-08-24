@@ -1,3 +1,4 @@
+import { fetchAllRowsChunked } from "@/lib/supabase/fetch-all";
 import { createSupabaseServiceClient } from "@/lib/supabase/server";
 import { hasDashboardSession } from "@/lib/session";
 import type { MotivoNoVentaTipo, ParsedSapEfectividadRow } from "@/types";
@@ -57,12 +58,13 @@ export async function POST(req: Request) {
     const uniqueCodes = [...new Set(rows.map((r) => r.sap_code))];
     const knownLocationIds = new Map<string, string>();
     if (uniqueCodes.length > 0) {
-      const { data: locs, error: locError } = await supabase
-        .from("locations")
-        .select("id, sap_code")
-        .in("sap_code", uniqueCodes);
-      if (locError) throw locError;
-      for (const l of (locs ?? []) as { id: string; sap_code: string }[]) {
+      // Por lotes: un `.in()` con más de 1000 códigos se corta sin avisar y
+      // los clientes que no resuelven se ignoran en silencio.
+      const locs = await fetchAllRowsChunked<{ id: string; sap_code: string }>(
+        (lote) => supabase.from("locations").select("id, sap_code").in("sap_code", lote),
+        uniqueCodes
+      );
+      for (const l of locs) {
         knownLocationIds.set(l.sap_code, l.id);
       }
     }

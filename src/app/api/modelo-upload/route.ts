@@ -1,3 +1,4 @@
+import { fetchAllRowsChunked } from "@/lib/supabase/fetch-all";
 import { createSupabaseServiceClient } from "@/lib/supabase/server";
 import { hasDashboardSession } from "@/lib/session";
 import type { ParsedModeloRow } from "@/types";
@@ -42,12 +43,17 @@ export async function POST(req: Request) {
     const codes = [...diasByCode.keys()];
 
     // Solo se tocan clientes existentes en la cartera.
-    const { data: existing, error: fetchError } = await supabase
-      .from("locations")
-      .select("id, sap_code")
-      .in("sap_code", codes);
-    if (fetchError) throw fetchError;
-    const existingCodes = new Set(((existing ?? []) as { sap_code: string }[]).map((l) => l.sap_code));
+    //
+    // Por lotes: un `.in()` con más de 1000 códigos se corta sin avisar. Acá
+    // el efecto es especialmente dañino — los clientes que no resuelven se
+    // quedan sin `dias_visita`, y sin plan de visita nunca cuentan como
+    // "programados", así que desaparecen del denominador de efectividad sin
+    // que nada lo reporte.
+    const existing = await fetchAllRowsChunked<{ id: string; sap_code: string }>(
+      (lote) => supabase.from("locations").select("id, sap_code").in("sap_code", lote),
+      codes
+    );
+    const existingCodes = new Set(existing.map((l) => l.sap_code));
     const sinCartera = codes.filter((c) => !existingCodes.has(c)).length;
 
     // Agrupar por plan de visita → un update por grupo.

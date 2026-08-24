@@ -1,3 +1,4 @@
+import { fetchAllRowsChunked } from "@/lib/supabase/fetch-all";
 import { createSupabaseServiceClient } from "@/lib/supabase/server";
 import { hasDashboardSession } from "@/lib/session";
 import { resolveVariantFromSku } from "@/data/catalog";
@@ -21,11 +22,12 @@ export async function POST(req: Request) {
     }
 
     const sapCodes = Array.from(new Set(rows.map((r) => r.sap_code)));
-    const { data: locData, error: locError } = await supabase
-      .from("locations")
-      .select("id, sap_code")
-      .in("sap_code", sapCodes);
-    if (locError) throw locError;
+    // Por lotes: un `.in()` con más de 1000 códigos se corta sin avisar y los
+    // clientes que no resuelven se ignoran en silencio, perdiendo sus filas.
+    const locData = await fetchAllRowsChunked<{ id: string; sap_code: string }>(
+      (lote) => supabase.from("locations").select("id, sap_code").in("sap_code", lote),
+      sapCodes
+    );
 
     const locationIdByCode = new Map(
       ((locData ?? []) as { id: string; sap_code: string }[]).map((l) => [l.sap_code, l.id])
