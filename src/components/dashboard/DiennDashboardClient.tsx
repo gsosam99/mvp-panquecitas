@@ -514,6 +514,18 @@ export function DiennDashboardClient({
       ? bundle.rendimiento3M[pan3mPoblacion]
       : bundles[ciudad3M].rendimiento3M[pan3mPoblacion];
 
+  // Ratio acumulado del corte activo, para mostrarlo en la cabecera del
+  // gráfico. Misma definición que el ratio por ciudad de abajo (DIENN,
+  // 18-08-2026): promedio de los ratios diarios, no Σ kg ÷ Σ referencia. Se
+  // reusa a propósito, para no tener dos criterios de "ratio acumulado"
+  // conviviendo en el mismo gráfico.
+  const ratioAcumulado3M = useMemo(() => {
+    const puntos = rendimiento3MData.puntos;
+    if (puntos.length === 0) return null;
+    const suma = puntos.reduce((s, p) => s + p.ratioPct, 0);
+    return { pct: Math.round((suma / puntos.length) * 10) / 10, dias: puntos.length };
+  }, [rendimiento3MData]);
+
   // Ratio acumulado por ciudad (definición de DIENN, 18-08-2026): se acumulan
   // los RATIOS DIARIOS que ya muestra el gráfico y se dividen entre el número de
   // días con venta de Panquecitas. O sea, el promedio corrido de los ratios
@@ -759,7 +771,31 @@ export function DiennDashboardClient({
               la meta y el día a día.
             </p>
           </div>
-          <div className="flex flex-wrap items-center gap-2 print:hidden">
+          <div className="flex flex-wrap items-center gap-2">
+            {/* Ratio acumulado del corte activo. Va acá arriba —y no solo en el
+                pie— porque es la lectura de una línea: cómo viene Panquecitas
+                contra el promedio de PAN, comparado con la meta del 4%. Se
+                imprime (sin print:hidden) a diferencia de los controles. */}
+            {ratioAcumulado3M && (
+              <div
+                className="rounded-lg border border-slate-200 bg-slate-50 px-3 py-1.5"
+                title={`Promedio de los ${ratioAcumulado3M.dias} ratios diarios del período (Panquecitas del día ÷ promedio diario de Harina PAN). Misma definición que el ratio acumulado por ciudad.`}
+              >
+                <p className="text-[10px] uppercase tracking-wide text-slate-400 leading-none">
+                  Ratio acumulado
+                </p>
+                <p
+                  className={`text-sm font-semibold leading-tight ${
+                    ratioAcumulado3M.pct >= 4 ? "text-emerald-700" : "text-slate-900"
+                  }`}
+                >
+                  {ratioAcumulado3M.pct.toLocaleString("es-VE", { maximumFractionDigits: 1 })}%
+                  <span className="text-[10px] font-normal text-slate-400"> · meta 4%</span>
+                </p>
+              </div>
+            )}
+            {/* Los controles sí se ocultan al imprimir; el ratio de arriba no. */}
+            <div className="flex flex-wrap items-center gap-2 print:hidden">
             {/* Filtro de comparación: PAN Cliente vs PAN Universo. */}
             <div className="flex rounded-lg border border-slate-200 overflow-hidden text-xs font-medium">
               {(
@@ -834,6 +870,7 @@ export function DiennDashboardClient({
                 { header: "Ratio vs promedio PAN (%)", value: (r) => r.ratioPct, width: 26 },
               ]}
             />
+            </div>
           </div>
         </CardHeader>
         <CardContent>
