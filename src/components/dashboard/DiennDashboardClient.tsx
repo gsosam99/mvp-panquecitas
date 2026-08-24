@@ -553,6 +553,9 @@ export function DiennDashboardClient({
   }, [rendimiento3MData, bundles, pan3mPoblacion]);
 
   const comboPoints = bundle.ventaRecompraActivacion[comboGranularity];
+  // Kg de PDV fuera de cartera incluidos en el volumen. Es acumulado, así que
+  // el último punto trae el total del período.
+  const ventaFueraKg = comboPoints.length > 0 ? comboPoints[comboPoints.length - 1].ventaAcumuladaFueraKg : 0;
 
   // Proporción de volumen Panquecitas sobre Harina PAN (Radar) — solo se
   // muestra como acotación en la tarjeta de volumen de Panquecitas.
@@ -865,6 +868,22 @@ export function DiennDashboardClient({
                   })}{" "}
                   kg/día
                 </span>
+                {/* La serie diaria de Panquecitas suma todo el Radar, igual que
+                    la tarjeta. El promedio de PAN de arriba es población y sigue
+                    acotado a la cartera. */}
+                {rendimiento3MData.panquecitasFueraKg > 0 && (
+                  <>
+                    {" "}
+                    · La venta diaria de Panquecitas incluye{" "}
+                    <span className="font-medium text-slate-600">
+                      {rendimiento3MData.panquecitasFueraKg.toLocaleString("es-VE", {
+                        maximumFractionDigits: 1,
+                      })}{" "}
+                      kg
+                    </span>{" "}
+                    de clientes fuera de cartera
+                  </>
+                )}
               </p>
             </>
           ) : (
@@ -953,6 +972,19 @@ export function DiennDashboardClient({
               <span className="font-medium">clientes con 2 o más fechas de compra ÷ clientes que compraron</span>, un
               conteo de clientes únicos — y % de activación de clientes sobre la cartera vigente en cada período (la
               cartera se amplió el 14 y el 24 de agosto; cada punto usa la cartera que existía en esa fecha).
+              {/* El volumen suma todo el Radar, igual que la tarjeta; las tasas
+                  solo cuentan cartera. Se declara la diferencia para que nadie
+                  tenga que deducirla. */}
+              {ventaFueraKg > 0 && (
+                <>
+                  {" "}
+                  El volumen incluye{" "}
+                  <span className="font-medium">
+                    {ventaFueraKg.toLocaleString("es-VE", { maximumFractionDigits: 1 })} kg
+                  </span>{" "}
+                  de clientes fuera de cartera; las tasas no los cuentan.
+                </>
+              )}
             </p>
           </div>
           <div className="flex flex-wrap items-center gap-2 print:hidden">

@@ -232,14 +232,30 @@ export interface VolumenRadarAcumulado {
   fueraDeCarteraClientes: number;
 }
 
-export async function getVolumenRadarAcumulado(sector?: Sector): Promise<VolumenRadarAcumulado> {
+/**
+ * Scope de VOLUMEN: los PDV cuyos kg suman en el dashboard.
+ *
+ * Devuelve los dos conjuntos por separado a propósito. El volumen los suma a
+ * los dos —el kilo de un PDV fuera de cartera es un kilo vendido igual— pero
+ * cualquier CONTEO de clientes (activación, penetración, recompra, cobertura)
+ * solo puede usar `cartera`. Mezclarlos ahí es justo lo que castigaría los
+ * indicadores con PDV que nadie se propuso atender.
+ *
+ * Los "fuera de cartera" no tienen fecha de incorporación, así que
+ * vigentesAl() los deja pasar siempre: no pertenecen a ninguna tanda.
+ */
+async function getScopeVolumen(sector?: Sector): Promise<{ cartera: Set<string>; fuera: Set<string> }> {
   const locations = await getVolumenLocations();
   const delSector = sector ? locations.filter((l) => sectorGroup(l.oficina_venta) === sector) : locations;
-  // Los "fuera de cartera" no tienen fecha de incorporación, así que
-  // vigentesAl() los deja pasar siempre: no pertenecen a ninguna tanda.
   const vigentes = vigentesAl(delSector, todayISO());
-  const idsCartera = new Set(vigentes.filter((l) => !esFueraDeCartera(l.cohorte)).map((l) => l.id));
-  const idsFuera = new Set(vigentes.filter((l) => esFueraDeCartera(l.cohorte)).map((l) => l.id));
+  return {
+    cartera: new Set(vigentes.filter((l) => !esFueraDeCartera(l.cohorte)).map((l) => l.id)),
+    fuera: new Set(vigentes.filter((l) => esFueraDeCartera(l.cohorte)).map((l) => l.id)),
+  };
+}
+
+export async function getVolumenRadarAcumulado(sector?: Sector): Promise<VolumenRadarAcumulado> {
+  const { cartera: idsCartera, fuera: idsFuera } = await getScopeVolumen(sector);
 
   const supabase = createSupabaseServiceClient();
   const data = await fetchAllRows<unknown>(() =>
@@ -657,10 +673,12 @@ export interface VentaRecompraActivacionPoint {
   activacionPct: number;
   /** Cartera vigente al cierre del bucket — denominador de activacionPct. */
   universo: number;
+  /** Parte de ventaAcumuladaKg que viene de PDV fuera de la cartera. */
+  ventaAcumuladaFueraKg: number;
 }
 
 function computeVentaRecompraActivacionPoints(
-  rows: { location_id: string; date_of_sale: string; quantity_kg: number }[],
+  rows: { location_id: string; date_of_sale: string; quantity_kg: number; esCartera: boolean }[],
   fechasRows: { location_id: string; fecha: string }[],
   universoSizeAt: (cierre: string) => number,
   granularity: TimeGranularity
@@ -672,10 +690,19 @@ function computeVentaRecompraActivacionPoints(
   for (const bucket of buckets) {
     const rowsUpToBucket = rows.filter((r) => bucketKeyFor(r.date_of_sale, granularity) <= bucket);
 
+    // El VOLUMEN suma todo, incluidos los PDV fuera de cartera: un kilo
+    // vendido es un kilo vendido, y así este total calza con la tarjeta y con
+    // el resto del dashboard. Se lleva aparte cuánto de eso viene de fuera de
+    // cartera para poder declararlo.
     const ventaAcumuladaKg = rowsUpToBucket.reduce((s, r) => s + r.quantity_kg, 0);
+    const ventaAcumuladaFueraKg = rowsUpToBucket
+      .filter((r) => !r.esCartera)
+      .reduce((s, r) => s + r.quantity_kg, 0);
 
-    // Activación: clientes con al menos una venta Radar hasta el bucket.
-    const activados = new Set(rowsUpToBucket.map((r) => r.location_id)).size;
+    // La ACTIVACIÓN, en cambio, solo cuenta cartera: su denominador es la
+    // cartera vigente, así que sumar al numerador PDV que no están en ese
+    // denominador daría una tasa inflada.
+    const activados = new Set(rowsUpToBucket.filter((r) => r.esCartera).map((r) => r.location_id)).size;
 
     // Recompra = TASA DE CLIENTES RECURRENTES (punto 3 del documento de cambios,
     // 18-08-2026): clientes con ≥2 fechas distintas de venta Radar ÷ clientes con
@@ -705,6 +732,7 @@ function computeVentaRecompraActivacionPoints(
       bucket,
       label: bucketLabelFor(bucket, granularity),
       ventaAcumuladaKg: Math.round(ventaAcumuladaKg * 10) / 10,
+      ventaAcumuladaFueraKg: Math.round(ventaAcumuladaFueraKg * 10) / 10,
       recompraPct:
         clientesConVenta > 0 ? Math.round((clientesRecurrentes / clientesConVenta) * 1000) / 10 : 0,
       activacionPct: universoSize > 0 ? Math.round((activados / universoSize) * 1000) / 10 : 0,
@@ -739,15 +767,26 @@ export async function getVentaRecompraActivacion(
       .order("date_of_sale")
   );
 
-  // Numerador con el mismo criterio que el denominador: una venta anterior a
-  // la incorporación del cliente no cuenta. Si contara, un cliente de la
-  // tanda del 24-08 con histórico previo aparecería "activado" en semanas en
-  // las que no estaba en el denominador, y la tasa pasaría del 100%.
-  const rows = ((data ?? []) as { location_id: string; date_of_sale: string; quantity_kg: number }[]).filter(
-    (r) =>
-      incorporacionPorId.has(r.location_id) &&
-      estabaIncorporado(incorporacionPorId.get(r.location_id), r.date_of_sale.slice(0, 10))
-  );
+  // Se traen las filas de cartera Y las de los PDV fuera de cartera, marcadas
+  // con `esCartera`. El volumen las suma a las dos —para que el total calce
+  // con la tarjeta y con el resto del dashboard— y el conteo de clientes usa
+  // solo las de cartera.
+  //
+  // Para la cartera vale el mismo criterio que el denominador: una venta
+  // anterior a la incorporación del cliente no cuenta. Si contara, un cliente
+  // de la tanda del 24-08 con histórico previo aparecería "activado" en
+  // semanas en las que no estaba en el denominador, y la tasa pasaría del
+  // 100%. Los de fuera de cartera no tienen fecha de incorporación y no
+  // entran en ninguna tasa, así que su volumen cuenta completo.
+  const { fuera } = await getScopeVolumen(sector);
+  const rows = ((data ?? []) as { location_id: string; date_of_sale: string; quantity_kg: number }[])
+    .filter(
+      (r) =>
+        fuera.has(r.location_id) ||
+        (incorporacionPorId.has(r.location_id) &&
+          estabaIncorporado(incorporacionPorId.get(r.location_id), r.date_of_sale.slice(0, 10)))
+    )
+    .map((r) => ({ ...r, esCartera: !fuera.has(r.location_id) }));
   if (rows.length === 0) return empty;
 
   // Fechas de venta Radar (para la recompra por fechas distintas). Si la tabla
@@ -818,6 +857,8 @@ export interface Rendimiento3MResult {
   clientesPan: number;
   /** PDV de la población elegida en este corte, para comparar contra el anterior. */
   clientesPoblacion: number;
+  /** Kg de Panquecitas de la serie diaria que vienen de PDV fuera de la cartera. */
+  panquecitasFueraKg: number;
   puntos: Rendimiento3MPunto[];
 }
 
@@ -837,6 +878,7 @@ const RENDIMIENTO_3M_VACIO: Rendimiento3MResult = {
   totalPanKg: 0,
   clientesPan: 0,
   clientesPoblacion: 0,
+  panquecitasFueraKg: 0,
   puntos: [],
 };
 
@@ -901,7 +943,15 @@ export async function getRendimiento3M(
     if (pagina.length < PAGINA) break;
   }
 
-  const panq = panqData.filter((r) => idsUniverso.has(r.location_id));
+  // El VOLUMEN diario de Panquecitas suma también los PDV fuera de cartera,
+  // para que esta serie calce con la tarjeta y con el resto del dashboard. El
+  // promedio de PAN de abajo, en cambio, es una POBLACIÓN y sigue acotado a la
+  // cartera. Ver getScopeVolumen().
+  const { fuera: idsFueraVolumen } = await getScopeVolumen(sector);
+  const panq = panqData.filter((r) => idsUniverso.has(r.location_id) || idsFueraVolumen.has(r.location_id));
+  const panqFueraKg = panqData
+    .filter((r) => idsFueraVolumen.has(r.location_id))
+    .reduce((s, r) => s + Number(r.quantity_kg), 0);
 
   // Población del promedio de PAN — ambas acotadas a la CARTERA (decisión de
   // DIENN, 18-08-2026: "PAN Universo son los clientes de la cartera"):
@@ -966,6 +1016,7 @@ export async function getRendimiento3M(
     totalPanKg: Math.round(totalPanKg * 10) / 10,
     clientesPan: new Set(panFiltrado.map((r) => r.location_id)).size,
     clientesPoblacion: idsPan.size,
+    panquecitasFueraKg: Math.round(panqFueraKg * 10) / 10,
     puntos,
   };
 }
