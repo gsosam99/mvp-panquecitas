@@ -76,36 +76,22 @@ const Inner = dynamic(
       // dominio por el alto útil del área de dibujo— y si el texto choca
       // debajo de la línea se pasa arriba. En los dos casos queda pegado a la
       // línea punteada, que es lo que hace que se entienda a qué se refiere.
-      const ALTO_PLOT = 230; // alto del área de dibujo, sin ejes ni leyenda
-      const ALTO_ETIQUETA = 17; // alto de un texto de 15px
-      const SEPARACION_PUNTO = 8; // el offset del LabelList de los ratios
-      const PUNTOS_BAJO_TEXTO = 3; // cuántos puntos cubre el ancho del texto
-
-      const posY = (v: number) => {
-        if (escalaLog) {
-          const lo = Math.log(minLog);
-          const hi = Math.log(maxLog);
-          return hi > lo ? 1 - (Math.log(Math.max(v, minLog)) - lo) / (hi - lo) : 0.5;
-        }
-        return maxLineal > 0 ? 1 - v / maxLineal : 0.5;
-      };
-
-      const bandasCercanas = data.puntos.slice(0, PUNTOS_BAJO_TEXTO).map((p) => {
-        const yPunto = posY(p.panquecitasKg) * ALTO_PLOT;
-        return { top: yPunto - SEPARACION_PUNTO - ALTO_ETIQUETA, bottom: yPunto - SEPARACION_PUNTO };
-      });
-      const chocaEn = (topTexto: number) =>
-        bandasCercanas.some((b) => b.top < topTexto + ALTO_ETIQUETA && b.bottom > topTexto);
-
-      const yMeta = posY(data.meta4Pct) * ALTO_PLOT;
-      // Se prefiere abajo (como estaba). Solo se sube si abajo choca y arriba no.
-      const metaAbajoChoca = chocaEn(yMeta + 2);
-      const metaArribaChoca = chocaEn(yMeta - 2 - ALTO_ETIQUETA);
-      const metaPosition = metaAbajoChoca && !metaArribaChoca ? "insideTopLeft" : "insideBottomLeft";
+      // Franja reservada a la derecha para el texto de la meta, que vive fuera
+      // del área de dibujo. Da para "Meta 4%: 1.234 kg" a 13px.
+      //
+      // No hay heurística de colisión acá. Se intentó —estimar en qué píxel
+      // cae cada número y mover el texto al lado con más holgura— y no
+      // alcanzó: Recharts no expone la geometría real del área de dibujo al
+      // posicionar la etiqueta, así que la estimación erraba y el solapamiento
+      // volvía. Sacar el texto del área no estima nada: donde va no hay
+      // ratios, y el solapamiento deja de ser posible.
+      const MARGEN_META = 118;
 
       return (
         <ResponsiveContainer width="100%" height={340}>
-          <ComposedChart data={chartData} margin={{ top: 40, right: 16, left: 10, bottom: 5 }}>
+          {/* El margen derecho reserva la franja donde vive el texto de la meta,
+              fuera del área de dibujo. Ver MARGEN_META más abajo. */}
+          <ComposedChart data={chartData} margin={{ top: 40, right: MARGEN_META, left: 10, bottom: 5 }}>
             <CartesianGrid strokeDasharray="3 3" stroke="#f1f5f9" vertical={false} />
             <XAxis dataKey="label" tick={{ fontSize: 13, fill: "#64748b" }} minTickGap={16} />
             {/* El dominio se fuerza a incluir las líneas fijas: en automático
@@ -169,7 +155,15 @@ const Inner = dynamic(
                 }}
               />
             )}
-            {/* Indicador Fijo B: 4% de ese promedio — la meta. */}
+            {/* Indicador Fijo B: 4% de ese promedio — la meta.
+
+                El texto va FUERA del área de dibujo, en el margen derecho que
+                reserva MARGEN_META, a la altura exacta de la línea. Antes iba
+                dentro (abajo a la izquierda) y se solapaba con los números de
+                ratio, que se dibujan encima de cada punto: bastaba un punto
+                algo por debajo de la línea para que su número cayera sobre el
+                texto. Fuera del área no hay ratios, así que el solapamiento
+                deja de ser posible en vez de depender de una estimación. */}
             <ReferenceLine
               yAxisId="kg"
               y={data.meta4Pct}
@@ -177,10 +171,10 @@ const Inner = dynamic(
               strokeWidth={2}
               strokeDasharray="6 4"
               label={{
-                value: `Meta 4%: ${data.meta4Pct.toLocaleString("es-VE", { maximumFractionDigits: 0 })} kg/día`,
-                position: metaPosition,
+                value: `Meta 4%: ${data.meta4Pct.toLocaleString("es-VE", { maximumFractionDigits: 0 })} kg`,
+                position: "right",
                 fill: "#15803d",
-                fontSize: 15,
+                fontSize: 13,
                 fontWeight: 600,
               }}
             />
