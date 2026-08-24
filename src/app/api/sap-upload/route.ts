@@ -46,32 +46,6 @@ function errorDetail(error: any): string {
   return String(error);
 }
 
-// Mapa dedupeKey → id de la fila ya existente (para actualizar en vez de
-// duplicar/omitir, reporte "Pedidos y Facturado" — llave por fecha exacta).
-// eslint-disable-next-line @typescript-eslint/no-explicit-any
-async function fetchExistingRecords(
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  supabase: any,
-  table: string,
-  dateColumn: string,
-  locationIds: string[],
-  dates: string[]
-): Promise<Map<string, string>> {
-  if (!locationIds.length || !dates.length) return new Map();
-  const { data, error } = await supabase
-    .from(table)
-    .select(`id, location_id, product_id, variant_id, ${dateColumn}`)
-    .in("location_id", locationIds)
-    .in(dateColumn, dates);
-  if (error) throw error;
-  const map = new Map<string, string>();
-  for (const r of data as { id: string; location_id: string; product_id: string; variant_id: string | null }[]) {
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    map.set(dedupeKey(r.location_id, r.product_id, r.variant_id, (r as any)[dateColumn]), r.id);
-  }
-  return map;
-}
-
 // El reporte Radar (SAP) NO crea clientes nuevos — solo puede alimentar
 // ventas de clientes que ya viven en `locations` (cargados vía Cartera de
 // Clientes, el universo cerrado del piloto). Un client_code de SAP que no
@@ -464,19 +438,9 @@ async function handleFacturacionUpload(supabase: any, rows: ParsedSapFacturacion
     }, { status: 422 });
   }
 
-  // ── 3. Descartar filas ya cargadas (mismo cliente + fecha + material) ──
-  const locationIds = [...new Set(pedidoFacturadoRows.map((r) => r.location_id))];
-  const existingKeys = await fetchExistingRecords(
-    supabase,
-    "sap_pedidos_facturados",
-    "fecha",
-    locationIds,
-    [...new Set(pedidoFacturadoRows.map((r) => r.fecha))]
-  );
-
-  // El reporte puede traer VARIAS filas por (cliente, producto, presentación,
-  // fecha) — distintas facturas/pedidos del mismo día — que NO son duplicados:
-  // se SUMAN, no se descartan (antes se caía ~la mitad del volumen facturado).
+  // ── 3. Agregar por cliente + producto + presentación + fecha ──────────
+  // El reporte puede traer VARIAS filas por esa llave — distintas
+  // facturas/pedidos del mismo día — que NO son duplicados: se SUMAN.
   const aggByKey = new Map<string, (typeof pedidoFacturadoRows)[number]>();
   for (const r of pedidoFacturadoRows) {
     const key = dedupeKey(r.location_id, r.product_id, r.variant_id, r.fecha);
@@ -488,23 +452,62 @@ async function handleFacturacionUpload(supabase: any, rows: ParsedSapFacturacion
       aggByKey.set(key, { ...r });
     }
   }
-  // Se omiten solo las llaves ya presentes en la BD (re-carga idempotente). Para
-  // recargar con los valores corregidos, borra antes el batch anterior.
-  const newRows = [...aggByKey.values()].filter(
-    (r) => !existingKeys.has(dedupeKey(r.location_id, r.product_id, r.variant_id, r.fecha))
-  );
+  const filasNuevas = [...aggByKey.values()];
 
-  // ── 4. Insert ────────────────────────────────────────────────────────────
-  if (newRows.length > 0) {
-    const { error } = await supabase.from("sap_pedidos_facturados").insert(newRows);
+  // ── 4. Reemplazar el PERÍODO que trae el archivo ─────────────────────
+  //
+  // Antes se descartaba toda fila cuya llave ya existiera en la base, para
+  // que recargar fuera idempotente. Pero este reporte NO es inmutable: un
+  // pedido del día 13 se factura días después, así que la misma llave
+  // (cliente, material, fecha) cambia de valor entre un export y el
+  // siguiente — `Cantidad Facturada` pasa de 0 al valor final. Saltarla
+  // como "duplicado" congelaba el dato viejo: en el export del 24-08-2026
+  // el reporte traía 9.215,20 kg facturados y el dashboard mostraba 7.750,
+  // 1,46 toneladas menos, sin ningún aviso.
+  //
+  // Ahora se reemplaza: para los clientes y productos del archivo se borra
+  // el rango de fechas que cubre y se reinserta. El archivo es la verdad de
+  // su período, así que una factura corregida —o un pedido anulado— queda
+  // reflejada. Recargar el mismo archivo sigue siendo idempotente.
+  const locationIds = [...new Set(filasNuevas.map((r) => r.location_id))];
+  const fechas = filasNuevas.map((r) => r.fecha).sort();
+  const desde = fechas[0];
+  const hasta = fechas[fechas.length - 1];
+  const productos = [...new Set(filasNuevas.map((r) => r.product_id))];
+  const LOTE_CLIENTES = 200;
+
+  let deleted = 0;
+  for (const productId of productos) {
+    for (let i = 0; i < locationIds.length; i += LOTE_CLIENTES) {
+      const { data, error } = await supabase
+        .from("sap_pedidos_facturados")
+        .delete()
+        .eq("product_id", productId)
+        .in("location_id", locationIds.slice(i, i + LOTE_CLIENTES))
+        .gte("fecha", desde)
+        .lte("fecha", hasta)
+        .select("id");
+      if (error) throw error;
+      deleted += (data ?? []).length;
+    }
+  }
+
+  // ── 5. Insert por lotes ──────────────────────────────────────────────
+  const LOTE_INSERT = 500;
+  let inserted = 0;
+  for (let i = 0; i < filasNuevas.length; i += LOTE_INSERT) {
+    const lote = filasNuevas.slice(i, i + LOTE_INSERT);
+    const { error } = await supabase.from("sap_pedidos_facturados").insert(lote);
     if (error) throw error;
+    inserted += lote.length;
   }
 
   return Response.json({
     format: "facturacion",
     locations_upserted: locationsUpdated,
-    inserted: newRows.length,
-    duplicates_skipped: pedidoFacturadoRows.length - newRows.length,
+    inserted,
+    deleted,
+    periodo: `${desde} a ${hasta}`,
     clientes_fuera_cartera: clientesFueraCartera,
   });
 }

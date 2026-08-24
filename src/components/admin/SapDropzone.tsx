@@ -129,13 +129,13 @@ export function SapDropzone({ mode, onCommitSuccess }: SapDropzoneProps) {
       });
       const data = (await res.json()) as {
         inserted?: number;
-        updated?: number;
-        stale_skipped?: number;
+        /** Filas sustituidas: las dos cargas reemplazan el período que trae el archivo. */
         deleted?: number;
+        /** Rango de fechas que cubre el archivo (solo Pedidos y Facturado). */
+        periodo?: string;
         non_positive_skipped?: number;
-        locations_upserted?: number;
-        duplicates_skipped?: number;
         fechas_eliminadas?: number;
+        locations_upserted?: number;
         clientes_fuera_cartera?: number;
         error?: string;
         detail?: string;
@@ -150,10 +150,14 @@ export function SapDropzone({ mode, onCommitSuccess }: SapDropzoneProps) {
         ? ` · ${data.clientes_fuera_cartera} clientes fuera de la cartera (ignorados)`
         : "";
       if (parsed.format === "facturacion") {
-        const duplicatesNote = data.duplicates_skipped ? ` · ${data.duplicates_skipped} duplicados omitidos (ya cargados)` : "";
+        // El reporte no es inmutable (un pedido se factura días después), así
+        // que la carga REEMPLAZA el período que trae en vez de saltar las
+        // llaves ya cargadas. `deleted` son las filas sustituidas.
+        const deletedNote = data.deleted ? ` · ${data.deleted} reemplazadas de cargas anteriores` : "";
+        const periodoNote = data.periodo ? ` · período ${data.periodo}` : "";
         onCommitSuccess(batchId, data.inserted ?? 0, data.locations_upserted ?? 0);
         setDoneSummary(
-          `${data.inserted} registros de pedido/facturado · ${data.locations_upserted} localidades actualizadas${duplicatesNote}${foraCarteraNote}`
+          `${data.inserted} registros de pedido/facturado${deletedNote}${periodoNote} · ${data.locations_upserted} localidades actualizadas${foraCarteraNote}`
         );
         toast.success("Carga completada");
       } else {
