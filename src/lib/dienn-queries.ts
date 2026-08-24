@@ -244,12 +244,18 @@ export interface VolumenRadarAcumulado {
  * Los "fuera de cartera" no tienen fecha de incorporación, así que
  * vigentesAl() los deja pasar siempre: no pertenecen a ninguna tanda.
  */
-async function getScopeVolumen(sector?: Sector): Promise<{ cartera: Set<string>; fuera: Set<string> }> {
+async function getScopeVolumen(
+  sector?: Sector
+): Promise<{ cartera: Map<string, string | null>; fuera: Set<string> }> {
   const locations = await getVolumenLocations();
   const delSector = sector ? locations.filter((l) => sectorGroup(l.oficina_venta) === sector) : locations;
   const vigentes = vigentesAl(delSector, todayISO());
   return {
-    cartera: new Set(vigentes.filter((l) => !esFueraDeCartera(l.cohorte)).map((l) => l.id)),
+    // Map y no Set: se necesita la fecha de incorporación para descartar las
+    // ventas anteriores a ella, igual que hacen las series.
+    cartera: new Map(
+      vigentes.filter((l) => !esFueraDeCartera(l.cohorte)).map((l) => [l.id, l.fecha_incorporacion ?? null])
+    ),
     fuera: new Set(vigentes.filter((l) => esFueraDeCartera(l.cohorte)).map((l) => l.id)),
   };
 }
@@ -278,6 +284,11 @@ export async function getVolumenRadarAcumulado(sector?: Sector): Promise<Volumen
   }[]) {
     const esFuera = idsFuera.has(r.location_id);
     if (!esFuera && !idsCartera.has(r.location_id)) continue;
+    // Mismo criterio que las series: una venta anterior a la incorporación
+    // del cliente no cuenta. Sin este filtro la tarjeta sumaba histórico de
+    // clientes que en esa fecha no eran cartera y quedaba por encima de los
+    // gráficos. Los "fuera de cartera" no tienen fecha y cuentan completo.
+    if (!esFuera && !estabaIncorporado(idsCartera.get(r.location_id), r.date_of_sale.slice(0, 10))) continue;
 
     if (r.product_id === PRODUCT_IDS.PANQUECITAS) {
       panquecitasKg += r.quantity_kg;
@@ -1907,6 +1918,8 @@ export interface CarteraTotalDiaPunto {
   dia: string; // "YYYY-MM-DD" (día) o clave del bucket (semana/mes)
   label: string;
   radarKgDia: number; // volumen Radar del período (kg del bucket, NO acumulado)
+  // Incluye los PDV fuera de cartera, que no tienen modelo: Directo +
+  // Indirecto puede quedar por debajo de radarKgDia.
   radarKgDiaDirecto: number; // parte del volumen del período del modelo Directo
   radarKgDiaIndirecto: number; // parte del volumen del período del modelo Indirecto
   programados: number; // clientes que tocaba visitar ese período (denominador)
@@ -2019,6 +2032,19 @@ export async function getCarteraPorSegmento(): Promise<CarteraSegmentoResult> {
   const radar = ((radarData ?? []) as { location_id: string; quantity_kg: number; date_of_sale: string }[]).filter(
     (r) => yaEraCartera(r.location_id, r.date_of_sale)
   );
+
+  // PDV fuera de cartera: su volumen suma en el TOTAL del gráfico —para que
+  // cuadre con la tarjeta y con el resto del dashboard— pero NO se desglosa
+  // por segmento, porque no pertenecen a ninguno, ni entra en ningún conteo
+  // de clientes. Van aparte por eso: `radar` sigue siendo solo cartera y
+  // alimenta segmentos, activación y split Directo/Indirecto sin ensuciarse.
+  const fueraLocations = (await getVolumenLocations()).filter(
+    (l) => esFueraDeCartera(l.cohorte) && sectorGroup(l.oficina_venta) !== null
+  );
+  const sectorFuera = new Map(fueraLocations.map((l) => [l.id, sectorGroup(l.oficina_venta)]));
+  const radarFuera = (
+    (radarData ?? []) as { location_id: string; quantity_kg: number; date_of_sale: string }[]
+  ).filter((r) => sectorFuera.has(r.location_id));
   const fact = ((factData ?? []) as { location_id: string; fecha: string }[]).filter((r) =>
     yaEraCartera(r.location_id, r.fecha)
   );
@@ -2142,8 +2168,24 @@ export async function getCarteraPorSegmento(): Promise<CarteraSegmentoResult> {
       if (!pedidoByBucket.has(b)) pedidoByBucket.set(b, []);
       pedidoByBucket.get(b)!.push(r.location_id);
     }
+    // Volumen de los PDV fuera de cartera, por bucket. Solo suma al kg del
+    // total; no toca segmentos, conteos ni el split Directo/Indirecto.
+    const radarFueraScope = sector
+      ? radarFuera.filter((r) => sectorFuera.get(r.location_id) === sector)
+      : radarFuera;
+    const fueraByBucket = new Map<string, number>();
+    for (const r of radarFueraScope) {
+      const b = bucketKeyFor(r.date_of_sale.slice(0, 10), granularity);
+      fueraByBucket.set(b, (fueraByBucket.get(b) ?? 0) + r.quantity_kg);
+    }
+
     const buckets = Array.from(
-      new Set([...radarByBucket.keys(), ...factByBucket.keys(), ...pedidoByBucket.keys()])
+      new Set([
+        ...radarByBucket.keys(),
+        ...factByBucket.keys(),
+        ...pedidoByBucket.keys(),
+        ...fueraByBucket.keys(),
+      ])
     ).sort();
     // Cartera del scope (denominador del modo "acumulado": clientes activos
     // acumulados ÷ cartera, IGUAL que la tarjeta de activación de cliente).
@@ -2170,6 +2212,10 @@ export async function getCarteraPorSegmento(): Promise<CarteraSegmentoResult> {
         else if (esDirectoLoc.has(r.locId)) kgBucketInd += r.kg;
         radarCum.add(r.locId);
       }
+      // Fuera de cartera: suma al total y a nada más. No tiene modelo, así
+      // que la suma de Directo + Indirecto puede quedar por debajo del total.
+      const kgBucketFuera = fueraByBucket.get(b) ?? 0;
+      kgBucket += kgBucketFuera;
       for (const locId of factByBucket.get(b) ?? []) factCum.add(locId);
       for (const locId of pedidoByBucket.get(b) ?? []) pedidoCum.add(locId);
       // día → solo ese día de la semana; semana/mes → cualquier día programado.
