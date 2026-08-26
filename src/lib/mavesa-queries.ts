@@ -3,7 +3,6 @@ import { fetchAllRows } from "@/lib/supabase/fetch-all";
 import {
   getUniverseLocations,
   getVolumenLocations,
-  getSellInTotalsByLocation,
   vigentesAl,
   sectorGroup,
   SECTOR_LABELS,
@@ -12,6 +11,7 @@ import {
 import { contarDiasHabiles } from "@/lib/business-days";
 import { bucketLabelFor, todayISO } from "@/lib/date-buckets";
 import { PRODUCT_IDS } from "@/data/catalog";
+import { getVolumenRadarAcumulado } from "@/lib/dienn-queries";
 
 // Queries de la comparativa Panquecitas vs. Margarina/Mayonesa (Mavesa), en
 // archivo APARTE de dienn-queries.ts a propósito: ese archivo ya tiene ~30
@@ -209,15 +209,15 @@ const PILOT_SECTOR_KEYS: Sector[] = ["cumana", "barquisimeto_este"];
  * "Comparar con Harina PAN" del gráfico de barras).
  *
  * Fuente de cada uno:
- *   - Panquecitas / Harina PAN → sap_sell_in_records (Carga Radar, la venta
- *     viva del piloto — misma fuente que getPanVsHarinaPan).
+ *   - Panquecitas / Harina PAN → getVolumenRadarAcumulado(sector), la MISMA
+ *     query que ya alimenta la tarjeta de volumen del dashboard de DIENN —
+ *     no se reimplementa la suma a mano porque esa función ya aplica dos
+ *     recortes que si no coincide con la tarjeta oficial: solo cuenta
+ *     Harina PAN desde el 03-08-2026 (esHpmVigente) y descarta ventas
+ *     anteriores a la fecha de incorporación de cada cliente.
  *   - Margarina / Mayonesa → radar_{categoria}_actual_records (agosto en
  *     adelante) — NUNCA las tablas _referencia, que son exclusivas del
  *     gráfico de ratio (getRendimientoVsMavesa).
- *
- * No se recorta por vigentesAl(): es un acumulado de volumen, no una tasa
- * con denominador de población — mismo criterio que getVolumenLocations()
- * para métricas de volumen puro.
  */
 export async function getComparativaPortafolioPorCiudad(): Promise<PortafolioPorCiudadRow[]> {
   const supabase = createSupabaseServiceClient();
@@ -230,9 +230,9 @@ export async function getComparativaPortafolioPorCiudad(): Promise<PortafolioPor
     if (sector) idsPorSector.get(sector)!.add(l.id);
   }
 
-  const [panquecitasTotals, harinaPanTotals, margarinaRows, mayonesaRows] = await Promise.all([
-    getSellInTotalsByLocation(PRODUCT_IDS.PANQUECITAS),
-    getSellInTotalsByLocation(PRODUCT_IDS.HARINA_PAN),
+  const [volumenCumana, volumenBarquisimeto, margarinaRows, mayonesaRows] = await Promise.all([
+    getVolumenRadarAcumulado("cumana"),
+    getVolumenRadarAcumulado("barquisimeto_este"),
     fetchAllRows<{ location_id: string; quantity_kg: number }>(() =>
       supabase
         .from(ACTUAL_TABLA.margarina)
@@ -246,6 +246,7 @@ export async function getComparativaPortafolioPorCiudad(): Promise<PortafolioPor
         .eq("product_id", PRODUCT_IDS.MAYONESA)
     ),
   ]);
+  const volumenPorSector = { cumana: volumenCumana, barquisimeto_este: volumenBarquisimeto };
 
   const margarinaPorLocation = new Map<string, number>();
   for (const r of margarinaRows) margarinaPorLocation.set(r.location_id, (margarinaPorLocation.get(r.location_id) ?? 0) + Number(r.quantity_kg));
@@ -260,14 +261,15 @@ export async function getComparativaPortafolioPorCiudad(): Promise<PortafolioPor
 
   return PILOT_SECTOR_KEYS.map((sector) => {
     const ids = idsPorSector.get(sector)!;
+    const volumen = volumenPorSector[sector];
     return {
       sector,
       label: SECTOR_LABELS[sector],
       productos: [
-        { nombre: "Panquecitas", volumenKg: sumar(ids, panquecitasTotals) },
+        { nombre: "Panquecitas", volumenKg: Math.round(volumen.panquecitasTon * 1000 * 10) / 10 },
         { nombre: "Margarina", volumenKg: sumar(ids, margarinaPorLocation) },
         { nombre: "Mayonesa", volumenKg: sumar(ids, mayonesaPorLocation) },
-        { nombre: "Harina PAN", volumenKg: sumar(ids, harinaPanTotals) },
+        { nombre: "Harina PAN", volumenKg: Math.round(volumen.harinaPanTon * 1000 * 10) / 10 },
       ],
     };
   });
