@@ -14,7 +14,7 @@ import type { Location } from "@/types";
 // usuario (26-08-2026) para tener estos números a mano sin construir una
 // sección nueva en el dashboard de DIENN.
 
-export interface CohorteResumen {
+export interface CohorteResumen extends EsquemaAtencionResumen {
   nombre: string;
   desde: string | null;
   cantidad: number;
@@ -74,20 +74,31 @@ export async function getResumenPiloto(): Promise<ResumenPiloto> {
 
   const idsFueraDeCartera = new Set(volumen.filter((l) => esFueraDeCartera(l.cohorte)).map((l) => l.id));
 
-  const porCohorteMap = new Map<string, number>();
+  // Por cohorte (tanda de incorporación) — con su propio desglose de esquema
+  // de atención adentro, para poder cruzar los dos: "cohorte" es CUÁNDO entró
+  // el cliente a la cartera (una tanda puntual), "esquema_atencion" es CÓMO se
+  // le atiende (Directo/Indirecto/Mixto) — son campos independientes, así que
+  // un PDV de la tanda "Indirecto Cumaná" no necesariamente tiene
+  // esquema_atencion="Indirecto" cargado (o viceversa: hay PDV "Indirecto" en
+  // Cumaná que ya estaban desde el "Piloto original", antes de esa tanda).
+  const locsPorCohorte = new Map<string, Location[]>();
   for (const l of volumen) {
     const nombre = l.cohorte ?? "Sin cohorte asignada";
-    porCohorteMap.set(nombre, (porCohorteMap.get(nombre) ?? 0) + 1);
+    const grupo = locsPorCohorte.get(nombre);
+    if (grupo) grupo.push(l);
+    else locsPorCohorte.set(nombre, [l]);
   }
   // En el orden de COHORTES (cronológico) + lo que no calce al final
   // ("Fuera de cartera", "Sin cohorte asignada", o cualquier cohorte nueva
   // que se agregue en cohortes.ts sin actualizar este archivo).
   const nombresConocidos = new Set(COHORTES.map((c) => c.nombre));
+  const armarCohorte = (nombre: string, desde: string | null): CohorteResumen => {
+    const locs = locsPorCohorte.get(nombre) ?? [];
+    return { nombre, desde, cantidad: locs.length, ...contarEsquemas(locs) };
+  };
   const porCohorte: CohorteResumen[] = [
-    ...COHORTES.map((c) => ({ nombre: c.nombre, desde: c.desde, cantidad: porCohorteMap.get(c.nombre) ?? 0 })),
-    ...[...porCohorteMap.entries()]
-      .filter(([nombre]) => !nombresConocidos.has(nombre))
-      .map(([nombre, cantidad]) => ({ nombre, desde: null, cantidad })),
+    ...COHORTES.map((c) => armarCohorte(c.nombre, c.desde)),
+    ...[...locsPorCohorte.keys()].filter((nombre) => !nombresConocidos.has(nombre)).map((nombre) => armarCohorte(nombre, null)),
   ];
 
   // PDV por ciudad (sector) y, dentro de cada una, por esquema de atención

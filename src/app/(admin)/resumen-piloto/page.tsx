@@ -113,16 +113,29 @@ export default async function ResumenPilotoPage() {
       <Card>
         <CardHeader>
           <CardTitle>PDV por tanda de incorporación</CardTitle>
+          <p className="text-xs text-slate-400 mt-1">
+            La tanda es CUÁNDO entró el cliente a la cartera; el esquema de atención es CÓMO se le atiende
+            (Directo/Indirecto/Mixto) — son dos campos independientes. Por eso un PDV &quot;Indirecto&quot; en una
+            ciudad no siempre coincide con el tamaño de la tanda &quot;Indirecto&quot; de esa ciudad: puede haber
+            indirectos de otras tandas (p. ej. del Piloto original), o PDV de esta tanda sin el esquema cargado
+            todavía en la Cartera de Clientes.
+          </p>
         </CardHeader>
         <CardContent>
           <div className="divide-y divide-slate-100">
             {resumen.porCohorte.map((c) => (
-              <div key={c.nombre} className="flex items-center justify-between py-3">
-                <div>
-                  <p className="font-medium text-slate-900">{c.nombre}</p>
-                  {c.desde && <p className="text-xs text-slate-400">Cuenta en el universo desde el {c.desde}</p>}
+              <div key={c.nombre} className="py-3">
+                <div className="flex items-center justify-between">
+                  <div>
+                    <p className="font-medium text-slate-900">{c.nombre}</p>
+                    {c.desde && <p className="text-xs text-slate-400">Cuenta en el universo desde el {c.desde}</p>}
+                  </div>
+                  <p className="text-2xl font-bold text-slate-900">{c.cantidad}</p>
                 </div>
-                <p className="text-2xl font-bold text-slate-900">{c.cantidad}</p>
+                <p className="text-xs text-slate-400 mt-1">
+                  De estos: {c.directos} directos · {c.indirectos} indirectos · {c.mixtos} mixtos
+                  {c.sinEsquema > 0 && <> · {c.sinEsquema} sin esquema cargado</>}
+                </p>
               </div>
             ))}
           </div>
