@@ -15,9 +15,9 @@ export { CAMPAIGN_WEEKS };
 /** Una fila por cliente de la cartera, con su última visita de mercaderista. */
 export interface AdminPdvRow {
   location: Location;
-  /** Tiene volumen SAP de Panquecitas: pedido y/o factura (booleano, sin kg). */
+  /** Tiene volumen de Panquecitas en la Carga Radar (booleano, sin kg). Pedidos y Facturado NO cuenta. */
   comprador: boolean;
-  /** Fecha de la primera actividad SAP (pedido o factura), o null si no tiene. */
+  /** Fecha de su primera venta en la Carga Radar, o null si no tiene. */
   primeraCompra: string | null;
   visitado: boolean;
   ultimaVisita: string | null;
@@ -139,6 +139,29 @@ export function unidadesTotales(row: AdminPdvRow): number {
   return (row.unidadesAnaquel ?? 0) + row.unidadesDeposito;
 }
 
+/**
+ * ¿Se puede juzgar el inventario de este PDV? Mismo criterio que
+ * precioEvaluable: lo que no se observó no se califica (decisión del
+ * usuario, 26-08-2026). Antes un dato faltante valía 0 unidades y el PDV
+ * quedaba marcado en riesgo sin que nadie hubiera visto un anaquel vacío.
+ *
+ * Anaquel: si el producto NO está presente, el wizard salta el conteo y
+ * unidadesAnaquel queda null — pero ahí el 0 es real, no es dato faltante
+ * (ver AuditWizard: el paso anaquel_count solo corre con productPresent).
+ * Con producto presente y sin conteo (visitas viejas), sí falta el dato.
+ *
+ * Depósito: con deposit_access=false el wizard salta el conteo, así que
+ * unidadesDeposito=0 significa "no se sabe", no "no hay". Ahí solo se puede
+ * concluir algo si lo visto en anaquel YA alcanza el umbral: hay stock, sin
+ * importar qué haya atrás. Si no llega, no hay forma de decidir.
+ */
+export function inventarioEvaluable(row: AdminPdvRow): boolean {
+  if (!row.visitado) return false;
+  if (row.productPresent === true && row.unidadesAnaquel === null) return false;
+  if (row.depositAccess !== true) return (row.unidadesAnaquel ?? 0) >= STOCK_OUT_UMBRAL_UNIDADES;
+  return true;
+}
+
 // ── Listas de incidencias (Bloque 1 y 2) ──────────────────────────
 
 export function clientesSinVentaSap(rows: AdminPdvRow[]): AdminPdvRow[] {
@@ -163,8 +186,14 @@ export function clientesSinMaterialPop(rows: AdminPdvRow[]): AdminPdvRow[] {
   return rows.filter((r) => r.visitado && r.comprador && r.popPresent === false);
 }
 
+// Misma población que precio, POP y exhibición: visitados CON venta Radar
+// (decisión del usuario, 26-08-2026). Era el único indicador de ejecución que
+// se medía sobre TODOS los visitados, y por eso su "de N visitados" no
+// coincidía con el de las otras tarjetas.
 export function clientesRiesgoStockOut(rows: AdminPdvRow[]): AdminPdvRow[] {
-  return rows.filter((r) => r.visitado && unidadesTotales(r) < STOCK_OUT_UMBRAL_UNIDADES);
+  return rows.filter(
+    (r) => r.visitado && r.comprador && inventarioEvaluable(r) && unidadesTotales(r) < STOCK_OUT_UMBRAL_UNIDADES
+  );
 }
 
 export type MotivoExhibicion = "CARAS_INSUFICIENTES" | "SIN_PRESENCIA";
@@ -198,20 +227,39 @@ export function clientesFaltaPorVisitar(rows: AdminPdvRow[]): AdminPdvRow[] {
 }
 
 // ── Tarjetas de KPI ───────────────────────────────────────────────
+//
+// UNA SOLA BASE para los tres indicadores de ejecución (precio, POP y stock
+// out): los VISITADOS CON VENTA RADAR (decisión del usuario, 26-08-2026 — "la
+// base para todos debe ser visitados con venta radar"). Antes cada uno dividía
+// entre un subconjunto distinto —precio entre los que tenían precio
+// observable, stock out entre TODOS los visitados— y por eso el "de N" de
+// cada tarjeta daba un número diferente.
+//
+// Regla del numerador, una sola para las tres: solo suma lo VERIFICADO.
+//   - Precio: el numerador es lo bueno (correctos). Un PDV sin precio
+//     observable no tiene precio correcto verificado, así que no suma. El %
+//     baja y esa bajada es real: no se pudo comprobar.
+//   - Stock out: el numerador es lo malo (en riesgo). Un PDV cuyo inventario
+//     no se pudo ver tampoco está verificado como en riesgo, así que tampoco
+//     suma. Marcarlo en riesgo sería inventar una incidencia.
+// En ambos casos el PDV SÍ está en el denominador, y se reporta aparte en
+// `sinDato` para poder separar la mala ejecución de la auditoría incompleta.
 
 export interface AdminKpis {
   /** % de la cartera del corte de filtros vigente con venta publicada en el Radar de Panquecitas. */
   compraron: { pct: number; count: number; total: number };
-  /** % de clientes visitados con ventas SAP (y precio observable) con el precio de su zona correcto. */
-  precioCorrecto: { pct: number; count: number; total: number };
-  /** % de clientes visitados con ventas SAP con material POP presente. */
+  /** % de la base con el precio de su zona verificado correcto. `sinDato`: los de la base sin precio observable. */
+  precioCorrecto: { pct: number; count: number; total: number; sinDato: number };
+  /** % de la base con material POP presente. El wizard siempre pregunta por POP, así que acá nunca falta el dato. */
   materialPop: { pct: number; count: number; total: number };
-  /** Clientes con menos de 2 unidades entre anaquel y depósito. */
-  riesgoStockOut: { count: number; total: number };
+  /** Clientes de la base verificados con menos de 2 unidades. `sinDato`: los de la base cuyo inventario no se pudo observar. */
+  riesgoStockOut: { pct: number; count: number; total: number; sinDato: number };
   /** % de la cartera visitada por el mercaderista. */
   coberturaMercaderista: { pct: number; count: number; total: number };
   /** % de la cartera que falta por visitar (complemento de la cobertura). */
   faltaPorVisitar: { pct: number; count: number; total: number };
+  /** La base común de los indicadores de ejecución: visitados con venta Radar. */
+  baseEjecucion: number;
 }
 
 function pct(part: number, whole: number): number {
@@ -223,20 +271,22 @@ export function computeAdminKpis(rows: AdminPdvRow[]): AdminKpis {
 
   const compradores = rows.filter((r) => r.comprador).length;
 
-  // Ejecución (precio y POP) se mide sobre los clientes VISITADOS con VENTAS EN
-  // SAP (r.comprador), igual que las listas de incidencias, sin exigir presencia
-  // del producto (decisión 11-08-2026). Precio correcto conserva además el
-  // requisito de que haya un precio observable (precioEvaluable): no se puede
-  // calificar un precio que el mercaderista no registró. La cobertura de
-  // mercaderista y "% compraron" sí van sobre toda la cartera del corte.
-  const evaluables = rows.filter((r) => r.visitado && r.comprador && precioEvaluable(r));
-  const correctos = evaluables.filter((r) => !precioIncorrecto(r)).length;
-
   const visitados = rows.filter((r) => r.visitado);
+  // LA BASE. Precio, POP y stock out dividen todos entre este mismo número.
   const visitadosConVenta = rows.filter((r) => r.visitado && r.comprador);
+  const base = visitadosConVenta.length;
+
   const conPop = visitadosConVenta.filter((r) => r.popPresent === true).length;
 
+  // Numeradores: solo lo verificado (ver nota de la interfaz).
+  const evaluables = visitadosConVenta.filter(precioEvaluable);
+  const correctos = evaluables.filter((r) => !precioIncorrecto(r)).length;
   const enRiesgo = clientesRiesgoStockOut(rows).length;
+
+  // Lo que quedó sin verificar, para poder declararlo al lado del %.
+  const sinPrecioObservable = base - evaluables.length;
+  const sinInventarioObservable = base - visitadosConVenta.filter(inventarioEvaluable).length;
+
   const faltantes = total - visitados.length;
 
   return {
@@ -244,19 +294,20 @@ export function computeAdminKpis(rows: AdminPdvRow[]): AdminKpis {
     // cartera global; una zona = solo esa zona). Numerador y denominador se
     // filtran juntos porque `rows` ya viene recortado por Oficina/Grupo.
     compraron: { pct: pct(compradores, total), count: compradores, total },
-    precioCorrecto: { pct: pct(correctos, evaluables.length), count: correctos, total: evaluables.length },
-    materialPop: { pct: pct(conPop, visitadosConVenta.length), count: conPop, total: visitadosConVenta.length },
-    riesgoStockOut: { count: enRiesgo, total: visitados.length },
+    precioCorrecto: { pct: pct(correctos, base), count: correctos, total: base, sinDato: sinPrecioObservable },
+    materialPop: { pct: pct(conPop, base), count: conPop, total: base },
+    riesgoStockOut: { pct: pct(enRiesgo, base), count: enRiesgo, total: base, sinDato: sinInventarioObservable },
     coberturaMercaderista: { pct: pct(visitados.length, total), count: visitados.length, total },
     faltaPorVisitar: { pct: pct(faltantes, total), count: faltantes, total },
+    baseEjecucion: base,
   };
 }
 
 // ── Gráfico: activación de clientes en el tiempo ───────────────────
 // % acumulado de la cartera (del corte de filtros vigente — Oficina de
-// Venta / Grupo Vendedor) que ya registró su primera venta facturada en
-// SAP, semana a semana. Se calcula 100% en el cliente a partir de
-// `primeraCompra` (fecha de la primera venta facturada por PDV, ya resuelta
+// Venta / Grupo Vendedor) que ya registró su primera venta en
+// la Carga Radar, semana a semana. Se calcula 100% en el cliente a partir de
+// `primeraCompra` (fecha de la primera venta Radar por PDV, ya resuelta
 // en getAdminExecutionSnapshot) para que reaccione a los mismos filtros
 // instantáneos que el resto del dashboard, sin ida y vuelta al servidor.
 

@@ -141,6 +141,18 @@ export function AdminExecutionDashboardClient({
   const exhibicion = useMemo(() => clientesExhibicionDeficiente(filtered), [filtered]);
   const faltaPorVisitar = useMemo(() => clientesFaltaPorVisitar(filtered), [filtered]);
 
+  // Cómo se llega a la base de ejecución desde la cartera. Los tres
+  // indicadores de ejecución dividen entre `base`; esta línea existe para
+  // poder reconstruir ese número sin abrir el código.
+  const poblaciones = useMemo(
+    () => ({
+      cartera: filtered.length,
+      visitados: filtered.filter((r) => r.visitado).length,
+      base: kpis.baseEjecucion,
+    }),
+    [filtered, kpis]
+  );
+
   const oficinaTexto = oficina === "TOTAL" ? "Todas las oficinas" : SECTOR_LABELS[oficina];
   const grupoTexto = grupoVendedor || "Todos los grupos vendedores";
 
@@ -223,13 +235,15 @@ export function AdminExecutionDashboardClient({
         <KpiCard
           title="% Precio correcto por zona"
           value={kpis.precioCorrecto.total > 0 ? `${kpis.precioCorrecto.pct}%` : "s/d"}
-          subtitle={`${kpis.precioCorrecto.count} de ${kpis.precioCorrecto.total} visitados con ventas SAP y precio observado`}
+          subtitle={`${kpis.precioCorrecto.count} de ${kpis.precioCorrecto.total} visitados con venta Radar${
+            kpis.precioCorrecto.sinDato > 0 ? ` · ${kpis.precioCorrecto.sinDato} sin precio observable` : ""
+          }`}
           critical={kpis.precioCorrecto.total > 0 && kpis.precioCorrecto.pct < 100}
         />
         <KpiCard
           title="% Clientes con material POP"
           value={kpis.materialPop.total > 0 ? `${kpis.materialPop.pct}%` : "s/d"}
-          subtitle={`${kpis.materialPop.count} de ${kpis.materialPop.total} visitados con ventas SAP`}
+          subtitle={`${kpis.materialPop.count} de ${kpis.materialPop.total} visitados con venta Radar`}
         />
         <KpiCard
           title="Clientes Sin ventas en SAP"
@@ -243,13 +257,38 @@ export function AdminExecutionDashboardClient({
         />
       </div>
 
+      {/* Precio, POP y stock out dividen los tres entre la misma base. Se
+          escribe cómo se llega a ella para poder auditarla sin ver el código. */}
+      <p className="text-xs text-slate-400 mb-6 -mt-2">
+        Base de los indicadores de ejecución: cartera{" "}
+        <span className="font-medium text-slate-600">{poblaciones.cartera}</span> → visitados{" "}
+        <span className="font-medium text-slate-600">{poblaciones.visitados}</span> → con venta Radar{" "}
+        <span className="font-medium text-slate-600">{poblaciones.base}</span>. Precio, material POP y riesgo de stock
+        out se miden los tres sobre esos {poblaciones.base}.
+        {kpis.precioCorrecto.sinDato > 0 && (
+          <>
+            {" "}
+            De ellos, <span className="font-medium text-slate-600">{kpis.precioCorrecto.sinDato}</span> no tienen precio
+            observable (el producto no estaba presente, o ninguna presentación estaba en anaquel)
+          </>
+        )}
+        {kpis.riesgoStockOut.sinDato > 0 && (
+          <>
+            {kpis.precioCorrecto.sinDato > 0 ? " y " : " De ellos, "}
+            <span className="font-medium text-slate-600">{kpis.riesgoStockOut.sinDato}</span> no tienen inventario
+            observable (sin acceso al depósito)
+          </>
+        )}
+        {(kpis.precioCorrecto.sinDato > 0 || kpis.riesgoStockOut.sinDato > 0) && ": cuentan en el denominador, pero no como verificados."}
+      </p>
+
       {/* ── Gráfico: activación de clientes en el tiempo ──────────────── */}
       <Card className="mb-6 print-avoid-break">
         <CardHeader className="flex flex-row items-start justify-between gap-3 space-y-0">
           <div>
             <CardTitle>Activación de clientes en el tiempo</CardTitle>
             <p className="text-xs text-slate-400 mt-1">
-              % acumulado de la cartera (según los filtros vigentes) con al menos una venta facturada en SAP, en el
+              % acumulado de la cartera (según los filtros vigentes) con su primera venta en la Carga Radar de Panquecitas, en el
               tiempo.
             </p>
           </div>
@@ -287,7 +326,7 @@ export function AdminExecutionDashboardClient({
             <div className="h-[280px] flex items-center justify-center text-slate-400">
               <div className="text-center">
                 <p className="text-4xl mb-2">📈</p>
-                <p>Sin ventas facturadas de Panquecitas todavía. Carga el reporte SAP.</p>
+                <p>Sin volumen de Panquecitas en la Carga Radar todavía. Carga el reporte.</p>
               </div>
             </div>
           )}
@@ -367,7 +406,7 @@ export function AdminExecutionDashboardClient({
           <CardHeader>
             <CardTitle>1. Clientes sin ventas en SAP</CardTitle>
             <p className="text-xs text-slate-400 mt-1">
-              Cartera inicial sin pedido ni factura de Panquecitas cargados en SAP.
+              Clientes de la cartera sin volumen en la Carga Radar de Panquecitas. Pedidos y Facturado NO cuenta acá: puede traer distribuidoras que no son puntos de venta reales.
             </p>
           </CardHeader>
           <CardContent>
@@ -417,7 +456,7 @@ export function AdminExecutionDashboardClient({
             <IndicatorTable
               rows={conVenta.map((r) => toRow(r))}
               exportName="Clientes con ventas en SAP"
-              emptyMessage="Ningún cliente de la cartera tiene pedido ni factura de Panquecitas en SAP."
+              emptyMessage="Ningún cliente de la cartera tiene volumen en la Carga Radar de Panquecitas."
             />
           </CardContent>
         </Card>
