@@ -1,6 +1,13 @@
 import { getVolumenLocations, getUniverseLocations } from "@/lib/universe";
-import { DISTRIBUIDORAS_INTERMEDIARIAS_SAP_CODES, FRANQUICIADAS_INDIRECTO_SAP_CODES } from "@/lib/sectors";
+import {
+  DISTRIBUIDORAS_INTERMEDIARIAS_SAP_CODES,
+  FRANQUICIADAS_INDIRECTO_SAP_CODES,
+  sectorGroup,
+  SECTOR_LABELS,
+  type Sector,
+} from "@/lib/sectors";
 import { COHORTES, esFueraDeCartera } from "@/lib/cohortes";
+import type { Location } from "@/types";
 
 // Cuadro informativo de la estructura del piloto (grupos vendedores,
 // vendedores, franquiciados, PDV por tanda de incorporación) — pedido por el
@@ -13,6 +20,20 @@ export interface CohorteResumen {
   cantidad: number;
 }
 
+export interface EsquemaAtencionResumen {
+  directos: number;
+  indirectos: number;
+  mixtos: number;
+  /** Sin "Esquema de Atención" cargado en la Cartera de Clientes. */
+  sinEsquema: number;
+}
+
+export interface SectorResumen extends EsquemaAtencionResumen {
+  sector: Sector;
+  label: string;
+  total: number;
+}
+
 export interface ResumenPiloto {
   totalPdv: number;
   pdvEnCartera: number;
@@ -22,6 +43,21 @@ export interface ResumenPiloto {
   franquiciados: number;
   distribuidorasIntermediarias: number;
   porCohorte: CohorteResumen[];
+  porSector: SectorResumen[];
+}
+
+const PILOT_SECTOR_KEYS: Sector[] = ["cumana", "barquisimeto_este"];
+
+function contarEsquemas(locations: Location[]): EsquemaAtencionResumen {
+  const resumen: EsquemaAtencionResumen = { directos: 0, indirectos: 0, mixtos: 0, sinEsquema: 0 };
+  for (const l of locations) {
+    const esquema = (l.esquema_atencion ?? "").trim().toLowerCase();
+    if (esquema === "directo") resumen.directos++;
+    else if (esquema === "indirecto") resumen.indirectos++;
+    else if (esquema === "mixto") resumen.mixtos++;
+    else resumen.sinEsquema++;
+  }
+  return resumen;
 }
 
 export async function getResumenPiloto(): Promise<ResumenPiloto> {
@@ -54,6 +90,19 @@ export async function getResumenPiloto(): Promise<ResumenPiloto> {
       .map(([nombre, cantidad]) => ({ nombre, desde: null, cantidad })),
   ];
 
+  // PDV por ciudad (sector) y, dentro de cada una, por esquema de atención
+  // (Directo/Indirecto/Mixto) — sobre el TOTAL (volumen), igual base que la
+  // tarjeta "Total PDV" de arriba, no solo cartera.
+  const porSector: SectorResumen[] = PILOT_SECTOR_KEYS.map((sector) => {
+    const locsSector = volumen.filter((l) => sectorGroup(l.oficina_venta) === sector);
+    return {
+      sector,
+      label: SECTOR_LABELS[sector],
+      total: locsSector.length,
+      ...contarEsquemas(locsSector),
+    };
+  });
+
   return {
     totalPdv: volumen.length,
     pdvEnCartera: universo.length,
@@ -63,5 +112,6 @@ export async function getResumenPiloto(): Promise<ResumenPiloto> {
     franquiciados: FRANQUICIADAS_INDIRECTO_SAP_CODES.length,
     distribuidorasIntermediarias: DISTRIBUIDORAS_INTERMEDIARIAS_SAP_CODES.length,
     porCohorte,
+    porSector,
   };
 }

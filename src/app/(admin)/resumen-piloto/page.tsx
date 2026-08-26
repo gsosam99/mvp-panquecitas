@@ -72,6 +72,44 @@ export default async function ResumenPilotoPage() {
         </Card>
       </div>
 
+      <Card className="mb-6">
+        <CardHeader>
+          <CardTitle>PDV por ciudad</CardTitle>
+        </CardHeader>
+        <CardContent>
+          <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
+            {resumen.porSector.map((s) => (
+              <div key={s.sector} className="rounded-lg border border-slate-100 p-4">
+                <div className="flex items-baseline justify-between">
+                  <p className="font-medium text-slate-900">{s.label}</p>
+                  <p className="text-2xl font-bold text-slate-900">{s.total}</p>
+                </div>
+                <div className="mt-3 space-y-1 text-sm text-slate-500">
+                  <div className="flex justify-between">
+                    <span>Directos</span>
+                    <span className="font-medium text-slate-700">{s.directos}</span>
+                  </div>
+                  <div className="flex justify-between">
+                    <span>Indirectos</span>
+                    <span className="font-medium text-slate-700">{s.indirectos}</span>
+                  </div>
+                  <div className="flex justify-between">
+                    <span>Mixtos</span>
+                    <span className="font-medium text-slate-700">{s.mixtos}</span>
+                  </div>
+                  {s.sinEsquema > 0 && (
+                    <div className="flex justify-between">
+                      <span>Sin esquema cargado</span>
+                      <span className="font-medium text-slate-700">{s.sinEsquema}</span>
+                    </div>
+                  )}
+                </div>
+              </div>
+            ))}
+          </div>
+        </CardContent>
+      </Card>
+
       <Card>
         <CardHeader>
           <CardTitle>PDV por tanda de incorporación</CardTitle>
