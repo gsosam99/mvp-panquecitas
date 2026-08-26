@@ -309,9 +309,7 @@ export function DiennDashboardClient({
   // Barras de totales por ciudad (Panquecitas/Margarina/Mayonesa + Harina PAN opcional).
   const [portafolioComoPct, setPortafolioComoPct] = useState(false);
   const [portafolioIncluirHarinaPan, setPortafolioIncluirHarinaPan] = useState(false);
-  // Barras de Margarina/Mayonesa/Harina PAN de los últimos 3 meses (referencia),
-  // con el mismo criterio Cliente/Universo que ya usa PAN.
-  const [ventas3MesesPoblacion, setVentas3MesesPoblacion] = useState<Pan3MPoblacion>("clientes");
+  // Barras de Margarina/Mayonesa/Harina PAN de los últimos 3 meses (referencia).
   const [ventas3MesesComoPct, setVentas3MesesComoPct] = useState(false);
   // Ranking por segmento: volumen en kg o como % del total.
   const [rankingComoPct, setRankingComoPct] = useState(false);
@@ -2128,30 +2126,10 @@ export function DiennDashboardClient({
           <div>
             <CardTitle>Ventas Últimos 3 Meses — Margarina, Mayonesa y Harina PAN</CardTitle>
             <p className="text-xs text-slate-400 mt-1">
-              Mayo-julio (reporte de referencia), por ciudad. <span className="font-medium">PAN Cliente</span> son solo
-              los PDV de la cartera que además compran Panquecitas; <span className="font-medium">PAN Universo</span>,
-              toda la cartera. Mismo criterio que el gráfico de Rendimiento Diario de PAN.
+              Mayo-julio (reporte de referencia), por ciudad — toda la cartera del piloto.
             </p>
           </div>
           <div className="flex flex-wrap items-center gap-2 print:hidden">
-            <div className="flex rounded-lg border border-slate-200 overflow-hidden text-xs font-medium">
-              {(
-                [
-                  ["clientes", "PAN Cliente"],
-                  ["universo", "PAN Universo"],
-                ] as const
-              ).map(([key, label]) => (
-                <button
-                  key={key}
-                  onClick={() => setVentas3MesesPoblacion(key)}
-                  className={`px-3 py-1.5 transition-colors ${
-                    ventas3MesesPoblacion === key ? "bg-slate-900 text-white" : "bg-white text-slate-500 hover:bg-slate-50"
-                  }`}
-                >
-                  {label}
-                </button>
-              ))}
-            </div>
             <div className="flex rounded-lg border border-slate-200 overflow-hidden text-xs font-medium">
               {(
                 [
@@ -2174,14 +2152,7 @@ export function DiennDashboardClient({
         </CardHeader>
         <CardContent>
           {ventas3MesesPorCiudad.length > 0 ? (
-            <Ventas3MesesPorCiudadChart
-              data={ventas3MesesPorCiudad.map((row) => ({
-                sector: row.sector,
-                label: row.label,
-                productos: row[ventas3MesesPoblacion],
-              }))}
-              comoPct={ventas3MesesComoPct}
-            />
+            <Ventas3MesesPorCiudadChart data={ventas3MesesPorCiudad} comoPct={ventas3MesesComoPct} />
           ) : (
             <div className="h-[320px] flex items-center justify-center text-slate-400">
               <div className="text-center">
@@ -2315,7 +2286,11 @@ export function DiennDashboardClient({
                 </span>{" "}
                 ({rendimientoVsMavesaData.totalReferenciaKg.toLocaleString("es-VE", { maximumFractionDigits: 0 })} kg ÷{" "}
                 {rendimientoVsMavesaData.diasPeriodo} días hábiles, del {rendimientoVsMavesaData.desde} al{" "}
-                {rendimientoVsMavesaData.hasta}) · Meta 4%:{" "}
+                {rendimientoVsMavesaData.hasta}) · aportado por{" "}
+                <span className="font-medium text-slate-600">
+                  {rendimientoVsMavesaData.clientesConCompra} de {rendimientoVsMavesaData.clientesEnCartera} PDV
+                </span>{" "}
+                de la cartera del corte · Meta 4%:{" "}
                 <span className="font-medium text-emerald-700">
                   {rendimientoVsMavesaData.meta4Pct.toLocaleString("es-VE", { maximumFractionDigits: 1 })} kg/día
                 </span>

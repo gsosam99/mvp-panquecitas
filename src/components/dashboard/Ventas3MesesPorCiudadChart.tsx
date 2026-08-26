@@ -1,14 +1,13 @@
 "use client";
 
 import dynamic from "next/dynamic";
-import type { PortafolioProducto } from "@/lib/mavesa-queries";
-import type { Sector } from "@/lib/sectors";
+import type { Ventas3MesesRow } from "@/lib/mavesa-queries";
 
 // Barras de Margarina, Mayonesa y Harina PAN de los últimos 3 meses
 // (referencia), por ciudad — mismo patrón visual que PortafolioPorCiudadChart
-// (eje X = categoría, color = ciudad), pero acá `data` ya viene resuelto a la
-// población elegida (Cliente/Universo) desde afuera, y no hay toggle de
-// Harina PAN porque siempre está presente.
+// (eje X = categoría, color = ciudad). Sin toggle de Harina PAN (siempre
+// presente) ni de Cliente/Universo (la cartera es una sola población, ver
+// getVentas3MesesPorCiudad).
 
 const COLOR_POR_SECTOR: Record<string, string> = {
   cumana: "#1a65bd",
@@ -24,7 +23,7 @@ const Inner = dynamic(
       data,
       comoPct,
     }: {
-      data: { sector: Sector; label: string; productos: PortafolioProducto[] }[];
+      data: Ventas3MesesRow[];
       comoPct: boolean;
     }) {
       const categorias = ["Margarina", "Mayonesa", "Harina PAN"];
@@ -84,7 +83,7 @@ export function Ventas3MesesPorCiudadChart({
   data,
   comoPct = false,
 }: {
-  data: { sector: Sector; label: string; productos: PortafolioProducto[] }[];
+  data: Ventas3MesesRow[];
   comoPct?: boolean;
 }) {
   return <Inner data={data} comoPct={comoPct} />;

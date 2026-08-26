@@ -1,4 +1,4 @@
-import { getUniverseLocations, getVolumenLocations } from "@/lib/universe";
+import { getUniverseLocations } from "@/lib/universe";
 import type { ParsedSapRadarRow } from "@/types";
 
 // Carga compartida por las 4 combinaciones categoría×propósito de Mavesa
@@ -8,18 +8,10 @@ import type { ParsedSapRadarRow } from "@/types";
 // otras 3 — la separación es a nivel de qué tabla se le pasa a esta función,
 // no de lógica condicional acá adentro.
 //
-// Dos modos de resolución de cliente (parámetro `soloCartera`), mismo
-// criterio que ya distingue "PAN Cliente/Universo" de `radar_3m_records`:
-//   - "actual" (soloCartera=true): resuelve contra getUniverseLocations()
-//     (cartera del piloto) y DESCARTA lo que no calce — alimenta las barras
-//     de totales, que comparan contra Panquecitas de esa misma cartera.
-//   - "referencia" (soloCartera=false): resuelve contra getVolumenLocations()
-//     (todas las locations de los sectores piloto, incluye "fuera de
-//     cartera") y NO descarta lo que no calce — se guarda con location_id
-//     null, y de todos modos cuenta para el promedio (es el "universo" del
-//     reporte, decisión del usuario 26-08-2026: "para el de los ratios toma
-//     el universo"). Sin location_id no se le puede asignar ciudad, pero
-//     sigue sumando al total/promedio global.
+// Cartera-only siempre, para las 4 combinaciones (decisión del usuario,
+// 26-08-2026: "universo toma todos los clientes de la cartera" — no el
+// universo del archivo completo, que se probó antes y se revirtió): resuelve
+// contra getUniverseLocations() y DESCARTA lo que no calce.
 
 export function errorDetail(error: unknown): string {
   if (error && typeof error === "object") {
@@ -60,11 +52,6 @@ export interface RadarCategoriaUploadResult {
  *   tamaño de payload de Vercel: correr el borrado en cada tanda dejaría la
  *   tabla momentáneamente incompleta (borraría clientes que la tanda
  *   siguiente todavía no reinsertó). Se corre UNA sola vez, en la última.
- * @param soloCartera `true` (endpoints "actual"): resuelve contra la cartera
- *   del piloto y descarta lo que no calce. `false` (endpoints "referencia"):
- *   resuelve contra TODAS las locations de los sectores piloto (incluye
- *   fuera de cartera) y nada se descarta — lo que no calce se guarda con
- *   `location_id: null` y de todos modos cuenta para el total/promedio.
  */
 export async function processRadarCategoriaUpload(
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -74,14 +61,13 @@ export async function processRadarCategoriaUpload(
   expectedProductId: string,
   rows: ParsedSapRadarRow[],
   batchId: string,
-  finalizar = true,
-  soloCartera = true
+  finalizar = true
 ): Promise<RadarCategoriaUploadResult | { error: string; status: number }> {
-  const locations = soloCartera ? await getUniverseLocations() : await getVolumenLocations();
+  const locations = await getUniverseLocations();
   const locationIdBySapCode = new Map(locations.map((l) => [l.sap_code, l.id]));
 
   const sapCodesEnArchivo = new Set(rows.map((r) => r.sap_code));
-  const codigosSinLocation = new Set<string>();
+  const codigosFueraDeCartera = new Set<string>();
   const materialesNoMapeados = new Set<string>();
 
   // NO se colapsa por "último corte" — verificado contra la fila "Resultado
@@ -101,7 +87,7 @@ export async function processRadarCategoriaUpload(
     {
       sap_code: string;
       material_code: string;
-      location_id: string | null;
+      location_id: string;
       product_id: string;
       quantity_kg: number;
       date_of_sale: string;
@@ -109,10 +95,10 @@ export async function processRadarCategoriaUpload(
   >();
 
   for (const r of rows) {
-    const location_id = locationIdBySapCode.get(r.sap_code) ?? null;
+    const location_id = locationIdBySapCode.get(r.sap_code);
     if (!location_id) {
-      codigosSinLocation.add(r.sap_code);
-      if (soloCartera) continue; // cartera-only: se descarta, no se guarda con location_id null
+      codigosFueraDeCartera.add(r.sap_code);
+      continue; // cartera-only: se descarta, no se guarda con location_id null
     }
 
     const product_id = materialMap[r.material_code];
@@ -150,12 +136,7 @@ export async function processRadarCategoriaUpload(
   const toInsert = colapsadas.filter((r) => r.quantity_kg > 0).map((r) => ({ ...r, upload_batch_id: batchId }));
 
   if (toInsert.length === 0) {
-    return {
-      error: soloCartera
-        ? "El archivo no trajo ninguna fila con volumen de clientes en cartera."
-        : "El archivo no trajo ninguna fila con volumen.",
-      status: 422,
-    };
+    return { error: "El archivo no trajo ninguna fila con volumen de clientes en cartera.", status: 422 };
   }
 
   const TANDA_FILAS = 500;
@@ -190,14 +171,8 @@ export async function processRadarCategoriaUpload(
   return {
     inserted: toInsert.length,
     reemplazadas,
-    // Distintas locations reconocidas (nunca cuenta null) — en modo cartera
-    // es "clientes de la cartera"; en modo universo es "clientes con ciudad
-    // reconocida" (un subconjunto: el resto sigue sumando al total pero sin
-    // poder agruparse por ciudad).
-    clientes_en_cartera: new Set(toInsert.filter((r) => r.location_id !== null).map((r) => r.location_id)).size,
-    // En modo cartera son los descartados; en modo universo nada se
-    // descarta, pero igual informa cuántos quedaron sin ciudad reconocida.
-    clientes_descartados_fuera_cartera: soloCartera ? codigosSinLocation.size : 0,
+    clientes_en_cartera: new Set(toInsert.map((r) => r.location_id)).size,
+    clientes_descartados_fuera_cartera: codigosFueraDeCartera.size,
     clientes_en_archivo: sapCodesEnArchivo.size,
     meses: [...new Set(rows.map((r) => r.fecha.slice(0, 7)))].sort(),
     desde: fechasArchivo[0],

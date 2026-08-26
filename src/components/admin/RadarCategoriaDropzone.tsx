@@ -159,14 +159,12 @@ export function RadarCategoriaDropzone({
       const meses = [...acumulado.meses].sort();
       const partes = [
         `${acumulado.inserted} registros guardados`,
-        proposito === "actual"
-          ? `${acumulado.clientes_en_cartera} clientes de la cartera (de ${clientesEnArchivo} en el archivo)`
-          : `${acumulado.clientes_en_cartera} de ${clientesEnArchivo} clientes con ciudad reconocida (el resto igual suma al total, sin poder agruparse por ciudad)`,
+        `${acumulado.clientes_en_cartera} clientes de la cartera (de ${clientesEnArchivo} en el archivo)`,
         `${meses.length} meses: ${meses.join(", ") || "—"}`,
         `rango ${acumulado.desde} → ${acumulado.hasta}`,
         `total ${acumulado.total_kg.toLocaleString("es-VE", { maximumFractionDigits: 0 })} kg`,
       ];
-      if (proposito === "actual" && acumulado.clientes_descartados_fuera_cartera) {
+      if (acumulado.clientes_descartados_fuera_cartera) {
         partes.push(`${acumulado.clientes_descartados_fuera_cartera} clientes del archivo NO están en la cartera (descartados)`);
       }
       if (acumulado.reemplazadas) partes.push(`${acumulado.reemplazadas} filas de la carga anterior reemplazadas`);

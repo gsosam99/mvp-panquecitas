@@ -2,8 +2,6 @@ import { createSupabaseServiceClient } from "@/lib/supabase/server";
 import { fetchAllRows } from "@/lib/supabase/fetch-all";
 import {
   getUniverseLocations,
-  getVolumenLocations,
-  getSellInTotalsByLocation,
   vigentesAl,
   sectorGroup,
   SECTOR_LABELS,
@@ -12,7 +10,7 @@ import {
 import { contarDiasHabiles } from "@/lib/business-days";
 import { bucketLabelFor, todayISO } from "@/lib/date-buckets";
 import { PRODUCT_IDS } from "@/data/catalog";
-import { getVolumenRadarAcumulado, getRendimiento3M, type Pan3MPoblacion } from "@/lib/dienn-queries";
+import { getVolumenRadarAcumulado, getRendimiento3M } from "@/lib/dienn-queries";
 
 // Queries de la comparativa Panquecitas vs. Margarina/Mayonesa (Mavesa), en
 // archivo APARTE de dienn-queries.ts a propósito: ese archivo ya tiene ~30
@@ -73,6 +71,10 @@ export interface RendimientoVsMavesaResult {
   desde: string;
   hasta: string;
   totalReferenciaKg: number;
+  /** Cuántos PDV de la cartera ya compraron esta categoría al menos una vez en el período. */
+  clientesConCompra: number;
+  /** PDV de la cartera del corte (Cumaná/Cabudare/total), hayan comprado o no. */
+  clientesEnCartera: number;
   puntos: RendimientoVsMavesaPunto[];
 }
 
@@ -84,6 +86,8 @@ const VACIO = (categoria: MavesaCategoria): RendimientoVsMavesaResult => ({
   desde: "",
   hasta: "",
   totalReferenciaKg: 0,
+  clientesConCompra: 0,
+  clientesEnCartera: 0,
   puntos: [],
 });
 
@@ -92,22 +96,18 @@ const VACIO = (categoria: MavesaCategoria): RendimientoVsMavesaResult => ({
  * Mayonesa — misma mecánica que getRendimiento3M en dienn-queries.ts, pero:
  *   - el promedio sale del período REAL de la tabla de referencia (los meses
  *     que de hecho tenga cargados), no fijo a 3 meses;
- *   - el promedio es el UNIVERSO completo del reporte (decisión del usuario,
- *     26-08-2026: "para el de los ratios toma el universo") — NO se acota a
- *     la cartera del piloto, mismo criterio que "PAN Universo" en
- *     getRendimiento3M. La tabla de referencia ya guarda location_id null
- *     para lo que no resuelve contra ninguna location (ver migration 023 /
- *     radar-categoria-upload.ts `soloCartera: false`); esas filas SÍ suman
- *     al total pero no entran en el corte por ciudad, porque no se les puede
- *     asignar sector;
- *   - Panquecitas del día SÍ se acota a la cartera del piloto (es la venta
- *     real del piloto, no tiene un "universo" más amplio que comparar).
+ *   - "universo" = toda la cartera del piloto (decisión del usuario,
+ *     26-08-2026: "universo toma todos los clientes de la cartera") — la
+ *     tabla de referencia ya es cartera-only desde la carga, así que no hace
+ *     falta filtrar de nuevo acá; el total es el mismo que si se llamara
+ *     "clientes" (quien no compró no aporta filas, así que restringir a
+ *     "ya compró al menos una vez" no cambia la suma — sí se informa el
+ *     conteo por separado en `clientesConCompra`).
  */
 export async function getRendimientoVsMavesa(
   categoria: MavesaCategoria,
   sector?: Sector
 ): Promise<RendimientoVsMavesaResult> {
-  // Cartera del piloto — sigue siendo la población de Panquecitas (numerador).
   const universoTotal = await getUniverseLocations();
   const delSectorCartera = sector
     ? universoTotal.filter((l) => sectorGroup(l.oficina_venta) === sector)
@@ -118,27 +118,17 @@ export async function getRendimientoVsMavesa(
   const supabase = createSupabaseServiceClient();
   const productId = CATEGORIA_PRODUCT_ID[categoria];
 
-  const referenciaData = await fetchAllRows<{ location_id: string | null; quantity_kg: number; date_of_sale: string }>(
-    () =>
-      supabase
-        .from(REFERENCIA_TABLA[categoria])
-        .select("location_id, quantity_kg, date_of_sale")
-        .eq("product_id", productId)
+  const referenciaData = await fetchAllRows<{ location_id: string; quantity_kg: number; date_of_sale: string }>(() =>
+    supabase
+      .from(REFERENCIA_TABLA[categoria])
+      .select("location_id, quantity_kg, date_of_sale")
+      .eq("product_id", productId)
   );
 
-  // El universo del reporte es TODAS las locations de los sectores piloto
-  // (no solo cartera) — mismo set amplio que usó la carga (getVolumenLocations).
-  // Si se pide un sector, se acota por ahí; las filas con location_id null
-  // (sin match en absoluto) quedan fuera del corte por sector, pero cuentan
-  // en el TOTAL (sector indefinido).
-  let referenciaFiltrada = referenciaData;
-  if (sector) {
-    const volumen = await getVolumenLocations();
-    const idsSector = new Set(volumen.filter((l) => sectorGroup(l.oficina_venta) === sector).map((l) => l.id));
-    referenciaFiltrada = referenciaData.filter((r) => r.location_id !== null && idsSector.has(r.location_id));
-  }
+  const referenciaFiltrada = referenciaData.filter((r) => idsUniverso.has(r.location_id));
   if (referenciaFiltrada.length === 0) return VACIO(categoria);
 
+  const clientesConCompra = new Set(referenciaFiltrada.map((r) => r.location_id)).size;
   const totalReferenciaKg = referenciaFiltrada.reduce((s, r) => s + Number(r.quantity_kg), 0);
 
   // Mismo criterio que getRendimiento3M: el período son los MESES presentes,
@@ -152,9 +142,7 @@ export async function getRendimientoVsMavesa(
   const promedioReferencia = totalReferenciaKg / diasPeriodo;
   if (promedioReferencia <= 0) return VACIO(categoria);
 
-  // Panquecitas por día — acotado a la cartera del piloto: es la venta real
-  // que se quiere entender, y se compara contra el universo (más amplio) de
-  // Margarina/Mayonesa de esa misma ciudad.
+  // Panquecitas por día — misma cartera (idsUniverso) que la referencia.
   const panqData = await fetchAllRows<{ location_id: string; quantity_kg: number; date_of_sale: string }>(() =>
     supabase
       .from("sap_sell_in_records")
@@ -187,6 +175,8 @@ export async function getRendimientoVsMavesa(
     desde: inicioPeriodo,
     hasta: finPeriodo,
     totalReferenciaKg: Math.round(totalReferenciaKg * 10) / 10,
+    clientesConCompra,
+    clientesEnCartera: idsUniverso.size,
     puntos,
   };
 }
@@ -279,70 +269,55 @@ export async function getComparativaPortafolioPorCiudad(): Promise<PortafolioPor
 export interface Ventas3MesesRow {
   sector: Sector;
   label: string;
-  clientes: PortafolioProducto[];
-  universo: PortafolioProducto[];
+  productos: PortafolioProducto[];
 }
 
 /**
  * Barras de Margarina, Mayonesa y Harina PAN de los ÚLTIMOS 3 MESES (mayo-
- * julio, las tablas de REFERENCIA), por ciudad, con el mismo criterio
- * Cliente/Universo que ya usa el gráfico de PAN
- * (getRendimiento3M/Pan3MPoblacion):
- *   - "clientes": solo los PDV de la cartera del piloto que ADEMÁS compran
- *     Panquecitas.
- *   - "universo": toda la cartera del piloto, compren Panquecitas o no.
+ * julio, las tablas de REFERENCIA), por ciudad.
  *
- * A diferencia de getRendimientoVsMavesa (que usa el UNIVERSO del reporte
- * completo, incluyendo PDV fuera de cartera, para el promedio de
- * referencia), acá las dos poblaciones son subconjuntos de la CARTERA —
- * mismo criterio exacto que "PAN Cliente"/"PAN Universo" hoy.
+ * Población = toda la cartera del piloto (decisión del usuario, 26-08-2026:
+ * "universo toma todos los clientes de la cartera, clientes toma los
+ * clientes que ya han comprado por lo menos 1 vez"). Ya NO se cruza contra
+ * si el PDV compra Panquecitas — ese cruce hacía que el total de Margarina/
+ * Mayonesa/Harina PAN cambiara según un filtro que no tiene nada que ver con
+ * esas categorías, y era la causa real de números que no cuadraban. Como
+ * "ya compró al menos 1 vez" no excluye ninguna fila que ya esté sumando
+ * (quien no compró aporta 0 de todas formas), el total es uno solo por
+ * ciudad — no hace falta el toggle Cliente/Universo acá.
  *
- * Harina PAN reusa getRendimiento3M (misma tabla radar_3m_records, mismo
- * cálculo de población) en vez de reimplementarlo.
+ * Harina PAN reusa getRendimiento3M("universo", sector) (misma tabla
+ * radar_3m_records) en vez de reimplementar la suma.
  */
 export async function getVentas3MesesPorCiudad(): Promise<Ventas3MesesRow[]> {
   const supabase = createSupabaseServiceClient();
   const universoTotal = await getUniverseLocations();
-  const panqTotals = await getSellInTotalsByLocation(PRODUCT_IDS.PANQUECITAS);
 
-  const [[margarinaRows, mayonesaRows], harinaPanResultados] = await Promise.all([
-    Promise.all([
-      fetchAllRows<{ location_id: string | null; quantity_kg: number }>(() =>
-        supabase
-          .from(REFERENCIA_TABLA.margarina)
-          .select("location_id, quantity_kg")
-          .eq("product_id", PRODUCT_IDS.MARGARINA)
-      ),
-      fetchAllRows<{ location_id: string | null; quantity_kg: number }>(() =>
-        supabase
-          .from(REFERENCIA_TABLA.mayonesa)
-          .select("location_id, quantity_kg")
-          .eq("product_id", PRODUCT_IDS.MAYONESA)
-      ),
-    ]),
-    Promise.all(
-      PILOT_SECTOR_KEYS.flatMap((sector) =>
-        (["clientes", "universo"] as Pan3MPoblacion[]).map((poblacion) => getRendimiento3M(poblacion, sector))
-      )
+  const [margarinaRows, mayonesaRows, harinaPanCumana, harinaPanBarquisimeto] = await Promise.all([
+    fetchAllRows<{ location_id: string; quantity_kg: number }>(() =>
+      supabase
+        .from(REFERENCIA_TABLA.margarina)
+        .select("location_id, quantity_kg")
+        .eq("product_id", PRODUCT_IDS.MARGARINA)
     ),
+    fetchAllRows<{ location_id: string; quantity_kg: number }>(() =>
+      supabase
+        .from(REFERENCIA_TABLA.mayonesa)
+        .select("location_id, quantity_kg")
+        .eq("product_id", PRODUCT_IDS.MAYONESA)
+    ),
+    getRendimiento3M("universo", "cumana"),
+    getRendimiento3M("universo", "barquisimeto_este"),
   ]);
-  // 4 resultados en el mismo orden que se pidieron: [cumana-clientes,
-  // cumana-universo, barquisimeto-clientes, barquisimeto-universo].
-  const harinaPanPorSectorPoblacion: Record<Sector, Record<Pan3MPoblacion, number>> = {
-    cumana: { clientes: harinaPanResultados[0].totalPanKg, universo: harinaPanResultados[1].totalPanKg },
-    barquisimeto_este: { clientes: harinaPanResultados[2].totalPanKg, universo: harinaPanResultados[3].totalPanKg },
+  const harinaPanPorSector: Record<Sector, number> = {
+    cumana: harinaPanCumana.totalPanKg,
+    barquisimeto_este: harinaPanBarquisimeto.totalPanKg,
   };
 
   const margarinaPorLocation = new Map<string, number>();
-  for (const r of margarinaRows) {
-    if (r.location_id === null) continue;
-    margarinaPorLocation.set(r.location_id, (margarinaPorLocation.get(r.location_id) ?? 0) + Number(r.quantity_kg));
-  }
+  for (const r of margarinaRows) margarinaPorLocation.set(r.location_id, (margarinaPorLocation.get(r.location_id) ?? 0) + Number(r.quantity_kg));
   const mayonesaPorLocation = new Map<string, number>();
-  for (const r of mayonesaRows) {
-    if (r.location_id === null) continue;
-    mayonesaPorLocation.set(r.location_id, (mayonesaPorLocation.get(r.location_id) ?? 0) + Number(r.quantity_kg));
-  }
+  for (const r of mayonesaRows) mayonesaPorLocation.set(r.location_id, (mayonesaPorLocation.get(r.location_id) ?? 0) + Number(r.quantity_kg));
 
   function sumar(ids: Set<string>, porLocation: Map<string, number>): number {
     let total = 0;
@@ -352,21 +327,16 @@ export async function getVentas3MesesPorCiudad(): Promise<Ventas3MesesRow[]> {
 
   return PILOT_SECTOR_KEYS.map((sector) => {
     const delSector = universoTotal.filter((l) => sectorGroup(l.oficina_venta) === sector);
-    const universo = vigentesAl(delSector, todayISO());
-    const idsUniverso = new Set(universo.map((l) => l.id));
-    const idsClientes = new Set(universo.filter((l) => (panqTotals.get(l.id) ?? 0) > 0).map((l) => l.id));
-
-    const armar = (ids: Set<string>, poblacion: Pan3MPoblacion): PortafolioProducto[] => [
-      { nombre: "Margarina", volumenKg: sumar(ids, margarinaPorLocation) },
-      { nombre: "Mayonesa", volumenKg: sumar(ids, mayonesaPorLocation) },
-      { nombre: "Harina PAN", volumenKg: harinaPanPorSectorPoblacion[sector][poblacion] },
-    ];
+    const idsUniverso = new Set(vigentesAl(delSector, todayISO()).map((l) => l.id));
 
     return {
       sector,
       label: SECTOR_LABELS[sector],
-      clientes: armar(idsClientes, "clientes"),
-      universo: armar(idsUniverso, "universo"),
+      productos: [
+        { nombre: "Margarina", volumenKg: sumar(idsUniverso, margarinaPorLocation) },
+        { nombre: "Mayonesa", volumenKg: sumar(idsUniverso, mayonesaPorLocation) },
+        { nombre: "Harina PAN", volumenKg: harinaPanPorSector[sector] },
+      ],
     };
   });
 }

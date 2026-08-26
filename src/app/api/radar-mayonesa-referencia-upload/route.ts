@@ -10,6 +10,10 @@ import type { ParsedSapRadarRow } from "@/types";
 // radar_mayonesa_actual_records (ver radar-mayonesa-actual-upload). Tabla
 // propia: cargar este archivo no puede afectar a Margarina ni al "actual" de
 // esta misma categoría.
+//
+// Cartera-only (decisión del usuario, 26-08-2026: "universo toma todos los
+// clientes de la cartera") — no el universo del archivo completo como se
+// intentó antes; lo que no resuelva contra la cartera se descarta.
 
 export async function POST(req: Request) {
   try {
@@ -31,8 +35,7 @@ export async function POST(req: Request) {
       PRODUCT_IDS.MAYONESA,
       rows,
       batchId,
-      finalizar ?? true,
-      false // universo completo del reporte, no solo cartera — ver plan/migration 023
+      finalizar ?? true
     );
     if ("error" in result) return Response.json({ error: result.error }, { status: result.status });
     return Response.json(result);
