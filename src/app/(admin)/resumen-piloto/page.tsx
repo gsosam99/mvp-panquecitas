@@ -93,10 +93,6 @@ export default async function ResumenPilotoPage() {
                     <span>Indirectos</span>
                     <span className="font-medium text-slate-700">{s.indirectos}</span>
                   </div>
-                  <div className="flex justify-between">
-                    <span>Mixtos</span>
-                    <span className="font-medium text-slate-700">{s.mixtos}</span>
-                  </div>
                   {s.sinEsquema > 0 && (
                     <div className="flex justify-between">
                       <span>Sin esquema cargado</span>
@@ -115,10 +111,10 @@ export default async function ResumenPilotoPage() {
           <CardTitle>PDV por tanda de incorporación</CardTitle>
           <p className="text-xs text-slate-400 mt-1">
             La tanda es CUÁNDO entró el cliente a la cartera; el esquema de atención es CÓMO se le atiende
-            (Directo/Indirecto/Mixto) — son dos campos independientes. Por eso un PDV &quot;Indirecto&quot; en una
-            ciudad no siempre coincide con el tamaño de la tanda &quot;Indirecto&quot; de esa ciudad: puede haber
-            indirectos de otras tandas (p. ej. del Piloto original), o PDV de esta tanda sin el esquema cargado
-            todavía en la Cartera de Clientes.
+            (Directo/Indirecto — &quot;Mixto&quot; cuenta como Directo) — son dos campos independientes. Por eso un
+            PDV &quot;Indirecto&quot; en una ciudad no siempre coincide con el tamaño de la tanda
+            &quot;Indirecto&quot; de esa ciudad: puede haber indirectos de otras tandas (p. ej. del Piloto original),
+            o PDV de esta tanda sin el esquema cargado todavía en la Cartera de Clientes.
           </p>
         </CardHeader>
         <CardContent>
@@ -133,7 +129,7 @@ export default async function ResumenPilotoPage() {
                   <p className="text-2xl font-bold text-slate-900">{c.cantidad}</p>
                 </div>
                 <p className="text-xs text-slate-400 mt-1">
-                  De estos: {c.directos} directos · {c.indirectos} indirectos · {c.mixtos} mixtos
+                  De estos: {c.directos} directos · {c.indirectos} indirectos
                   {c.sinEsquema > 0 && <> · {c.sinEsquema} sin esquema cargado</>}
                 </p>
               </div>

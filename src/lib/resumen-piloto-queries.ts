@@ -21,9 +21,9 @@ export interface CohorteResumen extends EsquemaAtencionResumen {
 }
 
 export interface EsquemaAtencionResumen {
+  /** Incluye "Mixto" (decisión del usuario, 26-08-2026: "toma lo mixto como directo"). */
   directos: number;
   indirectos: number;
-  mixtos: number;
   /** Sin "Esquema de Atención" cargado en la Cartera de Clientes. */
   sinEsquema: number;
 }
@@ -49,12 +49,12 @@ export interface ResumenPiloto {
 const PILOT_SECTOR_KEYS: Sector[] = ["cumana", "barquisimeto_este"];
 
 function contarEsquemas(locations: Location[]): EsquemaAtencionResumen {
-  const resumen: EsquemaAtencionResumen = { directos: 0, indirectos: 0, mixtos: 0, sinEsquema: 0 };
+  const resumen: EsquemaAtencionResumen = { directos: 0, indirectos: 0, sinEsquema: 0 };
   for (const l of locations) {
     const esquema = (l.esquema_atencion ?? "").trim().toLowerCase();
-    if (esquema === "directo") resumen.directos++;
+    // "Mixto" cuenta como directo (decisión del usuario, 26-08-2026).
+    if (esquema === "directo" || esquema === "mixto") resumen.directos++;
     else if (esquema === "indirecto") resumen.indirectos++;
-    else if (esquema === "mixto") resumen.mixtos++;
     else resumen.sinEsquema++;
   }
   return resumen;
