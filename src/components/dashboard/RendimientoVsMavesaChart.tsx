@@ -41,8 +41,20 @@ const Inner = dynamic(
 
       const escalaLog = showReferenciaDiario && data.promedioReferencia > 0;
       const maxLineal = Math.ceil(Math.max(maxPanquecitas, data.meta4Pct) * 1.15);
-      const minLog = Math.max(1, Math.floor(Math.min(minPanquecitas, data.meta4Pct) * 0.6));
-      const maxLog = Math.ceil(data.promedioReferencia * 1.3);
+
+      // El techo de la escala log tiene que contemplar TAMBIEN el maximo de
+      // Panquecitas, no solo el promedio de referencia. Con Mayonesa el
+      // promedio es bajo (vende bastante menos que Harina PAN), asi que los
+      // dias buenos del piloto quedaban por encima del dominio y, como el eje
+      // va con allowDataOverflow, se cortaban sin dejar rastro: ni punto, ni
+      // etiqueta de %, ni tramo de linea.
+      const maxLog = Math.ceil(Math.max(data.promedioReferencia, maxPanquecitas, data.meta4Pct) * 1.3);
+
+      // El piso puede bajar de 1 kg: la escala log no admite 0, pero si
+      // fracciones. Antes se forzaba a >= 1 y un dia de menos de 1 kg se
+      // salia por abajo del dominio, con el mismo resultado.
+      const pisoCandidato = Math.min(minPanquecitas, data.meta4Pct > 0 ? data.meta4Pct : minPanquecitas);
+      const minLog = Math.max(0.1, pisoCandidato * 0.6);
 
       const ratioPorDia = new Map(ratiosCiudad.map((r) => [r.dia, r]));
       const chartData = data.puntos.map((p) => ({
@@ -55,7 +67,7 @@ const Inner = dynamic(
 
       return (
         <ResponsiveContainer width="100%" height={340}>
-          <ComposedChart data={chartData} margin={{ top: 40, right: MARGEN_META, left: 10, bottom: 5 }}>
+          <ComposedChart data={chartData} margin={{ top: 52, right: MARGEN_META, left: 10, bottom: 5 }}>
             <CartesianGrid strokeDasharray="3 3" stroke="#f1f5f9" vertical={false} />
             <XAxis dataKey="label" tick={{ fontSize: 13, fill: "#64748b" }} minTickGap={16} />
             <YAxis
