@@ -3,6 +3,7 @@ import { fetchAllRows } from "@/lib/supabase/fetch-all";
 import {
   getUniverseLocations,
   getVolumenLocations,
+  getSellInTotalsByLocation,
   vigentesAl,
   sectorGroup,
   SECTOR_LABELS,
@@ -11,7 +12,7 @@ import {
 import { contarDiasHabiles } from "@/lib/business-days";
 import { bucketLabelFor, todayISO } from "@/lib/date-buckets";
 import { PRODUCT_IDS } from "@/data/catalog";
-import { getVolumenRadarAcumulado } from "@/lib/dienn-queries";
+import { getVolumenRadarAcumulado, getRendimiento3M, type Pan3MPoblacion } from "@/lib/dienn-queries";
 
 // Queries de la comparativa Panquecitas vs. Margarina/Mayonesa (Mavesa), en
 // archivo APARTE de dienn-queries.ts a propósito: ese archivo ya tiene ~30
@@ -271,6 +272,101 @@ export async function getComparativaPortafolioPorCiudad(): Promise<PortafolioPor
         { nombre: "Mayonesa", volumenKg: sumar(ids, mayonesaPorLocation) },
         { nombre: "Harina PAN", volumenKg: Math.round(volumen.harinaPanTon * 1000 * 10) / 10 },
       ],
+    };
+  });
+}
+
+export interface Ventas3MesesRow {
+  sector: Sector;
+  label: string;
+  clientes: PortafolioProducto[];
+  universo: PortafolioProducto[];
+}
+
+/**
+ * Barras de Margarina, Mayonesa y Harina PAN de los ÚLTIMOS 3 MESES (mayo-
+ * julio, las tablas de REFERENCIA), por ciudad, con el mismo criterio
+ * Cliente/Universo que ya usa el gráfico de PAN
+ * (getRendimiento3M/Pan3MPoblacion):
+ *   - "clientes": solo los PDV de la cartera del piloto que ADEMÁS compran
+ *     Panquecitas.
+ *   - "universo": toda la cartera del piloto, compren Panquecitas o no.
+ *
+ * A diferencia de getRendimientoVsMavesa (que usa el UNIVERSO del reporte
+ * completo, incluyendo PDV fuera de cartera, para el promedio de
+ * referencia), acá las dos poblaciones son subconjuntos de la CARTERA —
+ * mismo criterio exacto que "PAN Cliente"/"PAN Universo" hoy.
+ *
+ * Harina PAN reusa getRendimiento3M (misma tabla radar_3m_records, mismo
+ * cálculo de población) en vez de reimplementarlo.
+ */
+export async function getVentas3MesesPorCiudad(): Promise<Ventas3MesesRow[]> {
+  const supabase = createSupabaseServiceClient();
+  const universoTotal = await getUniverseLocations();
+  const panqTotals = await getSellInTotalsByLocation(PRODUCT_IDS.PANQUECITAS);
+
+  const [[margarinaRows, mayonesaRows], harinaPanResultados] = await Promise.all([
+    Promise.all([
+      fetchAllRows<{ location_id: string | null; quantity_kg: number }>(() =>
+        supabase
+          .from(REFERENCIA_TABLA.margarina)
+          .select("location_id, quantity_kg")
+          .eq("product_id", PRODUCT_IDS.MARGARINA)
+      ),
+      fetchAllRows<{ location_id: string | null; quantity_kg: number }>(() =>
+        supabase
+          .from(REFERENCIA_TABLA.mayonesa)
+          .select("location_id, quantity_kg")
+          .eq("product_id", PRODUCT_IDS.MAYONESA)
+      ),
+    ]),
+    Promise.all(
+      PILOT_SECTOR_KEYS.flatMap((sector) =>
+        (["clientes", "universo"] as Pan3MPoblacion[]).map((poblacion) => getRendimiento3M(poblacion, sector))
+      )
+    ),
+  ]);
+  // 4 resultados en el mismo orden que se pidieron: [cumana-clientes,
+  // cumana-universo, barquisimeto-clientes, barquisimeto-universo].
+  const harinaPanPorSectorPoblacion: Record<Sector, Record<Pan3MPoblacion, number>> = {
+    cumana: { clientes: harinaPanResultados[0].totalPanKg, universo: harinaPanResultados[1].totalPanKg },
+    barquisimeto_este: { clientes: harinaPanResultados[2].totalPanKg, universo: harinaPanResultados[3].totalPanKg },
+  };
+
+  const margarinaPorLocation = new Map<string, number>();
+  for (const r of margarinaRows) {
+    if (r.location_id === null) continue;
+    margarinaPorLocation.set(r.location_id, (margarinaPorLocation.get(r.location_id) ?? 0) + Number(r.quantity_kg));
+  }
+  const mayonesaPorLocation = new Map<string, number>();
+  for (const r of mayonesaRows) {
+    if (r.location_id === null) continue;
+    mayonesaPorLocation.set(r.location_id, (mayonesaPorLocation.get(r.location_id) ?? 0) + Number(r.quantity_kg));
+  }
+
+  function sumar(ids: Set<string>, porLocation: Map<string, number>): number {
+    let total = 0;
+    for (const id of ids) total += porLocation.get(id) ?? 0;
+    return Math.round(total * 10) / 10;
+  }
+
+  return PILOT_SECTOR_KEYS.map((sector) => {
+    const delSector = universoTotal.filter((l) => sectorGroup(l.oficina_venta) === sector);
+    const universo = vigentesAl(delSector, todayISO());
+    const idsUniverso = new Set(universo.map((l) => l.id));
+    const idsClientes = new Set(universo.filter((l) => (panqTotals.get(l.id) ?? 0) > 0).map((l) => l.id));
+
+    const armar = (ids: Set<string>, poblacion: Pan3MPoblacion): PortafolioProducto[] => [
+      { nombre: "Margarina", volumenKg: sumar(ids, margarinaPorLocation) },
+      { nombre: "Mayonesa", volumenKg: sumar(ids, mayonesaPorLocation) },
+      { nombre: "Harina PAN", volumenKg: harinaPanPorSectorPoblacion[sector][poblacion] },
+    ];
+
+    return {
+      sector,
+      label: SECTOR_LABELS[sector],
+      clientes: armar(idsClientes, "clientes"),
+      universo: armar(idsUniverso, "universo"),
     };
   });
 }

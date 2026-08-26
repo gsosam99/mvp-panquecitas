@@ -29,6 +29,7 @@ import {
   type RendimientoVsMavesaRatioCiudad,
 } from "@/components/dashboard/RendimientoVsMavesaChart";
 import { PortafolioPorCiudadChart } from "@/components/dashboard/PortafolioPorCiudadChart";
+import { Ventas3MesesPorCiudadChart } from "@/components/dashboard/Ventas3MesesPorCiudadChart";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Separator } from "@/components/ui/separator";
 import {
@@ -77,6 +78,7 @@ import type {
   MavesaCategoria,
   RendimientoVsMavesaResult,
   PortafolioPorCiudadRow,
+  Ventas3MesesRow,
 } from "@/lib/mavesa-queries";
 
 export interface SectorBundle {
@@ -224,6 +226,8 @@ interface Props {
   precioCorrecto: PrecioCorrectoRow[];
   /** Totales acumulados de Panquecitas/Margarina/Mayonesa/Harina PAN por ciudad, hasta la fecha. Global. */
   portafolioPorCiudad: PortafolioPorCiudadRow[];
+  /** Margarina/Mayonesa/Harina PAN de los últimos 3 meses (referencia) por ciudad, con Cliente/Universo ya resueltos. Global. */
+  ventas3MesesPorCiudad: Ventas3MesesRow[];
 }
 
 export function DiennDashboardClient({
@@ -240,6 +244,7 @@ export function DiennDashboardClient({
   carteraPorSegmento,
   precioCorrecto,
   portafolioPorCiudad,
+  ventas3MesesPorCiudad,
 }: Props) {
   const [filter, setFilter] = useState<FilterKey>("TOTAL");
   const [zonaFilter, setZonaFilter] = useState("");
@@ -304,6 +309,10 @@ export function DiennDashboardClient({
   // Barras de totales por ciudad (Panquecitas/Margarina/Mayonesa + Harina PAN opcional).
   const [portafolioComoPct, setPortafolioComoPct] = useState(false);
   const [portafolioIncluirHarinaPan, setPortafolioIncluirHarinaPan] = useState(false);
+  // Barras de Margarina/Mayonesa/Harina PAN de los últimos 3 meses (referencia),
+  // con el mismo criterio Cliente/Universo que ya usa PAN.
+  const [ventas3MesesPoblacion, setVentas3MesesPoblacion] = useState<Pan3MPoblacion>("clientes");
+  const [ventas3MesesComoPct, setVentas3MesesComoPct] = useState(false);
   // Ranking por segmento: volumen en kg o como % del total.
   const [rankingComoPct, setRankingComoPct] = useState(false);
   const [panGranularity, setPanGranularity] = useState<PanComparisonGranularity>("month");
@@ -2101,6 +2110,76 @@ export function DiennDashboardClient({
               data={portafolioPorCiudad}
               comoPct={portafolioComoPct}
               incluirHarinaPan={portafolioIncluirHarinaPan}
+            />
+          ) : (
+            <div className="h-[320px] flex items-center justify-center text-slate-400">
+              <div className="text-center">
+                <p className="text-4xl mb-2">📊</p>
+                <p>Sin datos todavía.</p>
+              </div>
+            </div>
+          )}
+        </CardContent>
+      </Card>
+
+      {/* ── Ventas de los últimos 3 meses (Mavesa + Harina PAN) por ciudad ── */}
+      <Card className="mb-6 print-avoid-break">
+        <CardHeader className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between space-y-0">
+          <div>
+            <CardTitle>Ventas Últimos 3 Meses — Margarina, Mayonesa y Harina PAN</CardTitle>
+            <p className="text-xs text-slate-400 mt-1">
+              Mayo-julio (reporte de referencia), por ciudad. <span className="font-medium">PAN Cliente</span> son solo
+              los PDV de la cartera que además compran Panquecitas; <span className="font-medium">PAN Universo</span>,
+              toda la cartera. Mismo criterio que el gráfico de Rendimiento Diario de PAN.
+            </p>
+          </div>
+          <div className="flex flex-wrap items-center gap-2 print:hidden">
+            <div className="flex rounded-lg border border-slate-200 overflow-hidden text-xs font-medium">
+              {(
+                [
+                  ["clientes", "PAN Cliente"],
+                  ["universo", "PAN Universo"],
+                ] as const
+              ).map(([key, label]) => (
+                <button
+                  key={key}
+                  onClick={() => setVentas3MesesPoblacion(key)}
+                  className={`px-3 py-1.5 transition-colors ${
+                    ventas3MesesPoblacion === key ? "bg-slate-900 text-white" : "bg-white text-slate-500 hover:bg-slate-50"
+                  }`}
+                >
+                  {label}
+                </button>
+              ))}
+            </div>
+            <div className="flex rounded-lg border border-slate-200 overflow-hidden text-xs font-medium">
+              {(
+                [
+                  [false, "Kg"],
+                  [true, "% del total"],
+                ] as const
+              ).map(([key, label]) => (
+                <button
+                  key={label}
+                  onClick={() => setVentas3MesesComoPct(key)}
+                  className={`px-3 py-1.5 transition-colors ${
+                    ventas3MesesComoPct === key ? "bg-slate-900 text-white" : "bg-white text-slate-500 hover:bg-slate-50"
+                  }`}
+                >
+                  {label}
+                </button>
+              ))}
+            </div>
+          </div>
+        </CardHeader>
+        <CardContent>
+          {ventas3MesesPorCiudad.length > 0 ? (
+            <Ventas3MesesPorCiudadChart
+              data={ventas3MesesPorCiudad.map((row) => ({
+                label: row.label,
+                productos: row[ventas3MesesPoblacion],
+              }))}
+              comoPct={ventas3MesesComoPct}
             />
           ) : (
             <div className="h-[320px] flex items-center justify-center text-slate-400">
