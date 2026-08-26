@@ -21,10 +21,6 @@ import type { ParsedSapRadarRow } from "@/types";
 //     el universo"). Sin location_id no se le puede asignar ciudad, pero
 //     sigue sumando al total/promedio global.
 
-function monthKey(dateStr: string): string {
-  return dateStr.slice(0, 7);
-}
-
 export function errorDetail(error: unknown): string {
   if (error && typeof error === "object") {
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -88,9 +84,13 @@ export async function processRadarCategoriaUpload(
   const codigosSinLocation = new Set<string>();
   const materialesNoMapeados = new Set<string>();
 
-  // Colapsar por cliente+material+MES, quedándose con la fecha más reciente:
-  // "Venta Acumulada" se reinicia cada mes, el último corte de cada mes ES el
-  // total de ese mes — mismo criterio que handleRadarUpload/radar-3m-upload.
+  // Colapsar por cliente+material SOLO (sin mes): a diferencia del radar de
+  // PAN, acá "Venta Acumulada" NO se reinicia cada mes — es el corrido de
+  // TODO el período del archivo (confirmado por el usuario, 26-08-2026: "la
+  // columna de ventas acumuladas es el total de los 3 meses"). El último
+  // corte (la fecha más reciente) de cada cliente+material YA ES el total
+  // completo — sumarlo por mes y volver a sumar los meses triplicaría el
+  // total, porque julio ya incluye mayo y junio.
   const byKey = new Map<
     string,
     {
@@ -116,7 +116,7 @@ export async function processRadarCategoriaUpload(
       continue;
     }
 
-    const key = `${r.sap_code}|${r.material_code}|${monthKey(r.fecha)}`;
+    const key = `${r.sap_code}|${r.material_code}`;
     const prev = byKey.get(key);
     if (!prev || r.fecha > prev.date_of_sale) {
       byKey.set(key, {
@@ -176,7 +176,12 @@ export async function processRadarCategoriaUpload(
     reemplazadas = (borradas ?? []).length;
   }
 
-  const fechas = toInsert.map((r) => r.date_of_sale).sort();
+  // Diagnóstico de meses/rango a partir del ARCHIVO completo (no de
+  // `toInsert`, que ahora solo guarda un corte final por cliente+material) —
+  // así el resumen de la carga muestra fielmente qué período trae el Excel,
+  // independientemente de en qué fecha haya quedado el último corte de cada
+  // cliente.
+  const fechasArchivo = rows.map((r) => r.fecha).sort();
   return {
     inserted: toInsert.length,
     reemplazadas,
@@ -189,9 +194,9 @@ export async function processRadarCategoriaUpload(
     // descarta, pero igual informa cuántos quedaron sin ciudad reconocida.
     clientes_descartados_fuera_cartera: soloCartera ? codigosSinLocation.size : 0,
     clientes_en_archivo: sapCodesEnArchivo.size,
-    meses: [...new Set(toInsert.map((r) => monthKey(r.date_of_sale)))].sort(),
-    desde: fechas[0],
-    hasta: fechas[fechas.length - 1],
+    meses: [...new Set(rows.map((r) => r.fecha.slice(0, 7)))].sort(),
+    desde: fechasArchivo[0],
+    hasta: fechasArchivo[fechasArchivo.length - 1],
     total_kg: Math.round(toInsert.reduce((s, r) => s + r.quantity_kg, 0) * 10) / 10,
   };
 }
