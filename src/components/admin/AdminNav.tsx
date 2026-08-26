@@ -24,6 +24,7 @@ const NAV_ITEMS: Record<DashboardRole, { href: string; label: string }[]> = {
     { href: '/despachos', label: 'Despachos SAP' },
     { href: '/sell-out-cadenas', label: 'Sell-Out Cadenas' },
     { href: '/cartera', label: 'Cartera de Clientes' },
+    { href: '/resumen-piloto', label: 'Resumen del Piloto' },
     { href: '/modelo-atencion', label: 'Plan de Visita' },
     { href: '/products', label: 'Productos' },
     { href: '/personal', label: 'Personal de Campo' },

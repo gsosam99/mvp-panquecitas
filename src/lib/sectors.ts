@@ -52,22 +52,30 @@ export const SECTOR_LABELS: Record<Sector, string> = {
 // refrescan sus datos de cartera, la fila persiste). Nunca deben contar en
 // el universo real del piloto ni recibir visitas de mercaderista/promotora.
 // Ver conversación con Alejandro (07-08-2026) y Mariana Di Buongrazio (08-08-2026).
-const EXCLUDED_DISTRIBUIDOR_SAP_CODES = new Set<string>([
+export const DISTRIBUIDORAS_INTERMEDIARIAS_SAP_CODES = [
   "22401504", // DISTRIBUIDORA LEOMAR, S.A
   "22401950", // DISTRIBUIDORA LA EXCELENCIA, C.A
   "22403639", // DISTRIBUIDORA D'AVALLGAR, C.A.
   "22405578", // DISTRIBUIDORA KATAO, C.A
   "22406035", // DISTRIBUIDORA ANTONELLI F&G, C.A
-  // Franquiciadas del modelo indirecto de Cumaná, incorporado el 14-08-2026
-  // (Alejandro, 21-08-2026). Mismo tratamiento que las de arriba: no son
-  // población, solo se leen para lo facturado y lo pedido. Los PDV reales
-  // que abastecen SÍ son cartera y se distinguen por los grupos vendedores
-  // U27/U28 — ver COHORTES_NUEVAS en src/lib/cohortes.ts.
+] as const;
+
+// Franquiciadas del modelo indirecto de Cumaná, incorporado el 14-08-2026
+// (Alejandro, 21-08-2026). Mismo tratamiento que las de arriba: no son
+// población, solo se leen para lo facturado y lo pedido. Los PDV reales
+// que abastecen SÍ son cartera y se distinguen por los grupos vendedores
+// U27/U28 — ver COHORTES_NUEVAS en src/lib/cohortes.ts.
+export const FRANQUICIADAS_INDIRECTO_SAP_CODES = [
   "22401000", // COMERCIAL VELIZ SUCRE, C.A.
   "22403226", // KEYKA, C.A.
   "22403689", // DISTRIBUIDORA NURCARLYS, C.A.
   "22405444", // DISTRIBUIDORA RCY 85, C.A.
   "22405792", // INVERSIONES C.C., C.A.
+] as const;
+
+const EXCLUDED_DISTRIBUIDOR_SAP_CODES = new Set<string>([
+  ...DISTRIBUIDORAS_INTERMEDIARIAS_SAP_CODES,
+  ...FRANQUICIADAS_INDIRECTO_SAP_CODES,
 ]);
 
 export function isExcludedDistribuidor(sapCode: string | null | undefined): boolean {
