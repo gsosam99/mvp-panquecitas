@@ -7,7 +7,7 @@ import {
   SECTOR_LABELS,
   type Sector,
 } from "@/lib/universe";
-import { contarDiasHabiles } from "@/lib/business-days";
+import { DIAS_HABILES_3M } from "@/lib/business-days";
 import { bucketLabelFor, todayISO } from "@/lib/date-buckets";
 import { PRODUCT_IDS } from "@/data/catalog";
 import { getVolumenRadarAcumulado, getRendimiento3M } from "@/lib/dienn-queries";
@@ -131,13 +131,15 @@ export async function getRendimientoVsMavesa(
   const clientesConCompra = new Set(referenciaFiltrada.map((r) => r.location_id)).size;
   const totalReferenciaKg = referenciaFiltrada.reduce((s, r) => s + Number(r.quantity_kg), 0);
 
-  // Mismo criterio que getRendimiento3M: el período son los MESES presentes,
-  // de su primer día al último — no las fechas literales, que pueden recortar
-  // el período por los dos extremos e inflar el promedio.
+  // MISMO divisor que Harina PAN: venta acumulada de los 3 meses ÷ 63 días
+  // hábiles (decisión del usuario, 26-08-2026). Antes cada categoría se
+  // dividía entre los días hábiles del rango que traía SU archivo, así que
+  // los promedios de Margarina, Mayonesa y PAN no eran comparables.
+  // inicioPeriodo/finPeriodo se siguen usando para mostrar el rango al pie.
   const fechas = referenciaFiltrada.map((r) => r.date_of_sale.slice(0, 10)).sort();
   const inicioPeriodo = `${fechas[0].slice(0, 7)}-01`;
   const finPeriodo = ultimoDiaDelMes(fechas[fechas.length - 1].slice(0, 7));
-  const diasPeriodo = contarDiasHabiles(inicioPeriodo, finPeriodo);
+  const diasPeriodo = DIAS_HABILES_3M;
 
   const promedioReferencia = totalReferenciaKg / diasPeriodo;
   if (promedioReferencia <= 0) return VACIO(categoria);
@@ -288,6 +290,12 @@ export interface Ventas3MesesRow {
  *
  * Harina PAN reusa getRendimiento3M("universo", sector) (misma tabla
  * radar_3m_records) en vez de reimplementar la suma.
+ *
+ * Las barras son el ACUMULADO de los 3 meses en kg, para comparar una
+ * categoría contra otra (decisión del usuario, 26-08-2026). NO se divide
+ * entre días hábiles acá: ese divisor es de los PROMEDIOS que alimentan
+ * los gráficos de ratio (getRendimiento3M y getRendimientoVsMavesa), no de
+ * este gráfico.
  */
 export async function getVentas3MesesPorCiudad(): Promise<Ventas3MesesRow[]> {
   const supabase = createSupabaseServiceClient();

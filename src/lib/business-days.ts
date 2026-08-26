@@ -33,3 +33,15 @@ export function contarDiasHabiles(desde: string, hasta: string): number {
   }
   return Math.max(1, habiles);
 }
+
+/**
+ * Días hábiles del período de referencia de 3 meses (mayo–julio 2026).
+ *
+ * Es una CONSTANTE, no un conteo derivado del archivo (decisión del usuario,
+ * 26-08-2026: "el promedio de todos debe ser su venta acumulada de los tres
+ * meses [...] dividido entre días hábiles (63)"). Antes cada categoría se
+ * dividía entre los días hábiles del rango que de hecho traía su archivo, así
+ * que Harina PAN, Margarina y Mayonesa usaban divisores distintos y sus
+ * promedios no eran comparables entre sí. Un solo divisor para las tres.
+ */
+export const DIAS_HABILES_3M = 63;

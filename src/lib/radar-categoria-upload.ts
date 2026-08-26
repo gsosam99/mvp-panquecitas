@@ -70,18 +70,20 @@ export async function processRadarCategoriaUpload(
   const codigosFueraDeCartera = new Set<string>();
   const materialesNoMapeados = new Set<string>();
 
-  // NO se colapsa por "último corte" — verificado contra la fila "Resultado
-  // total" que el propio SAP calcula al final del archivo (26-08-2026): la
-  // suma de "Venta Acumulada" de TODAS las filas, sin filtrar por fecha ni
-  // por mes, es exactamente el total que reporta SAP (y coincide con
-  // "Venta Diaria Promedio" del mismo Resultado total × días hábiles). Cada
-  // fila es un aporte independiente que hay que sumar completo — no una
-  // fotografía acumulada de la que solo valga la más reciente.
+  // "Venta Acumulada" se reinicia cada mes, así que el ÚLTIMO corte de cada
+  // mes ES el total de ese mes, y sumar los meses da el total del período —
+  // exactamente el mismo criterio que radar-3m-upload (Harina PAN).
   //
-  // Sí se colapsa por cliente+material+FECHA exacta (sumando, no
-  // reemplazando): si el archivo repite la misma fila exacta, la unique
-  // constraint de la tabla (sap_code, material_code, date_of_sale) exige un
-  // solo registro para esa combinación.
+  // Antes acá se sumaban TODAS las filas del archivo. Eso contaba cada corte
+  // diario como si fuera una venta nueva e inflaba el total, y además dejaba
+  // a Margarina/Mayonesa con una definición de "venta acumulada" distinta a
+  // la de PAN, así que sus promedios no eran comparables (decisión del
+  // usuario, 26-08-2026: "el promedio de todos debe ser su venta acumulada de
+  // los tres meses, ese número final de venta acumulada").
+  //
+  // Por MATERIAL y no por producto: una categoría puede tener varias
+  // presentaciones y colapsando por producto un cliente con dos de ellas
+  // perdería el volumen de una.
   const byKey = new Map<
     string,
     {
@@ -107,11 +109,9 @@ export async function processRadarCategoriaUpload(
       continue;
     }
 
-    const key = `${r.sap_code}|${r.material_code}|${r.fecha}`;
+    const key = `${r.sap_code}|${r.material_code}|${r.fecha.slice(0, 7)}`;
     const prev = byKey.get(key);
-    if (prev) {
-      prev.quantity_kg += r.quantity_kg;
-    } else {
+    if (!prev || r.fecha > prev.date_of_sale) {
       byKey.set(key, {
         sap_code: r.sap_code,
         material_code: r.material_code,

@@ -2,7 +2,7 @@ import { createSupabaseServiceClient } from "@/lib/supabase/server";
 import { fetchAllRows, fetchAllRowsChunked } from "@/lib/supabase/fetch-all";
 import { PRODUCT_IDS, VARIANT_IDS } from "@/data/catalog";
 import { PVP_TARGETS, PVP_TOLERANCE } from "@/data/pvp-thresholds";
-import { DIAS_HABILES_POR_SEMANA, contarDiasHabiles } from "@/lib/business-days";
+import { DIAS_HABILES_POR_SEMANA, DIAS_HABILES_3M, contarDiasHabiles } from "@/lib/business-days";
 import { getBcvRateLookup, precioVisitaEnUsd } from "@/lib/bcv";
 import {
   PILOT_SECTORS,
@@ -988,19 +988,22 @@ export async function getRendimiento3M(
   if (panFiltrado.length === 0) return RENDIMIENTO_3M_VACIO;
   const totalPanKg = panFiltrado.reduce((s, r) => s + Number(r.quantity_kg), 0);
 
-  // Promedio = venta acumulada de los 3 meses ÷ días hábiles de esos 3 meses
-  // COMPLETOS (definición de DIENN, 18-08-2026).
+  // Promedio = venta acumulada de los 3 meses ÷ DIAS_HABILES_3M (decisión del
+  // usuario, 26-08-2026: "el promedio de todos debe ser su venta acumulada de
+  // los tres meses [...] dividido entre días hábiles (63)").
   //
-  // El período NO se toma de las fechas guardadas: en radar_3m_records hay un
-  // corte por mes (el último, que es el acumulado del mes entero), así que la
-  // fecha más antigua es un fin de mes y la más nueva es el corte de julio, que
-  // puede no ser el 31. Tomarlas literal recortaba el período por los dos
-  // extremos e inflaba el promedio. Se usan los MESES presentes, de su primer
-  // día al último.
+  // Divisor FIJO y compartido con Margarina/Mayonesa (ver DIAS_HABILES_3M en
+  // business-days.ts). Antes se contaban los días hábiles del rango que traía
+  // cada archivo: como PAN, Margarina y Mayonesa no cubren exactamente los
+  // mismos meses, cada promedio se dividía entre un número distinto y no eran
+  // comparables entre sí — que es justo para lo que sirven.
+  //
+  // inicioPeriodo/finPeriodo se siguen calculando: son el rango que se muestra
+  // al pie del gráfico para poder auditar de dónde salió el acumulado.
   const fechasPan = panFiltrado.map((r) => r.date_of_sale.slice(0, 10)).sort();
   const inicioPeriodo = `${fechasPan[0].slice(0, 7)}-01`;
   const finPeriodo = ultimoDiaDelMes(fechasPan[fechasPan.length - 1].slice(0, 7));
-  const diasPeriodo = contarDiasHabiles(inicioPeriodo, finPeriodo);
+  const diasPeriodo = DIAS_HABILES_3M;
 
   const promedio3M = totalPanKg / diasPeriodo;
   if (promedio3M <= 0) return RENDIMIENTO_3M_VACIO;
