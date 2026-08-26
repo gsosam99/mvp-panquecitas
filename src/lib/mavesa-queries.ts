@@ -1,6 +1,14 @@
 import { createSupabaseServiceClient } from "@/lib/supabase/server";
 import { fetchAllRows } from "@/lib/supabase/fetch-all";
-import { getUniverseLocations, getSellInTotalsByLocation, vigentesAl, sectorGroup, SECTOR_LABELS, type Sector } from "@/lib/universe";
+import {
+  getUniverseLocations,
+  getVolumenLocations,
+  getSellInTotalsByLocation,
+  vigentesAl,
+  sectorGroup,
+  SECTOR_LABELS,
+  type Sector,
+} from "@/lib/universe";
 import { contarDiasHabiles } from "@/lib/business-days";
 import { bucketLabelFor, todayISO } from "@/lib/date-buckets";
 import { PRODUCT_IDS } from "@/data/catalog";
@@ -83,26 +91,33 @@ const VACIO = (categoria: MavesaCategoria): RendimientoVsMavesaResult => ({
  * Mayonesa — misma mecánica que getRendimiento3M en dienn-queries.ts, pero:
  *   - el promedio sale del período REAL de la tabla de referencia (los meses
  *     que de hecho tenga cargados), no fijo a 3 meses;
- *   - no hay distinción clientes/universo: las tablas nuevas ya son
- *     solo-cartera por diseño, así que el promedio es un solo número;
- *   - Panquecitas del día se acota también a cartera únicamente (a
- *     diferencia de PAN, que suma además fuera de cartera), para comparar
- *     contra una referencia que ya es 100% cartera.
+ *   - el promedio es el UNIVERSO completo del reporte (decisión del usuario,
+ *     26-08-2026: "para el de los ratios toma el universo") — NO se acota a
+ *     la cartera del piloto, mismo criterio que "PAN Universo" en
+ *     getRendimiento3M. La tabla de referencia ya guarda location_id null
+ *     para lo que no resuelve contra ninguna location (ver migration 023 /
+ *     radar-categoria-upload.ts `soloCartera: false`); esas filas SÍ suman
+ *     al total pero no entran en el corte por ciudad, porque no se les puede
+ *     asignar sector;
+ *   - Panquecitas del día SÍ se acota a la cartera del piloto (es la venta
+ *     real del piloto, no tiene un "universo" más amplio que comparar).
  */
 export async function getRendimientoVsMavesa(
   categoria: MavesaCategoria,
   sector?: Sector
 ): Promise<RendimientoVsMavesaResult> {
+  // Cartera del piloto — sigue siendo la población de Panquecitas (numerador).
   const universoTotal = await getUniverseLocations();
-  const delSector = sector ? universoTotal.filter((l) => sectorGroup(l.oficina_venta) === sector) : universoTotal;
-  const universo = vigentesAl(delSector, todayISO());
-  if (universo.length === 0) return VACIO(categoria);
+  const delSectorCartera = sector
+    ? universoTotal.filter((l) => sectorGroup(l.oficina_venta) === sector)
+    : universoTotal;
+  const universo = vigentesAl(delSectorCartera, todayISO());
   const idsUniverso = new Set(universo.map((l) => l.id));
 
   const supabase = createSupabaseServiceClient();
   const productId = CATEGORIA_PRODUCT_ID[categoria];
 
-  const referenciaData = await fetchAllRows<{ location_id: string; quantity_kg: number; date_of_sale: string }>(
+  const referenciaData = await fetchAllRows<{ location_id: string | null; quantity_kg: number; date_of_sale: string }>(
     () =>
       supabase
         .from(REFERENCIA_TABLA[categoria])
@@ -110,7 +125,17 @@ export async function getRendimientoVsMavesa(
         .eq("product_id", productId)
   );
 
-  const referenciaFiltrada = referenciaData.filter((r) => idsUniverso.has(r.location_id));
+  // El universo del reporte es TODAS las locations de los sectores piloto
+  // (no solo cartera) — mismo set amplio que usó la carga (getVolumenLocations).
+  // Si se pide un sector, se acota por ahí; las filas con location_id null
+  // (sin match en absoluto) quedan fuera del corte por sector, pero cuentan
+  // en el TOTAL (sector indefinido).
+  let referenciaFiltrada = referenciaData;
+  if (sector) {
+    const volumen = await getVolumenLocations();
+    const idsSector = new Set(volumen.filter((l) => sectorGroup(l.oficina_venta) === sector).map((l) => l.id));
+    referenciaFiltrada = referenciaData.filter((r) => r.location_id !== null && idsSector.has(r.location_id));
+  }
   if (referenciaFiltrada.length === 0) return VACIO(categoria);
 
   const totalReferenciaKg = referenciaFiltrada.reduce((s, r) => s + Number(r.quantity_kg), 0);
@@ -126,10 +151,9 @@ export async function getRendimientoVsMavesa(
   const promedioReferencia = totalReferenciaKg / diasPeriodo;
   if (promedioReferencia <= 0) return VACIO(categoria);
 
-  // Panquecitas por día — acotado a cartera únicamente (a diferencia de
-  // getRendimiento3M, que también suma fuera de cartera para calzar con la
-  // tarjeta de volumen del dashboard). Acá se compara contra una referencia
-  // 100% cartera, así que el numerador se acota igual.
+  // Panquecitas por día — acotado a la cartera del piloto: es la venta real
+  // que se quiere entender, y se compara contra el universo (más amplio) de
+  // Margarina/Mayonesa de esa misma ciudad.
   const panqData = await fetchAllRows<{ location_id: string; quantity_kg: number; date_of_sale: string }>(() =>
     supabase
       .from("sap_sell_in_records")

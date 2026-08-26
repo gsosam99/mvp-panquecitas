@@ -31,7 +31,8 @@ export async function POST(req: Request) {
       PRODUCT_IDS.MARGARINA,
       rows,
       batchId,
-      finalizar ?? true
+      finalizar ?? true,
+      false // universo completo del reporte, no solo cartera — ver plan/migration 023
     );
     if ("error" in result) return Response.json({ error: result.error }, { status: result.status });
     return Response.json(result);
