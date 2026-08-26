@@ -84,13 +84,18 @@ export async function processRadarCategoriaUpload(
   const codigosSinLocation = new Set<string>();
   const materialesNoMapeados = new Set<string>();
 
-  // Colapsar por cliente+material SOLO (sin mes): a diferencia del radar de
-  // PAN, acá "Venta Acumulada" NO se reinicia cada mes — es el corrido de
-  // TODO el período del archivo (confirmado por el usuario, 26-08-2026: "la
-  // columna de ventas acumuladas es el total de los 3 meses"). El último
-  // corte (la fecha más reciente) de cada cliente+material YA ES el total
-  // completo — sumarlo por mes y volver a sumar los meses triplicaría el
-  // total, porque julio ya incluye mayo y junio.
+  // NO se colapsa por "último corte" — verificado contra la fila "Resultado
+  // total" que el propio SAP calcula al final del archivo (26-08-2026): la
+  // suma de "Venta Acumulada" de TODAS las filas, sin filtrar por fecha ni
+  // por mes, es exactamente el total que reporta SAP (y coincide con
+  // "Venta Diaria Promedio" del mismo Resultado total × días hábiles). Cada
+  // fila es un aporte independiente que hay que sumar completo — no una
+  // fotografía acumulada de la que solo valga la más reciente.
+  //
+  // Sí se colapsa por cliente+material+FECHA exacta (sumando, no
+  // reemplazando): si el archivo repite la misma fila exacta, la unique
+  // constraint de la tabla (sap_code, material_code, date_of_sale) exige un
+  // solo registro para esa combinación.
   const byKey = new Map<
     string,
     {
@@ -116,9 +121,11 @@ export async function processRadarCategoriaUpload(
       continue;
     }
 
-    const key = `${r.sap_code}|${r.material_code}`;
+    const key = `${r.sap_code}|${r.material_code}|${r.fecha}`;
     const prev = byKey.get(key);
-    if (!prev || r.fecha > prev.date_of_sale) {
+    if (prev) {
+      prev.quantity_kg += r.quantity_kg;
+    } else {
       byKey.set(key, {
         sap_code: r.sap_code,
         material_code: r.material_code,
@@ -176,11 +183,9 @@ export async function processRadarCategoriaUpload(
     reemplazadas = (borradas ?? []).length;
   }
 
-  // Diagnóstico de meses/rango a partir del ARCHIVO completo (no de
-  // `toInsert`, que ahora solo guarda un corte final por cliente+material) —
-  // así el resumen de la carga muestra fielmente qué período trae el Excel,
-  // independientemente de en qué fecha haya quedado el último corte de cada
-  // cliente.
+  // Diagnóstico de meses/rango a partir del ARCHIVO completo (rows), no de
+  // `toInsert` — evita que un cliente/material descartado (fuera de cartera,
+  // material no mapeado) recorte el rango mostrado.
   const fechasArchivo = rows.map((r) => r.fecha).sort();
   return {
     inserted: toInsert.length,
