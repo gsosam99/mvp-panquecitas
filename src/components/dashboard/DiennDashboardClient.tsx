@@ -2176,6 +2176,7 @@ export function DiennDashboardClient({
           {ventas3MesesPorCiudad.length > 0 ? (
             <Ventas3MesesPorCiudadChart
               data={ventas3MesesPorCiudad.map((row) => ({
+                sector: row.sector,
                 label: row.label,
                 productos: row[ventas3MesesPoblacion],
               }))}
