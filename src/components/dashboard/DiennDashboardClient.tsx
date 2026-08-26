@@ -24,6 +24,11 @@ import {
   Rendimiento3MChart,
   type Rendimiento3MRatioCiudad,
 } from "@/components/dashboard/Rendimiento3MChart";
+import {
+  RendimientoVsMavesaChart,
+  type RendimientoVsMavesaRatioCiudad,
+} from "@/components/dashboard/RendimientoVsMavesaChart";
+import { PortafolioPorCiudadChart } from "@/components/dashboard/PortafolioPorCiudadChart";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Separator } from "@/components/ui/separator";
 import {
@@ -68,6 +73,11 @@ import type {
 } from "@/lib/dienn-queries";
 import type { MotivoNoVentaRow } from "@/lib/efectividad-queries";
 import type { Sector } from "@/lib/sectors";
+import type {
+  MavesaCategoria,
+  RendimientoVsMavesaResult,
+  PortafolioPorCiudadRow,
+} from "@/lib/mavesa-queries";
 
 export interface SectorBundle {
   /** Volumen FACTURADO — exclusivo de Pedidos y Facturado (Cantidad Facturada). */
@@ -100,6 +110,8 @@ export interface SectorBundle {
   rankingSegmentos: RankingSegmentoRow[];
   /** Rendimiento diario vs. promedio histórico 3M de Harina PAN, por población. */
   rendimiento3M: Record<Pan3MPoblacion, Rendimiento3MResult>;
+  /** Rendimiento diario de Panquecitas vs. promedio histórico de Margarina/Mayonesa (Mavesa), por categoría. */
+  rendimientoVsMavesa: Record<MavesaCategoria, RendimientoVsMavesaResult>;
   /** Conversión de degustaciones (tickets recibidos ÷ entregados) de la ciudad/sector. */
   conversionDegustaciones: { samples: number; conversions: number; rate: number };
 }
@@ -210,6 +222,8 @@ interface Props {
   carteraPorSegmento: CarteraSegmentoResult;
   /** Precio correcto: PVP capturado en campo vs objetivo por ciudad (una fila por PDV×presentación evaluable). Global. */
   precioCorrecto: PrecioCorrectoRow[];
+  /** Totales acumulados de Panquecitas/Margarina/Mayonesa/Harina PAN por ciudad, hasta la fecha. Global. */
+  portafolioPorCiudad: PortafolioPorCiudadRow[];
 }
 
 export function DiennDashboardClient({
@@ -225,6 +239,7 @@ export function DiennDashboardClient({
   posicionPorCliente,
   carteraPorSegmento,
   precioCorrecto,
+  portafolioPorCiudad,
 }: Props) {
   const [filter, setFilter] = useState<FilterKey>("TOTAL");
   const [zonaFilter, setZonaFilter] = useState("");
@@ -279,6 +294,16 @@ export function DiennDashboardClient({
   // Acota el gráfico de 3 meses a una ciudad: sus ventas y el promedio de PAN de
   // los clientes ubicados ahí. "TOTAL" devuelve el corte de la pestaña de arriba.
   const [ciudad3M, setCiudad3M] = useState<"TOTAL" | Sector>("TOTAL");
+  // Gráfico "Rendimiento vs. Margarina/Mayonesa": misma mecánica que el de 3M
+  // de PAN, pero sin distinción clientes/universo (las tablas de Mavesa ya
+  // son solo-cartera) y con selector de categoría.
+  const [categoriaMavesa, setCategoriaMavesa] = useState<MavesaCategoria>("margarina");
+  const [showReferenciaMavesaDiario, setShowReferenciaMavesaDiario] = useState(true);
+  const [ratioPorCiudadMavesa, setRatioPorCiudadMavesa] = useState(false);
+  const [ciudadMavesa, setCiudadMavesa] = useState<"TOTAL" | Sector>("TOTAL");
+  // Barras de totales por ciudad (Panquecitas/Margarina/Mayonesa + Harina PAN opcional).
+  const [portafolioComoPct, setPortafolioComoPct] = useState(false);
+  const [portafolioIncluirHarinaPan, setPortafolioIncluirHarinaPan] = useState(false);
   // Ranking por segmento: volumen en kg o como % del total.
   const [rankingComoPct, setRankingComoPct] = useState(false);
   const [panGranularity, setPanGranularity] = useState<PanComparisonGranularity>("month");
@@ -563,6 +588,52 @@ export function DiennDashboardClient({
       };
     });
   }, [rendimiento3MData, bundles, pan3mPoblacion]);
+
+  // Mismo patrón que el gráfico de 3M de PAN, pero para Margarina/Mayonesa
+  // (sección "Rendimiento vs. Margarina/Mayonesa"): no hay distinción
+  // clientes/universo, solo categoría seleccionada.
+  const rendimientoVsMavesaData: RendimientoVsMavesaResult =
+    ciudadMavesa === "TOTAL"
+      ? bundle.rendimientoVsMavesa[categoriaMavesa]
+      : bundles[ciudadMavesa].rendimientoVsMavesa[categoriaMavesa];
+
+  const ratioAcumuladoMavesa = useMemo(() => {
+    const puntos = rendimientoVsMavesaData.puntos;
+    if (puntos.length === 0) return null;
+    const suma = puntos.reduce((s, p) => s + p.ratioPct, 0);
+    return { pct: Math.round((suma / puntos.length) * 10) / 10, dias: puntos.length };
+  }, [rendimientoVsMavesaData]);
+
+  const ratiosMavesaPorCiudad = useMemo<RendimientoVsMavesaRatioCiudad[]>(() => {
+    const base = rendimientoVsMavesaData.puntos;
+    if (base.length === 0) return [];
+    const porDia = (s: Sector) =>
+      new Map(bundles[s].rendimientoVsMavesa[categoriaMavesa].puntos.map((p) => [p.dia, p]));
+    const c = porDia("cumana");
+    const b = porDia("barquisimeto_este");
+
+    let cSuma = 0;
+    let cDias = 0;
+    let bSuma = 0;
+    let bDias = 0;
+    return base.map((p) => {
+      const cp = c.get(p.dia);
+      if (cp) {
+        cSuma += cp.ratioPct;
+        cDias += 1;
+      }
+      const bp = b.get(p.dia);
+      if (bp) {
+        bSuma += bp.ratioPct;
+        bDias += 1;
+      }
+      return {
+        dia: p.dia,
+        ratioCumanaAcum: cDias > 0 ? Math.round((cSuma / cDias) * 10) / 10 : null,
+        ratioCabudareAcum: bDias > 0 ? Math.round((bSuma / bDias) * 10) / 10 : null,
+      };
+    });
+  }, [rendimientoVsMavesaData, bundles, categoriaMavesa]);
 
   const comboPoints = bundle.ventaRecompraActivacion[comboGranularity];
   // Kg de PDV fuera de cartera incluidos en el volumen. Es acumulado, así que
@@ -1975,6 +2046,210 @@ export function DiennDashboardClient({
                   ))}
                 </TableBody>
               </Table>
+            </div>
+          )}
+        </CardContent>
+      </Card>
+
+      {/* ── Comparativa de portafolio por ciudad (Mavesa) ──────────────── */}
+      <Card className="mb-6 print-avoid-break">
+        <CardHeader className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between space-y-0">
+          <div>
+            <CardTitle>Portafolio por Ciudad — Panquecitas, Margarina y Mayonesa</CardTitle>
+            <p className="text-xs text-slate-400 mt-1">
+              Volumen acumulado HASTA LA FECHA por ciudad, para ver si el comportamiento de Panquecitas es parecido al
+              de otras categorías del portafolio (Margarina y Mayonesa, marca Mavesa — solo comparativo, no es
+              competencia) o es un caso aparte. &quot;Comparar con Harina PAN&quot; agrega la Carga Radar del mes de
+              PAN a la comparación.
+            </p>
+          </div>
+          <div className="flex flex-wrap items-center gap-2 print:hidden">
+            <div className="flex rounded-lg border border-slate-200 overflow-hidden text-xs font-medium">
+              {(
+                [
+                  [false, "Kg"],
+                  [true, "% del total"],
+                ] as const
+              ).map(([key, label]) => (
+                <button
+                  key={label}
+                  onClick={() => setPortafolioComoPct(key)}
+                  className={`px-3 py-1.5 transition-colors ${
+                    portafolioComoPct === key ? "bg-slate-900 text-white" : "bg-white text-slate-500 hover:bg-slate-50"
+                  }`}
+                >
+                  {label}
+                </button>
+              ))}
+            </div>
+            <button
+              onClick={() => setPortafolioIncluirHarinaPan((v) => !v)}
+              title="Agrega la Carga Radar del mes de Harina PAN a la comparación"
+              className={`px-3 py-1.5 rounded-lg border text-xs font-medium transition-colors ${
+                portafolioIncluirHarinaPan
+                  ? "border-slate-900 bg-slate-900 text-white"
+                  : "border-slate-200 bg-white text-slate-500 hover:bg-slate-50"
+              }`}
+            >
+              Comparar con Harina PAN
+            </button>
+          </div>
+        </CardHeader>
+        <CardContent>
+          {portafolioPorCiudad.length > 0 ? (
+            <PortafolioPorCiudadChart
+              data={portafolioPorCiudad}
+              comoPct={portafolioComoPct}
+              incluirHarinaPan={portafolioIncluirHarinaPan}
+            />
+          ) : (
+            <div className="h-[320px] flex items-center justify-center text-slate-400">
+              <div className="text-center">
+                <p className="text-4xl mb-2">📊</p>
+                <p>Sin datos todavía.</p>
+              </div>
+            </div>
+          )}
+        </CardContent>
+      </Card>
+
+      {/* ── Rendimiento vs. Margarina/Mayonesa (Mavesa) ────────────────── */}
+      <Card className="mb-6 print-avoid-break">
+        <CardHeader className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between space-y-0">
+          <div>
+            <CardTitle>Rendimiento Diario vs. Margarina/Mayonesa</CardTitle>
+            <p className="text-xs text-slate-400 mt-1">
+              Misma mecánica que el gráfico de PAN: venta diaria de Panquecitas (Carga Radar) contra el promedio de
+              ventas diarias de la categoría elegida (Mavesa), calculado con el período real cargado en su reporte de
+              referencia. La línea continua es ese promedio y la punteada su 4%. El porcentaje sobre cada punto es el
+              ratio del día. Con <span className="font-medium">Cumaná</span> o <span className="font-medium">Cabudare</span>{" "}
+              el gráfico se acota a esa ciudad.
+            </p>
+          </div>
+          <div className="flex flex-wrap items-center gap-2 print:hidden">
+            <div className="flex rounded-lg border border-slate-200 overflow-hidden text-xs font-medium">
+              {(
+                [
+                  ["margarina", "vs. Margarina"],
+                  ["mayonesa", "vs. Mayonesa"],
+                ] as const
+              ).map(([key, label]) => (
+                <button
+                  key={key}
+                  onClick={() => setCategoriaMavesa(key)}
+                  className={`px-3 py-1.5 transition-colors ${
+                    categoriaMavesa === key ? "bg-slate-900 text-white" : "bg-white text-slate-500 hover:bg-slate-50"
+                  }`}
+                >
+                  {label}
+                </button>
+              ))}
+            </div>
+            <div className="flex rounded-lg border border-slate-200 overflow-hidden text-xs font-medium">
+              {(
+                [
+                  ["TOTAL", "Total"],
+                  ["cumana", "Cumaná"],
+                  ["barquisimeto_este", "Cabudare"],
+                ] as const
+              ).map(([key, label]) => (
+                <button
+                  key={key}
+                  onClick={() => setCiudadMavesa(key)}
+                  className={`px-3 py-1.5 transition-colors ${
+                    ciudadMavesa === key ? "bg-sky-700 text-white" : "bg-white text-slate-500 hover:bg-slate-50"
+                  }`}
+                >
+                  {label}
+                </button>
+              ))}
+            </div>
+            <button
+              onClick={() => setShowReferenciaMavesaDiario((v) => !v)}
+              title="Muestra u oculta la línea del promedio diario de la categoría elegida"
+              className={`px-3 py-1.5 rounded-lg border text-xs font-medium transition-colors ${
+                showReferenciaMavesaDiario
+                  ? "border-slate-900 bg-slate-900 text-white"
+                  : "border-slate-200 bg-white text-slate-500 hover:bg-slate-50"
+              }`}
+            >
+              Línea referencia: {showReferenciaMavesaDiario ? "Visible" : "Oculta"}
+            </button>
+            <button
+              onClick={() => setRatioPorCiudadMavesa((v) => !v)}
+              title="Superpone el ratio acumulado de cada ciudad contra su propio promedio"
+              className={`px-3 py-1.5 rounded-lg border text-xs font-medium transition-colors ${
+                ratioPorCiudadMavesa
+                  ? "border-sky-700 bg-sky-700 text-white"
+                  : "border-slate-200 bg-white text-slate-500 hover:bg-slate-50"
+              }`}
+            >
+              Ratio acum. por ciudad
+            </button>
+            <ExportExcelButton
+              filename={`Rendimiento vs ${categoriaMavesa} — ${filtroTexto}`}
+              rows={rendimientoVsMavesaData.puntos}
+              columns={[
+                { header: "Día", value: (r) => r.dia, width: 14 },
+                { header: "Panquecitas (kg)", value: (r) => r.panquecitasKg, width: 18 },
+                { header: `Ratio vs promedio ${categoriaMavesa} (%)`, value: (r) => r.ratioPct, width: 26 },
+              ]}
+            />
+          </div>
+        </CardHeader>
+        <CardContent>
+          {rendimientoVsMavesaData.puntos.length > 0 ? (
+            <>
+              <div className="relative">
+                {ratioAcumuladoMavesa && (
+                  <div
+                    className="absolute right-0 top-0 z-10 rounded-lg border border-slate-200 bg-white/90 px-3 py-1.5 pointer-events-none"
+                    title={`Promedio de los ${ratioAcumuladoMavesa.dias} ratios diarios del período.`}
+                  >
+                    <p className="text-[10px] uppercase tracking-wide text-slate-400 leading-none">
+                      Ratio acumulado
+                    </p>
+                    <p
+                      className={`text-sm font-semibold leading-tight ${
+                        ratioAcumuladoMavesa.pct >= 4 ? "text-emerald-700" : "text-slate-900"
+                      }`}
+                    >
+                      {ratioAcumuladoMavesa.pct.toLocaleString("es-VE", { maximumFractionDigits: 1 })}%
+                      <span className="text-[10px] font-normal text-slate-400"> · meta 4%</span>
+                    </p>
+                  </div>
+                )}
+                <RendimientoVsMavesaChart
+                  data={rendimientoVsMavesaData}
+                  categoriaLabel={categoriaMavesa === "margarina" ? "Margarina" : "Mayonesa"}
+                  showReferenciaDiario={showReferenciaMavesaDiario}
+                  ratiosCiudad={ratiosMavesaPorCiudad}
+                  showRatioCiudades={ratioPorCiudadMavesa}
+                />
+              </div>
+              <p className="text-xs text-slate-400 mt-2">
+                Promedio {categoriaMavesa === "margarina" ? "Margarina" : "Mayonesa"}:{" "}
+                <span className="font-medium text-slate-600">
+                  {rendimientoVsMavesaData.promedioReferencia.toLocaleString("es-VE", { maximumFractionDigits: 1 })}{" "}
+                  kg/día
+                </span>{" "}
+                ({rendimientoVsMavesaData.totalReferenciaKg.toLocaleString("es-VE", { maximumFractionDigits: 0 })} kg ÷{" "}
+                {rendimientoVsMavesaData.diasPeriodo} días hábiles, del {rendimientoVsMavesaData.desde} al{" "}
+                {rendimientoVsMavesaData.hasta}) · Meta 4%:{" "}
+                <span className="font-medium text-emerald-700">
+                  {rendimientoVsMavesaData.meta4Pct.toLocaleString("es-VE", { maximumFractionDigits: 1 })} kg/día
+                </span>
+              </p>
+            </>
+          ) : (
+            <div className="h-[340px] flex items-center justify-center text-slate-400">
+              <div className="text-center">
+                <p className="text-4xl mb-2">📉</p>
+                <p>Sin datos todavía.</p>
+                <p className="text-xs mt-1">
+                  Falta cargar el reporte de referencia de {categoriaMavesa === "margarina" ? "Margarina" : "Mayonesa"}.
+                </p>
+              </div>
             </div>
           )}
         </CardContent>

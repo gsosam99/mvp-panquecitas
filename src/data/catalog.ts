@@ -3,6 +3,12 @@
 export const PRODUCT_IDS = {
   HARINA_PAN: "00000000-0000-0000-0000-000000000001",
   PANQUECITAS: "00000000-0000-0000-0000-000000000002",
+  // Marca Mavesa (no Primor) — solo comparativos de portafolio por ciudad,
+  // nunca se mezclan con los cálculos de Panquecitas/Harina PAN. Ver
+  // supabase/migrations/022_radar_mavesa.sql — 4 tablas (2 categorías ×
+  // referencia/actual), todas separadas entre sí.
+  MARGARINA: "00000000-0000-0000-0000-000000000003",
+  MAYONESA: "00000000-0000-0000-0000-000000000004",
 } as const;
 
 export const VARIANT_IDS = {
@@ -70,6 +76,21 @@ export const SAP_RADAR_MATERIAL_PRODUCT_MAP: Record<string, string> = {
 export const SAP_RADAR_MATERIAL_VARIANT_MAP: Record<string, string> = {
   "Q147": VARIANT_IDS.PANQ_04KG_UNIDAD,
   "Q148": VARIANT_IDS.PANQ_08KG_UNIDAD,
+};
+
+// Mapeo de "Material" del Radar de Mavesa (Margarina y Mayonesa, dos
+// reportes separados) → product_id. Mismo criterio que
+// SAP_RADAR_MATERIAL_PRODUCT_MAP: un material no listado se reporta como
+// error en vez de asumir un producto por defecto — así nunca se cuenta en
+// silencio una fila de una categoría bajo la otra.
+//
+// TODO: completar con los material_code reales cuando llegue cada archivo
+// (los de Margarina y los de Mayonesa pueden agregarse en cualquier orden,
+// son endpoints y tablas independientes — ver los 4 endpoints
+// radar-{margarina,mayonesa}-{referencia,actual}-upload).
+export const SAP_RADAR_MAVESA_MATERIAL_PRODUCT_MAP: Record<string, string> = {
+  // "M000": PRODUCT_IDS.MARGARINA,
+  // "M000": PRODUCT_IDS.MAYONESA,
 };
 
 // Mapeo de "Material" (código SKU, ej. "CR/Q147") del reporte SAP
