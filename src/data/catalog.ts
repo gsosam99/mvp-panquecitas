@@ -84,18 +84,28 @@ export const SAP_RADAR_MATERIAL_VARIANT_MAP: Record<string, string> = {
 // error en vez de asumir un producto por defecto — así nunca se cuenta en
 // silencio una fila de una categoría bajo la otra.
 //
-// Códigos confirmados contra el archivo real "Radar Mayonesa — Actual"
-// (N7_V_SD88_WEB_001 (5).xls, 26-08-2026). Los de Margarina todavía no
-// llegan — agregarlos acá cuando se suba ese archivo, son endpoints y
-// tablas independientes (ver los 4 endpoints
-// radar-{margarina,mayonesa}-{referencia,actual}-upload).
+// Códigos confirmados contra los archivos reales de Mayonesa (26-08-2026,
+// N7_V_SD88_WEB_001 (5).xls) y Margarina (26-08-2026, N7_V_SD88_WEB_001
+// (4).xls). El reporte de Margarina trae varias marcas de Mavesa además de
+// "Mavesa" (Chef, Nelly, Adora, Primor) — todas cuentan para la categoría
+// Margarina, es el mismo criterio de portafolio que pidió el usuario.
 export const SAP_RADAR_MAVESA_MATERIAL_PRODUCT_MAP: Record<string, string> = {
   "T018": PRODUCT_IDS.MAYONESA, // MAVESA MAYONESA 910Gx6UN
   "T020": PRODUCT_IDS.MAYONESA, // MAVESA MAYONESA 445Gx12UN
   "T409": PRODUCT_IDS.MAYONESA, // MAVESA MAYONESA 175Gx24UN PET
   "T486": PRODUCT_IDS.MAYONESA, // MAVESA ADEREZO MAYONESA 3,6KGx4UN CFH
   "T393": PRODUCT_IDS.MAYONESA, // MAVESA MAYONESA 445Gx12UN ND
-  // "M000": PRODUCT_IDS.MARGARINA,
+  "T076": PRODUCT_IDS.MARGARINA, // CHEF MARGARINA C/S 5KGx1UN CFH
+  "T084": PRODUCT_IDS.MARGARINA, // MAVESA MARGARINA 1000Gx6UN
+  "T086": PRODUCT_IDS.MARGARINA, // MAVESA MARGARINA 500Gx12UN
+  "T525": PRODUCT_IDS.MARGARINA, // MAVESA CHIFFON MARGARINA PREM 454Gx12UN
+  "T587": PRODUCT_IDS.MARGARINA, // NELLY MARGARINA REDUCIDA CAL 250Gx24UN
+  "T588": PRODUCT_IDS.MARGARINA, // NELLY MARGARINA REDUCIDA CAL 500Gx12UN
+  "T595": PRODUCT_IDS.MARGARINA, // MAVESA MARGARINA 250Gx24UN
+  "T082": PRODUCT_IDS.MARGARINA, // MAVESA LIGERA MARGARINA 500Gx12UN
+  "T080": PRODUCT_IDS.MARGARINA, // CHEF MARGARINA S/S 5KGx1UN CFH
+  "T589": PRODUCT_IDS.MARGARINA, // ADORA MARGARINA REDUCIDA CAL 500Gx12UN
+  "T586": PRODUCT_IDS.MARGARINA, // PRIMOR MARGARINA REDUCIDA CAL 500Gx12UN
 };
 
 // Mapeo de "Material" (código SKU, ej. "CR/Q147") del reporte SAP
