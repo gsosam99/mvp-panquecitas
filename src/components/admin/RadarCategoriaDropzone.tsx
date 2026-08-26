@@ -71,45 +71,104 @@ export function RadarCategoriaDropzone({
     }
   }, []);
 
+  // Vercel rechaza payloads de más de ~4.5MB por función — un archivo de
+  // referencia (varios meses × miles de clientes) puede pasarse fácil de
+  // ahí. Se parte por CLIENTE (nunca por fila suelta): agrupar por sap_code
+  // garantiza que el colapsado de "último corte del mes" del servidor vea
+  // siempre todas las filas de un mismo cliente juntas, así que partir acá
+  // no cambia el resultado. Todas las tandas comparten el mismo batchId; el
+  // borrado de filas viejas ("finalizar") solo corre en la última, para que
+  // una tanda a medias nunca deje la tabla con clientes borrados y todavía
+  // sin reemplazar.
+  const CLIENTES_POR_TANDA = 200;
+
+  function partirPorCliente(filas: ParsedSapRadarRow[]): ParsedSapRadarRow[][] {
+    const porCliente = new Map<string, ParsedSapRadarRow[]>();
+    for (const f of filas) {
+      const grupo = porCliente.get(f.sap_code);
+      if (grupo) grupo.push(f);
+      else porCliente.set(f.sap_code, [f]);
+    }
+    const clientes = [...porCliente.keys()];
+    const tandas: ParsedSapRadarRow[][] = [];
+    for (let i = 0; i < clientes.length; i += CLIENTES_POR_TANDA) {
+      const tanda = clientes.slice(i, i + CLIENTES_POR_TANDA).flatMap((c) => porCliente.get(c)!);
+      tandas.push(tanda);
+    }
+    return tandas;
+  }
+
   async function handleCommit() {
     if (!rows.length) return;
     setState("uploading");
+    const batchId = crypto.randomUUID();
+    const tandas = partirPorCliente(rows);
+
+    type Resultado = {
+      inserted?: number;
+      reemplazadas?: number;
+      clientes_en_cartera?: number;
+      clientes_descartados_fuera_cartera?: number;
+      meses?: string[];
+      desde?: string;
+      hasta?: string;
+      total_kg?: number;
+      error?: string;
+      detail?: string;
+    };
+    const acumulado = {
+      inserted: 0,
+      reemplazadas: 0,
+      clientes_en_cartera: 0,
+      clientes_descartados_fuera_cartera: 0,
+      meses: new Set<string>(),
+      desde: "",
+      hasta: "",
+      total_kg: 0,
+    };
+
     try {
-      const res = await fetch(endpoint, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ rows, batchId: crypto.randomUUID() }),
-      });
-      const data = (await res.json()) as {
-        inserted?: number;
-        reemplazadas?: number;
-        clientes_en_cartera?: number;
-        clientes_descartados_fuera_cartera?: number;
-        clientes_en_archivo?: number;
-        meses?: string[];
-        desde?: string;
-        hasta?: string;
-        total_kg?: number;
-        error?: string;
-        detail?: string;
-      };
-      if (!res.ok) {
-        toast.error(data.detail ? `${data.error}: ${data.detail}` : (data.error ?? "Error al guardar"));
-        setState("previewing");
-        return;
+      for (let i = 0; i < tandas.length; i++) {
+        const esUltima = i === tandas.length - 1;
+        const res = await fetch(endpoint, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ rows: tandas[i], batchId, finalizar: esUltima }),
+        });
+        const data = (await res.json()) as Resultado;
+        if (!res.ok) {
+          toast.error(
+            (data.detail ? `${data.error}: ${data.detail}` : (data.error ?? "Error al guardar")) +
+              (tandas.length > 1 ? ` (tanda ${i + 1} de ${tandas.length})` : "")
+          );
+          setState("previewing");
+          return;
+        }
+        acumulado.inserted += data.inserted ?? 0;
+        acumulado.reemplazadas += data.reemplazadas ?? 0;
+        acumulado.clientes_en_cartera += data.clientes_en_cartera ?? 0;
+        acumulado.clientes_descartados_fuera_cartera += data.clientes_descartados_fuera_cartera ?? 0;
+        for (const m of data.meses ?? []) acumulado.meses.add(m);
+        if (data.desde && (!acumulado.desde || data.desde < acumulado.desde)) acumulado.desde = data.desde;
+        if (data.hasta && data.hasta > acumulado.hasta) acumulado.hasta = data.hasta;
+        acumulado.total_kg += data.total_kg ?? 0;
       }
+
       setState("done");
+      const clientesEnArchivo = new Set(rows.map((r) => r.sap_code)).size;
+      const meses = [...acumulado.meses].sort();
       const partes = [
-        `${data.inserted} registros guardados`,
-        `${data.clientes_en_cartera} clientes de la cartera (de ${data.clientes_en_archivo} en el archivo)`,
-        `${data.meses?.length ?? 0} meses: ${data.meses?.join(", ") ?? "—"}`,
-        `rango ${data.desde} → ${data.hasta}`,
-        `total ${(data.total_kg ?? 0).toLocaleString("es-VE", { maximumFractionDigits: 0 })} kg`,
+        `${acumulado.inserted} registros guardados`,
+        `${acumulado.clientes_en_cartera} clientes de la cartera (de ${clientesEnArchivo} en el archivo)`,
+        `${meses.length} meses: ${meses.join(", ") || "—"}`,
+        `rango ${acumulado.desde} → ${acumulado.hasta}`,
+        `total ${acumulado.total_kg.toLocaleString("es-VE", { maximumFractionDigits: 0 })} kg`,
       ];
-      if (data.clientes_descartados_fuera_cartera) {
-        partes.push(`${data.clientes_descartados_fuera_cartera} clientes del archivo NO están en la cartera (descartados)`);
+      if (acumulado.clientes_descartados_fuera_cartera) {
+        partes.push(`${acumulado.clientes_descartados_fuera_cartera} clientes del archivo NO están en la cartera (descartados)`);
       }
-      if (data.reemplazadas) partes.push(`${data.reemplazadas} filas de la carga anterior reemplazadas`);
+      if (acumulado.reemplazadas) partes.push(`${acumulado.reemplazadas} filas de la carga anterior reemplazadas`);
+      if (tandas.length > 1) partes.push(`subido en ${tandas.length} tandas`);
       setDoneSummary(partes.join(" · "));
       toast.success("Carga completada");
     } catch {

@@ -17,8 +17,8 @@ export async function POST(req: Request) {
     }
     const supabase = createSupabaseServiceClient();
 
-    const body = (await req.json()) as { rows?: ParsedSapRadarRow[]; batchId?: string };
-    const { rows, batchId } = body;
+    const body = (await req.json()) as { rows?: ParsedSapRadarRow[]; batchId?: string; finalizar?: boolean };
+    const { rows, batchId, finalizar } = body;
     if (!rows?.length || !batchId) {
       return Response.json({ error: "Datos inválidos" }, { status: 400 });
     }
@@ -29,7 +29,8 @@ export async function POST(req: Request) {
       SAP_RADAR_MAVESA_MATERIAL_PRODUCT_MAP,
       PRODUCT_IDS.MARGARINA,
       rows,
-      batchId
+      batchId,
+      finalizar ?? true
     );
     if ("error" in result) return Response.json({ error: result.error }, { status: result.status });
     return Response.json(result);

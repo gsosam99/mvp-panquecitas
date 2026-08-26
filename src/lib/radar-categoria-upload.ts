@@ -30,6 +30,7 @@ export function errorDetail(error: unknown): string {
 
 export interface RadarCategoriaUploadResult {
   inserted: number;
+  /** 0 si `finalizar: false` — la limpieza de filas viejas se hace una sola vez, en la última tanda. */
   reemplazadas: number;
   clientes_en_cartera: number;
   clientes_descartados_fuera_cartera: number;
@@ -50,6 +51,12 @@ export interface RadarCategoriaUploadResult {
  *   material resuelva a un producto distinto se rechaza, para que subir el
  *   archivo en el endpoint equivocado falle rápido en vez de guardar datos
  *   de una categoría bajo el nombre de otra.
+ * @param finalizar Si es `false`, inserta/actualiza pero NO corre el
+ *   borrado de filas viejas — usado por el dropzone cuando parte un archivo
+ *   grande en varias tandas (mismo batchId) para no pasarse del límite de
+ *   tamaño de payload de Vercel: correr el borrado en cada tanda dejaría la
+ *   tabla momentáneamente incompleta (borraría clientes que la tanda
+ *   siguiente todavía no reinsertó). Se corre UNA sola vez, en la última.
  */
 export async function processRadarCategoriaUpload(
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -58,7 +65,8 @@ export async function processRadarCategoriaUpload(
   materialMap: Record<string, string>,
   expectedProductId: string,
   rows: ParsedSapRadarRow[],
-  batchId: string
+  batchId: string,
+  finalizar = true
 ): Promise<RadarCategoriaUploadResult | { error: string; status: number }> {
   const universo = await getUniverseLocations();
   const locationIdBySapCode = new Map(universo.map((l) => [l.sap_code, l.id]));
@@ -137,18 +145,23 @@ export async function processRadarCategoriaUpload(
   }
 
   // Reemplazo completo de ESTA tabla únicamente — nunca toca ninguna otra
-  // combinación categoría×propósito ni las tablas de PAN.
-  const { data: borradas, error: staleError } = await supabase
-    .from(tabla)
-    .delete()
-    .or(`upload_batch_id.is.null,upload_batch_id.neq.${batchId}`)
-    .select("id");
-  if (staleError) throw staleError;
+  // combinación categoría×propósito ni las tablas de PAN. Solo en la última
+  // tanda (ver `finalizar` en el JSDoc de arriba).
+  let reemplazadas = 0;
+  if (finalizar) {
+    const { data: borradas, error: staleError } = await supabase
+      .from(tabla)
+      .delete()
+      .or(`upload_batch_id.is.null,upload_batch_id.neq.${batchId}`)
+      .select("id");
+    if (staleError) throw staleError;
+    reemplazadas = (borradas ?? []).length;
+  }
 
   const fechas = toInsert.map((r) => r.date_of_sale).sort();
   return {
     inserted: toInsert.length,
-    reemplazadas: (borradas ?? []).length,
+    reemplazadas,
     clientes_en_cartera: new Set(toInsert.map((r) => r.location_id)).size,
     clientes_descartados_fuera_cartera: codigosFueraDeCartera.size,
     clientes_en_archivo: sapCodesEnArchivo.size,
