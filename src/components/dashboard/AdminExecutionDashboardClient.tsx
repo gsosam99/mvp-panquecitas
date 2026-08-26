@@ -236,7 +236,7 @@ export function AdminExecutionDashboardClient({
           title="% Precio correcto por zona"
           value={kpis.precioCorrecto.total > 0 ? `${kpis.precioCorrecto.pct}%` : "s/d"}
           subtitle={`${kpis.precioCorrecto.count} de ${kpis.precioCorrecto.total} visitados con venta Radar${
-            kpis.precioCorrecto.sinDato > 0 ? ` · ${kpis.precioCorrecto.sinDato} sin precio observable` : ""
+            kpis.precioCorrecto.sinDato > 0 ? ` · incluye ${kpis.precioCorrecto.sinDato} sin precio observable` : ""
           }`}
           critical={kpis.precioCorrecto.total > 0 && kpis.precioCorrecto.pct < 100}
         />
@@ -279,7 +279,8 @@ export function AdminExecutionDashboardClient({
             observable (sin acceso al depósito)
           </>
         )}
-        {(kpis.precioCorrecto.sinDato > 0 || kpis.riesgoStockOut.sinDato > 0) && ": cuentan en el denominador, pero no como verificados."}
+        {(kpis.precioCorrecto.sinDato > 0 || kpis.riesgoStockOut.sinDato > 0) &&
+          ": no se descartan, siguen en el denominador — simplemente no suman al numerador porque no se pudieron verificar."}
       </p>
 
       {/* ── Gráfico: activación de clientes en el tiempo ──────────────── */}
@@ -339,7 +340,7 @@ export function AdminExecutionDashboardClient({
           <div>
             <CardTitle>Ejecución por semana de auditoría (POP y Precio)</CardTitle>
             <p className="text-xs text-slate-400 mt-1 mb-2">
-              % de clientes visitados con ventas SAP esa semana con material POP y con precio correcto según su zona.
+              % de clientes visitados con venta Radar esa semana con material POP y con precio correcto según su zona. Las dos series dividen entre la misma base, igual que las tarjetas.
             </p>
             <RoundLegend />
           </div>

@@ -373,10 +373,22 @@ export interface EjecucionSemanalPoint {
 
 /**
  * % de clientes con material POP y % con precio correcto, por semana de
- * auditoría (S2/S4/S6/S8) — sobre los clientes VISITADOS esa semana (mismo
- * criterio que las tarjetas de KPI: % POP = con POP / visitados, % precio
- * correcto = correctos / evaluables). Una semana sin visitas en el corte de
- * filtros vigente simplemente no aparece en el gráfico.
+ * auditoría (S2/S4/S6/S8).
+ *
+ * MISMA BASE que las tarjetas de KPI, y la misma para las dos series: los
+ * visitados esa semana que además tienen venta Radar (el recorte por venta
+ * Radar lo aplica `allowedLocationIds`, ver AdminExecutionDashboardClient).
+ * Los dos porcentajes dividen entre `rows.length`.
+ *
+ * Precio dividía entre los que tenían precio observable mientras POP dividía
+ * entre todos, así que las dos barras de una misma semana no eran
+ * comparables. Ahora un PDV sin precio observable NO se descarta: queda en el
+ * denominador y simplemente no suma al numerador, porque su precio no se
+ * pudo verificar correcto (decisión del usuario, 26-08-2026: "la base es la
+ * misma para todos los indicadores").
+ *
+ * Una semana sin visitas en el corte de filtros vigente simplemente no
+ * aparece en el gráfico.
  */
 export function computeEjecucionSemanal(
   visits: AdminVisitSnapshot[],
@@ -390,14 +402,13 @@ export function computeEjecucionSemanal(
     if (rows.length === 0) continue;
 
     const conPop = rows.filter((r) => r.popPresent === true).length;
-    const evaluables = rows.filter(precioEvaluable);
-    const correctos = evaluables.filter((r) => !precioIncorrecto(r)).length;
+    const correctos = rows.filter((r) => precioEvaluable(r) && !precioIncorrecto(r)).length;
 
     points.push({
       label: week.label,
       color: week.color,
       popPct: pct(conPop, rows.length),
-      precioPct: pct(correctos, evaluables.length),
+      precioPct: pct(correctos, rows.length),
     });
   }
   return points;
