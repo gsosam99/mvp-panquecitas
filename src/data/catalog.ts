@@ -84,13 +84,18 @@ export const SAP_RADAR_MATERIAL_VARIANT_MAP: Record<string, string> = {
 // error en vez de asumir un producto por defecto — así nunca se cuenta en
 // silencio una fila de una categoría bajo la otra.
 //
-// TODO: completar con los material_code reales cuando llegue cada archivo
-// (los de Margarina y los de Mayonesa pueden agregarse en cualquier orden,
-// son endpoints y tablas independientes — ver los 4 endpoints
+// Códigos confirmados contra el archivo real "Radar Mayonesa — Actual"
+// (N7_V_SD88_WEB_001 (5).xls, 26-08-2026). Los de Margarina todavía no
+// llegan — agregarlos acá cuando se suba ese archivo, son endpoints y
+// tablas independientes (ver los 4 endpoints
 // radar-{margarina,mayonesa}-{referencia,actual}-upload).
 export const SAP_RADAR_MAVESA_MATERIAL_PRODUCT_MAP: Record<string, string> = {
+  "T018": PRODUCT_IDS.MAYONESA, // MAVESA MAYONESA 910Gx6UN
+  "T020": PRODUCT_IDS.MAYONESA, // MAVESA MAYONESA 445Gx12UN
+  "T409": PRODUCT_IDS.MAYONESA, // MAVESA MAYONESA 175Gx24UN PET
+  "T486": PRODUCT_IDS.MAYONESA, // MAVESA ADEREZO MAYONESA 3,6KGx4UN CFH
+  "T393": PRODUCT_IDS.MAYONESA, // MAVESA MAYONESA 445Gx12UN ND
   // "M000": PRODUCT_IDS.MARGARINA,
-  // "M000": PRODUCT_IDS.MAYONESA,
 };
 
 // Mapeo de "Material" (código SKU, ej. "CR/Q147") del reporte SAP
