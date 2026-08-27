@@ -39,8 +39,14 @@ const Inner = dynamic(
       const maxPanquecitas = valores.length > 0 ? Math.max(...valores) : 0;
       const minPanquecitas = valores.length > 0 ? Math.min(...valores) : 1;
 
+      // Este gráfico NO dibuja la línea de meta 4% (decisión del usuario,
+      // 27-08-2026) — a diferencia del de Harina PAN, que sí la conserva. Por
+      // eso `data.meta4Pct` ya no entra en el dominio del eje: incluirlo solo
+      // servía para que la línea cupiera, y como es el 4% de la referencia
+      // (un valor muy por debajo de la venta diaria) arrastraba el piso hacia
+      // abajo y aplastaba los datos reales contra el techo.
       const escalaLog = showReferenciaDiario && data.promedioReferencia > 0;
-      const maxLineal = Math.ceil(Math.max(maxPanquecitas, data.meta4Pct) * 1.15);
+      const maxLineal = Math.max(1, Math.ceil(maxPanquecitas * 1.15));
 
       // El techo de la escala log tiene que contemplar TAMBIEN el maximo de
       // Panquecitas, no solo el promedio de referencia. Con Mayonesa el
@@ -48,13 +54,12 @@ const Inner = dynamic(
       // dias buenos del piloto quedaban por encima del dominio y, como el eje
       // va con allowDataOverflow, se cortaban sin dejar rastro: ni punto, ni
       // etiqueta de %, ni tramo de linea.
-      const maxLog = Math.ceil(Math.max(data.promedioReferencia, maxPanquecitas, data.meta4Pct) * 1.3);
+      const maxLog = Math.max(1, Math.ceil(Math.max(data.promedioReferencia, maxPanquecitas) * 1.3));
 
       // El piso puede bajar de 1 kg: la escala log no admite 0, pero si
       // fracciones. Antes se forzaba a >= 1 y un dia de menos de 1 kg se
       // salia por abajo del dominio, con el mismo resultado.
-      const pisoCandidato = Math.min(minPanquecitas, data.meta4Pct > 0 ? data.meta4Pct : minPanquecitas);
-      const minLog = Math.max(0.1, pisoCandidato * 0.6);
+      const minLog = Math.max(0.1, minPanquecitas * 0.6);
 
       const ratioPorDia = new Map(ratiosCiudad.map((r) => [r.dia, r]));
       const chartData = data.puntos.map((p) => ({
@@ -63,11 +68,13 @@ const Inner = dynamic(
         ratioCabudareAcum: ratioPorDia.get(p.dia)?.ratioCabudareAcum ?? null,
       }));
 
-      const MARGEN_META = 118;
+      // Margen derecho chico: la etiqueta que lo obligaba a ser ancho era la
+      // de la meta 4%, que ya no se dibuja. La del promedio va insideTopLeft.
+      const MARGEN_DERECHO = 24;
 
       return (
         <ResponsiveContainer width="100%" height={340}>
-          <ComposedChart data={chartData} margin={{ top: 52, right: MARGEN_META, left: 10, bottom: 5 }}>
+          <ComposedChart data={chartData} margin={{ top: 52, right: MARGEN_DERECHO, left: 10, bottom: 5 }}>
             <CartesianGrid strokeDasharray="3 3" stroke="#f1f5f9" vertical={false} />
             <XAxis dataKey="label" tick={{ fontSize: 13, fill: "#64748b" }} minTickGap={16} />
             <YAxis
@@ -123,20 +130,6 @@ const Inner = dynamic(
                 }}
               />
             )}
-            <ReferenceLine
-              yAxisId="kg"
-              y={data.meta4Pct}
-              stroke="#16a34a"
-              strokeWidth={2}
-              strokeDasharray="6 4"
-              label={{
-                value: `Meta 4%: ${data.meta4Pct.toLocaleString("es-VE", { maximumFractionDigits: 0 })} kg`,
-                position: "right",
-                fill: "#15803d",
-                fontSize: 13,
-                fontWeight: 600,
-              }}
-            />
             <Line
               yAxisId="kg"
               type="monotone"

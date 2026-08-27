@@ -2290,10 +2290,7 @@ export function DiennDashboardClient({
                 <span className="font-medium text-slate-600">
                   {rendimientoVsMavesaData.clientesConCompra} de {rendimientoVsMavesaData.clientesEnCartera} PDV
                 </span>{" "}
-                de la cartera del corte · Meta 4%:{" "}
-                <span className="font-medium text-emerald-700">
-                  {rendimientoVsMavesaData.meta4Pct.toLocaleString("es-VE", { maximumFractionDigits: 1 })} kg/día
-                </span>
+                de la cartera del corte
               </p>
             </>
           ) : (
