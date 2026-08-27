@@ -745,88 +745,6 @@ export function DiennDashboardClient({
         />
       </div>
 
-      {/* ── Panquecitas vs Harina PAN ──────────────────────────────────── */}
-      <Card className="mb-6 print-avoid-break">
-        <CardHeader className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between space-y-0">
-          <div>
-            <CardTitle>Panquecitas vs Harina PAN</CardTitle>
-            <p className="text-xs text-slate-400 mt-1">
-              Despachado confirmado por Carga Radar de ambos productos — misma fuente para los dos, desde la
-              primera hasta la última fecha cargada.{" "}
-              {panPoblacion === "clientes"
-                ? "Solo clientes con Radar > 0 de Panquecitas."
-                : "Todos los clientes del universo del piloto vigente en cada fecha, hayan comprado Panquecitas o no."}
-            </p>
-          </div>
-          <div className="flex flex-wrap items-center gap-2 print:hidden">
-            <div className="flex rounded-lg border border-slate-200 overflow-hidden text-xs font-medium">
-              {PAN_POBLACION_OPTIONS.map((opt) => (
-                <button
-                  key={opt.key}
-                  onClick={() => setPanPoblacion(opt.key)}
-                  className={`px-3 py-1.5 transition-colors ${
-                    panPoblacion === opt.key ? "bg-slate-900 text-white" : "bg-white text-slate-500 hover:bg-slate-50"
-                  }`}
-                >
-                  {opt.label}
-                </button>
-              ))}
-            </div>
-            <div className="flex rounded-lg border border-slate-200 overflow-hidden text-xs font-medium">
-              {PAN_GRANULARITY_OPTIONS.map((opt) => (
-                <button
-                  key={opt.key}
-                  onClick={() => setPanGranularity(opt.key)}
-                  className={`px-3 py-1.5 transition-colors ${
-                    panGranularity === opt.key
-                      ? "bg-slate-900 text-white"
-                      : "bg-white text-slate-500 hover:bg-slate-50"
-                  }`}
-                >
-                  {opt.label}
-                </button>
-              ))}
-            </div>
-            {/* Ratio acumulado por ciudad, superpuesto (eje propio en %). */}
-            <button
-              onClick={() => setRatioPorCiudadPan((v) => !v)}
-              title="Superpone el ratio Panquecitas/Harina PAN acumulado de cada ciudad"
-              className={`px-3 py-1.5 rounded-lg border text-xs font-medium transition-colors ${
-                ratioPorCiudadPan
-                  ? "border-sky-700 bg-sky-700 text-white"
-                  : "border-slate-200 bg-white text-slate-500 hover:bg-slate-50"
-              }`}
-            >
-              Ratio acum. por ciudad
-            </button>
-            <ExportExcelButton
-              filename="datos_panquecitas_vs_harina_pan"
-              rows={panPoints}
-              columns={[
-                { header: "Período", value: (r) => r.label },
-                { header: "Panquecitas (kg)", value: (r) => r.panquecitasKg },
-                { header: "Harina PAN (kg)", value: (r) => r.harinaPanKg },
-                { header: "Ratio acum. Cumaná (%)", value: (r) => r.ratioCumanaAcum ?? "" },
-                { header: "Ratio acum. Cabudare (%)", value: (r) => r.ratioCabudareAcum ?? "" },
-              ]}
-            />
-          </div>
-        </CardHeader>
-        <CardContent>
-          {panPoints.length > 0 ? (
-            <PanVsHarinaPanChart data={panPoints} showRatioCiudades={ratioPorCiudadPan} />
-          ) : (
-            <div className="h-[300px] flex items-center justify-center text-slate-400">
-              <div className="text-center">
-                <p className="text-4xl mb-2">📊</p>
-                <p>Sin datos de Panquecitas o Harina PAN todavía.</p>
-                <p className="text-xs mt-1">Carga Radar de ambos productos (Panquecitas y Harina PAN).</p>
-              </div>
-            </div>
-          )}
-        </CardContent>
-      </Card>
-
       {/* ── Rendimiento diario vs. promedio histórico 3 Meses ──────────── */}
       <Card className="mb-6 print-avoid-break">
         <CardHeader className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between space-y-0">
@@ -1028,6 +946,426 @@ export function DiennDashboardClient({
       </Card>
 
       <Separator className="mb-4 print:hidden" />
+
+      {/* ── Rendimiento vs. Margarina/Mayonesa (Mavesa) ────────────────── */}
+      <Card className="mb-6 print-avoid-break">
+        <CardHeader className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between space-y-0">
+          <div>
+            <CardTitle>Rendimiento Diario vs. Margarina/Mayonesa</CardTitle>
+            <p className="text-xs text-slate-400 mt-1">
+              Misma mecánica que el gráfico de PAN: venta diaria de Panquecitas (Carga Radar) contra el promedio de
+              ventas diarias de la categoría elegida (Mavesa), calculado con el período real cargado en su reporte de
+              referencia. La línea continua es ese promedio y la punteada su 4%. El porcentaje sobre cada punto es el
+              ratio del día. Con <span className="font-medium">Cumaná</span> o <span className="font-medium">Cabudare</span>{" "}
+              el gráfico se acota a esa ciudad.
+            </p>
+          </div>
+          <div className="flex flex-wrap items-center gap-2 print:hidden">
+            <div className="flex rounded-lg border border-slate-200 overflow-hidden text-xs font-medium">
+              {(
+                [
+                  ["margarina", "vs. Margarina"],
+                  ["mayonesa", "vs. Mayonesa"],
+                ] as const
+              ).map(([key, label]) => (
+                <button
+                  key={key}
+                  onClick={() => setCategoriaMavesa(key)}
+                  className={`px-3 py-1.5 transition-colors ${
+                    categoriaMavesa === key ? "bg-slate-900 text-white" : "bg-white text-slate-500 hover:bg-slate-50"
+                  }`}
+                >
+                  {label}
+                </button>
+              ))}
+            </div>
+            <div className="flex rounded-lg border border-slate-200 overflow-hidden text-xs font-medium">
+              {(
+                [
+                  ["TOTAL", "Total"],
+                  ["cumana", "Cumaná"],
+                  ["barquisimeto_este", "Cabudare"],
+                ] as const
+              ).map(([key, label]) => (
+                <button
+                  key={key}
+                  onClick={() => setCiudadMavesa(key)}
+                  className={`px-3 py-1.5 transition-colors ${
+                    ciudadMavesa === key ? "bg-sky-700 text-white" : "bg-white text-slate-500 hover:bg-slate-50"
+                  }`}
+                >
+                  {label}
+                </button>
+              ))}
+            </div>
+            <button
+              onClick={() => setShowReferenciaMavesaDiario((v) => !v)}
+              title="Muestra u oculta la línea del promedio diario de la categoría elegida"
+              className={`px-3 py-1.5 rounded-lg border text-xs font-medium transition-colors ${
+                showReferenciaMavesaDiario
+                  ? "border-slate-900 bg-slate-900 text-white"
+                  : "border-slate-200 bg-white text-slate-500 hover:bg-slate-50"
+              }`}
+            >
+              Línea referencia: {showReferenciaMavesaDiario ? "Visible" : "Oculta"}
+            </button>
+            <button
+              onClick={() => setRatioPorCiudadMavesa((v) => !v)}
+              title="Superpone el ratio acumulado de cada ciudad contra su propio promedio"
+              className={`px-3 py-1.5 rounded-lg border text-xs font-medium transition-colors ${
+                ratioPorCiudadMavesa
+                  ? "border-sky-700 bg-sky-700 text-white"
+                  : "border-slate-200 bg-white text-slate-500 hover:bg-slate-50"
+              }`}
+            >
+              Ratio acum. por ciudad
+            </button>
+            <ExportExcelButton
+              filename={`Rendimiento vs ${categoriaMavesa} — ${filtroTexto}`}
+              rows={rendimientoVsMavesaData.puntos}
+              columns={[
+                { header: "Día", value: (r) => r.dia, width: 14 },
+                { header: "Panquecitas (kg)", value: (r) => r.panquecitasKg, width: 18 },
+                { header: `Ratio vs promedio ${categoriaMavesa} (%)`, value: (r) => r.ratioPct, width: 26 },
+              ]}
+            />
+          </div>
+        </CardHeader>
+        <CardContent>
+          {rendimientoVsMavesaData.puntos.length > 0 ? (
+            <>
+              <div className="relative">
+                {ratioAcumuladoMavesa && (
+                  <div
+                    className="absolute right-0 top-0 z-10 rounded-lg border border-slate-200 bg-white/90 px-3 py-1.5 pointer-events-none"
+                    title={`Promedio de los ${ratioAcumuladoMavesa.dias} ratios diarios del período.`}
+                  >
+                    <p className="text-[10px] uppercase tracking-wide text-slate-400 leading-none">
+                      Ratio acumulado
+                    </p>
+                    <p
+                      className={`text-sm font-semibold leading-tight ${
+                        ratioAcumuladoMavesa.pct >= 4 ? "text-emerald-700" : "text-slate-900"
+                      }`}
+                    >
+                      {ratioAcumuladoMavesa.pct.toLocaleString("es-VE", { maximumFractionDigits: 1 })}%
+                      <span className="text-[10px] font-normal text-slate-400"> · meta 4%</span>
+                    </p>
+                  </div>
+                )}
+                <RendimientoVsMavesaChart
+                  data={rendimientoVsMavesaData}
+                  categoriaLabel={categoriaMavesa === "margarina" ? "Margarina" : "Mayonesa"}
+                  showReferenciaDiario={showReferenciaMavesaDiario}
+                  ratiosCiudad={ratiosMavesaPorCiudad}
+                  showRatioCiudades={ratioPorCiudadMavesa}
+                />
+              </div>
+              <p className="text-xs text-slate-400 mt-2">
+                Promedio {categoriaMavesa === "margarina" ? "Margarina" : "Mayonesa"}:{" "}
+                <span className="font-medium text-slate-600">
+                  {rendimientoVsMavesaData.promedioReferencia.toLocaleString("es-VE", { maximumFractionDigits: 1 })}{" "}
+                  kg/día
+                </span>{" "}
+                ({rendimientoVsMavesaData.totalReferenciaKg.toLocaleString("es-VE", { maximumFractionDigits: 0 })} kg ÷{" "}
+                {rendimientoVsMavesaData.diasPeriodo} días hábiles, del {rendimientoVsMavesaData.desde} al{" "}
+                {rendimientoVsMavesaData.hasta}) · aportado por{" "}
+                <span className="font-medium text-slate-600">
+                  {rendimientoVsMavesaData.clientesConCompra} de {rendimientoVsMavesaData.clientesEnCartera} PDV
+                </span>{" "}
+                de la cartera del corte
+              </p>
+            </>
+          ) : (
+            <div className="h-[340px] flex items-center justify-center text-slate-400">
+              <div className="text-center">
+                <p className="text-4xl mb-2">📉</p>
+                <p>Sin datos todavía.</p>
+                <p className="text-xs mt-1">
+                  Falta cargar el reporte de referencia de {categoriaMavesa === "margarina" ? "Margarina" : "Mayonesa"}.
+                </p>
+              </div>
+            </div>
+          )}
+        </CardContent>
+      {/* ── Efectividad y volumen acumulado (total + comparativo por ciudad) ── */}
+      <div className="mb-2 flex flex-wrap items-center justify-between gap-3">
+        <div>
+          <h2 className="text-lg font-bold text-slate-900">Efectividad y volumen acumulado</h2>
+          <p className="text-sm text-slate-400">
+            Total (ambas ciudades) y el comparativo por ciudad. Cada gráfico usa la granularidad seleccionada.
+          </p>
+        </div>
+        <ExportExcelMultiButton
+          filename="Efectividad — 3 gráficos"
+          label="Bajar los 3 (Excel)"
+          sheets={efectividadExcelSheets}
+        />
+      </div>
+
+      {/* ── Total acumulado (día/semana/mes, ambas ciudades y modelos) ───── */}
+      {carteraTotalDiaData.length > 0 && (
+        <Card className="mb-6 print-avoid-break">
+          <CardHeader className="flex flex-row items-start justify-between gap-3 space-y-0">
+            <div>
+              <CardTitle>Total acumulado (ambas ciudades y modelos)</CardTitle>
+              <p className="text-xs text-slate-400 mt-1">
+                Barras: Radar por período (kg). Línea de efectividad (
+                {carteraMetrica === "activos" ? "activos" : carteraMetrica === "facturados" ? "facturados" : "pedidos"}),
+                según la métrica seleccionada — <span style={{ color: efectividadColor }} className="font-medium">
+                {carteraMetrica === "activos" ? "Radar (rojo)" : carteraMetrica === "facturados" ? "Facturado (azul marino)" : "Pedidos (naranja)"}
+                </span>. Series opcionales: activación por Radar del modelo{" "}
+                <span className="font-medium text-[#4f7a5c]">Directo</span> y{" "}
+                <span className="font-medium text-[#8a6d3b]">Indirecto</span>. Con los botones{" "}
+                <span className="font-medium">Efectividad</span> y <span className="font-medium">Modelos</span> alternas
+                cada línea entre el valor del período (Día) y el{" "}
+                <span className="font-medium">acumulado</span> (activos ÷ cartera total). Las barras se pueden desglosar
+                por modelo (<span className="font-medium">Ventas Directo / Indirecto</span>) o por ciudad (
+                <span className="font-medium">Ventas Cumaná / Cabudare</span>, en dos tonos de azul que se repiten en
+                sus líneas de activación), y la línea de efectividad total se apaga con{" "}
+                <span className="font-medium">Línea total</span>. Todo aplica también a los gráficos comparativos
+                (Cumaná / Cabudare).
+              </p>
+            </div>
+            <div className="flex flex-col items-end gap-2 print:hidden">
+              <div className="flex flex-wrap items-center justify-end gap-2">
+                {/* Métrica de efectividad: mismo denominador (a visitar), distinto numerador. */}
+                <div className="flex rounded-lg border border-slate-200 overflow-hidden text-xs font-medium">
+                  {(
+                    [
+                      ["activos", "Activos (Radar)"],
+                      ["facturados", "Facturados"],
+                      ["pedidos", "Pedidos"],
+                    ] as const
+                  ).map(([key, label]) => (
+                    <button
+                      key={key}
+                      onClick={() => setCarteraMetrica(key)}
+                      className={`px-3 py-1.5 transition-colors ${
+                        carteraMetrica === key ? "bg-red-600 text-white" : "bg-white text-slate-500 hover:bg-slate-50"
+                      }`}
+                    >
+                      {label}
+                    </button>
+                  ))}
+                </div>
+                {/* Granularidad propia de este gráfico (día / semana / mes). */}
+                <div className="flex rounded-lg border border-slate-200 overflow-hidden text-xs font-medium">
+                  {GRANULARITY_OPTIONS.map((opt) => (
+                    <button
+                      key={opt.key}
+                      onClick={() => setTotalGranularity(opt.key)}
+                      className={`px-3 py-1.5 transition-colors ${
+                        totalGranularity === opt.key
+                          ? "bg-slate-900 text-white"
+                          : "bg-white text-slate-500 hover:bg-slate-50"
+                      }`}
+                    >
+                      {opt.label}
+                    </button>
+                  ))}
+                </div>
+                {/* Toggles de activación por modelo (independientes, prenden/apagan). */}
+                <button
+                  onClick={() => setShowDirectoTotal((v) => !v)}
+                  className={`px-3 py-1.5 rounded-lg border text-xs font-medium transition-colors ${
+                    showDirectoTotal
+                      ? "border-[#4f7a5c] bg-[#4f7a5c] text-white"
+                      : "border-slate-200 bg-white text-slate-500 hover:bg-slate-50"
+                  }`}
+                >
+                  Activación Directo
+                </button>
+                <button
+                  onClick={() => setShowIndirectoTotal((v) => !v)}
+                  className={`px-3 py-1.5 rounded-lg border text-xs font-medium transition-colors ${
+                    showIndirectoTotal
+                      ? "border-[#8a6d3b] bg-[#8a6d3b] text-white"
+                      : "border-slate-200 bg-white text-slate-500 hover:bg-slate-50"
+                  }`}
+                >
+                  Activación Indirecto
+                </button>
+                {/* Vista día ↔ acumulado, separada: línea principal vs líneas por modelo. */}
+                <button
+                  onClick={() => setEfectividadAcum((v) => !v)}
+                  title="Cambia la línea principal entre el valor del período y el acumulado (activos ÷ cartera total)"
+                  className={`px-3 py-1.5 rounded-lg border text-xs font-medium transition-colors ${
+                    efectividadAcum
+                      ? "border-red-600 bg-red-600 text-white"
+                      : "border-slate-200 bg-white text-slate-500 hover:bg-slate-50"
+                  }`}
+                >
+                  Efectividad: {efectividadAcum ? "Acumulado" : "Día"}
+                </button>
+                <button
+                  onClick={() => setModeloAcum((v) => !v)}
+                  title="Cambia las líneas de modelo (Directo/Indirecto) entre el valor del período y el acumulado"
+                  className={`px-3 py-1.5 rounded-lg border text-xs font-medium transition-colors ${
+                    modeloAcum
+                      ? "border-slate-900 bg-slate-900 text-white"
+                      : "border-slate-200 bg-white text-slate-500 hover:bg-slate-50"
+                  }`}
+                >
+                  Modelos: {modeloAcum ? "Acumulado" : "Día"}
+                </button>
+                {/* Barras de volumen Radar del período por modelo (independientes). */}
+                <button
+                  onClick={() => setVentasDirecto((v) => !v)}
+                  title="Muestra las barras de volumen Radar del período del modelo Directo"
+                  className={`px-3 py-1.5 rounded-lg border text-xs font-medium transition-colors ${
+                    ventasDirecto
+                      ? "border-[#4f7a5c] bg-[#4f7a5c] text-white"
+                      : "border-slate-200 bg-white text-slate-500 hover:bg-slate-50"
+                  }`}
+                >
+                  Ventas Directo
+                </button>
+                <button
+                  onClick={() => setVentasIndirecto((v) => !v)}
+                  title="Muestra las barras de volumen Radar del período del modelo Indirecto"
+                  className={`px-3 py-1.5 rounded-lg border text-xs font-medium transition-colors ${
+                    ventasIndirecto
+                      ? "border-[#8a6d3b] bg-[#8a6d3b] text-white"
+                      : "border-slate-200 bg-white text-slate-500 hover:bg-slate-50"
+                  }`}
+                >
+                  Ventas Indirecto
+                </button>
+                {/* Mismas barras pero por ciudad — la etiqueta lleva kg + ciudad. */}
+                <button
+                  onClick={() => setVentasCumana((v) => !v)}
+                  title="Muestra las barras de volumen Radar del período de Cumaná (solo kg; la ciudad se identifica por color)"
+                  className={`px-3 py-1.5 rounded-lg border text-xs font-medium transition-colors ${
+                    ventasCumana
+                      ? "border-sky-700 bg-sky-700 text-white"
+                      : "border-slate-200 bg-white text-slate-500 hover:bg-slate-50"
+                  }`}
+                >
+                  Ventas Cumaná
+                </button>
+                <button
+                  onClick={() => setVentasCabudare((v) => !v)}
+                  title="Muestra las barras de volumen Radar del período de Cabudare (solo kg; la ciudad se identifica por color)"
+                  className={`px-3 py-1.5 rounded-lg border text-xs font-medium transition-colors ${
+                    ventasCabudare
+                      ? "border-blue-900 bg-blue-900 text-white"
+                      : "border-slate-200 bg-white text-slate-500 hover:bg-slate-50"
+                  }`}
+                >
+                  Ventas Cabudare
+                </button>
+                {/* Prende/apaga la línea de efectividad total (la de la métrica activa). */}
+                <button
+                  onClick={() => setShowEfectividadTotal((v) => !v)}
+                  title="Muestra u oculta la línea de efectividad total (Radar / Facturado / Pedidos)"
+                  className={`px-3 py-1.5 rounded-lg border text-xs font-medium transition-colors ${
+                    showEfectividadTotal
+                      ? "border-slate-900 bg-slate-900 text-white"
+                      : "border-slate-200 bg-white text-slate-500 hover:bg-slate-50"
+                  }`}
+                >
+                  Línea total: {showEfectividadTotal ? "Visible" : "Oculta"}
+                </button>
+                {/* Capas de efectividad por ciudad, superpuestas a la total (independientes). */}
+                <button
+                  onClick={() => setCiudadAcum((v) => !v)}
+                  title="Superpone la efectividad ACUMULADA de cada ciudad (Cumaná / Cabudare)"
+                  className={`px-3 py-1.5 rounded-lg border text-xs font-medium transition-colors ${
+                    ciudadAcum
+                      ? "border-sky-700 bg-sky-700 text-white"
+                      : "border-slate-200 bg-white text-slate-500 hover:bg-slate-50"
+                  }`}
+                >
+                  Ciudad Acum.
+                </button>
+                <button
+                  onClick={() => setCiudadDia((v) => !v)}
+                  title="Superpone la efectividad DIARIA (no acumulada) de cada ciudad (Cumaná / Cabudare)"
+                  className={`px-3 py-1.5 rounded-lg border text-xs font-medium transition-colors ${
+                    ciudadDia
+                      ? "border-blue-900 bg-blue-900 text-white"
+                      : "border-slate-200 bg-white text-slate-500 hover:bg-slate-50"
+                  }`}
+                >
+                  Ciudad Día
+                </button>
+                {/* Cuál ciudad se superpone (aplica a ambas capas de ciudad). */}
+                <select
+                  value={ciudadSel}
+                  onChange={(e) => setCiudadSel(e.target.value as "ambas" | "cumana" | "barquisimeto_este")}
+                  className="text-xs border border-slate-200 rounded-lg px-2 py-1.5 bg-white text-slate-700"
+                >
+                  <option value="ambas">Ambas ciudades</option>
+                  <option value="cumana">Solo Cumaná</option>
+                  <option value="barquisimeto_este">Solo Cabudare</option>
+                </select>
+              </div>
+              <ExportExcelButton
+                filename="Cartera total acumulado"
+                rows={carteraPorSegmento.totalPorDia[totalGranularity]}
+                chart={TOTAL_ACUM_CHART}
+                columns={TOTAL_ACUM_COLUMNS}
+              />
+            </div>
+          </CardHeader>
+          <CardContent>
+            <CarteraTotalDiaChart
+              data={carteraTotalDiaData}
+              showEfectividad={showEfectividadTotal}
+              showDirecto={showDirectoTotal}
+              showIndirecto={showIndirectoTotal}
+              efectividadColor={efectividadColor}
+              showVentasDirecto={ventasDirecto}
+              showVentasIndirecto={ventasIndirecto}
+              showVentasCumana={ventasCumana}
+              showVentasCabudare={ventasCabudare}
+              showCiudadAcum={ciudadAcum}
+              showCiudadDia={ciudadDia}
+              showCumana={ciudadSel !== "barquisimeto_este"}
+              showCabudare={ciudadSel !== "cumana"}
+            />
+          </CardContent>
+        </Card>
+      )}
+
+      {/* ── Comparativo por sector: mismo total acumulado, Cumaná vs Cabudare ── */}
+      {carteraTotalPorSectorData.some((s) => s.data.length > 0) && (
+        <div className="grid grid-cols-1 gap-6 mb-6 lg:grid-cols-2">
+          {carteraTotalPorSectorData.map((s) => (
+            <Card key={s.sector} className="print-avoid-break">
+              <CardHeader className="flex flex-row items-start justify-between gap-3 space-y-0">
+                <div>
+                  <CardTitle>Total acumulado — {s.label}</CardTitle>
+                  <p className="text-xs text-slate-400 mt-1">
+                    Mismo gráfico, acotado a {s.label}. Usa los filtros de arriba (métrica, granularidad y series por
+                    modelo).
+                  </p>
+                </div>
+                <ExportExcelButton
+                  filename={`Total acumulado — ${s.label}`}
+                  rows={carteraPorSegmento.totalPorSector[s.sector][totalGranularity]}
+                  chart={sectorAcumChart(s.label)}
+                  columns={SECTOR_ACUM_COLUMNS}
+                />
+              </CardHeader>
+              <CardContent>
+                <CarteraTotalDiaChart
+                  data={s.data}
+                  showEfectividad={showEfectividadTotal}
+                  showDirecto={showDirectoTotal}
+                  showIndirecto={showIndirectoTotal}
+                  efectividadColor={efectividadColor}
+                  showVentasDirecto={ventasDirecto}
+                  showVentasIndirecto={ventasIndirecto}
+                />
+              </CardContent>
+            </Card>
+          ))}
+        </div>
+      )}
+
+      <Separator className="mb-6 print:hidden" />
 
       {/* ── Filtro de granularidad temporal (Demanda Insatisfecha y Cobertura) ── */}
       <div className="flex items-center gap-2 mb-6 print:hidden">
@@ -1342,367 +1680,6 @@ export function DiennDashboardClient({
       </Card>
 
       <Separator className="mb-6 print:hidden" />
-
-      {/* ── Efectividad y volumen acumulado (total + comparativo por ciudad) ── */}
-      <div className="mb-2 flex flex-wrap items-center justify-between gap-3">
-        <div>
-          <h2 className="text-lg font-bold text-slate-900">Efectividad y volumen acumulado</h2>
-          <p className="text-sm text-slate-400">
-            Total (ambas ciudades) y el comparativo por ciudad. Cada gráfico usa la granularidad seleccionada.
-          </p>
-        </div>
-        <ExportExcelMultiButton
-          filename="Efectividad — 3 gráficos"
-          label="Bajar los 3 (Excel)"
-          sheets={efectividadExcelSheets}
-        />
-      </div>
-
-      {/* ── Total acumulado (día/semana/mes, ambas ciudades y modelos) ───── */}
-      {carteraTotalDiaData.length > 0 && (
-        <Card className="mb-6 print-avoid-break">
-          <CardHeader className="flex flex-row items-start justify-between gap-3 space-y-0">
-            <div>
-              <CardTitle>Total acumulado (ambas ciudades y modelos)</CardTitle>
-              <p className="text-xs text-slate-400 mt-1">
-                Barras: Radar por período (kg). Línea de efectividad (
-                {carteraMetrica === "activos" ? "activos" : carteraMetrica === "facturados" ? "facturados" : "pedidos"}),
-                según la métrica seleccionada — <span style={{ color: efectividadColor }} className="font-medium">
-                {carteraMetrica === "activos" ? "Radar (rojo)" : carteraMetrica === "facturados" ? "Facturado (azul marino)" : "Pedidos (naranja)"}
-                </span>. Series opcionales: activación por Radar del modelo{" "}
-                <span className="font-medium text-[#4f7a5c]">Directo</span> y{" "}
-                <span className="font-medium text-[#8a6d3b]">Indirecto</span>. Con los botones{" "}
-                <span className="font-medium">Efectividad</span> y <span className="font-medium">Modelos</span> alternas
-                cada línea entre el valor del período (Día) y el{" "}
-                <span className="font-medium">acumulado</span> (activos ÷ cartera total). Las barras se pueden desglosar
-                por modelo (<span className="font-medium">Ventas Directo / Indirecto</span>) o por ciudad (
-                <span className="font-medium">Ventas Cumaná / Cabudare</span>, en dos tonos de azul que se repiten en
-                sus líneas de activación), y la línea de efectividad total se apaga con{" "}
-                <span className="font-medium">Línea total</span>. Todo aplica también a los gráficos comparativos
-                (Cumaná / Cabudare).
-              </p>
-            </div>
-            <div className="flex flex-col items-end gap-2 print:hidden">
-              <div className="flex flex-wrap items-center justify-end gap-2">
-                {/* Métrica de efectividad: mismo denominador (a visitar), distinto numerador. */}
-                <div className="flex rounded-lg border border-slate-200 overflow-hidden text-xs font-medium">
-                  {(
-                    [
-                      ["activos", "Activos (Radar)"],
-                      ["facturados", "Facturados"],
-                      ["pedidos", "Pedidos"],
-                    ] as const
-                  ).map(([key, label]) => (
-                    <button
-                      key={key}
-                      onClick={() => setCarteraMetrica(key)}
-                      className={`px-3 py-1.5 transition-colors ${
-                        carteraMetrica === key ? "bg-red-600 text-white" : "bg-white text-slate-500 hover:bg-slate-50"
-                      }`}
-                    >
-                      {label}
-                    </button>
-                  ))}
-                </div>
-                {/* Granularidad propia de este gráfico (día / semana / mes). */}
-                <div className="flex rounded-lg border border-slate-200 overflow-hidden text-xs font-medium">
-                  {GRANULARITY_OPTIONS.map((opt) => (
-                    <button
-                      key={opt.key}
-                      onClick={() => setTotalGranularity(opt.key)}
-                      className={`px-3 py-1.5 transition-colors ${
-                        totalGranularity === opt.key
-                          ? "bg-slate-900 text-white"
-                          : "bg-white text-slate-500 hover:bg-slate-50"
-                      }`}
-                    >
-                      {opt.label}
-                    </button>
-                  ))}
-                </div>
-                {/* Toggles de activación por modelo (independientes, prenden/apagan). */}
-                <button
-                  onClick={() => setShowDirectoTotal((v) => !v)}
-                  className={`px-3 py-1.5 rounded-lg border text-xs font-medium transition-colors ${
-                    showDirectoTotal
-                      ? "border-[#4f7a5c] bg-[#4f7a5c] text-white"
-                      : "border-slate-200 bg-white text-slate-500 hover:bg-slate-50"
-                  }`}
-                >
-                  Activación Directo
-                </button>
-                <button
-                  onClick={() => setShowIndirectoTotal((v) => !v)}
-                  className={`px-3 py-1.5 rounded-lg border text-xs font-medium transition-colors ${
-                    showIndirectoTotal
-                      ? "border-[#8a6d3b] bg-[#8a6d3b] text-white"
-                      : "border-slate-200 bg-white text-slate-500 hover:bg-slate-50"
-                  }`}
-                >
-                  Activación Indirecto
-                </button>
-                {/* Vista día ↔ acumulado, separada: línea principal vs líneas por modelo. */}
-                <button
-                  onClick={() => setEfectividadAcum((v) => !v)}
-                  title="Cambia la línea principal entre el valor del período y el acumulado (activos ÷ cartera total)"
-                  className={`px-3 py-1.5 rounded-lg border text-xs font-medium transition-colors ${
-                    efectividadAcum
-                      ? "border-red-600 bg-red-600 text-white"
-                      : "border-slate-200 bg-white text-slate-500 hover:bg-slate-50"
-                  }`}
-                >
-                  Efectividad: {efectividadAcum ? "Acumulado" : "Día"}
-                </button>
-                <button
-                  onClick={() => setModeloAcum((v) => !v)}
-                  title="Cambia las líneas de modelo (Directo/Indirecto) entre el valor del período y el acumulado"
-                  className={`px-3 py-1.5 rounded-lg border text-xs font-medium transition-colors ${
-                    modeloAcum
-                      ? "border-slate-900 bg-slate-900 text-white"
-                      : "border-slate-200 bg-white text-slate-500 hover:bg-slate-50"
-                  }`}
-                >
-                  Modelos: {modeloAcum ? "Acumulado" : "Día"}
-                </button>
-                {/* Barras de volumen Radar del período por modelo (independientes). */}
-                <button
-                  onClick={() => setVentasDirecto((v) => !v)}
-                  title="Muestra las barras de volumen Radar del período del modelo Directo"
-                  className={`px-3 py-1.5 rounded-lg border text-xs font-medium transition-colors ${
-                    ventasDirecto
-                      ? "border-[#4f7a5c] bg-[#4f7a5c] text-white"
-                      : "border-slate-200 bg-white text-slate-500 hover:bg-slate-50"
-                  }`}
-                >
-                  Ventas Directo
-                </button>
-                <button
-                  onClick={() => setVentasIndirecto((v) => !v)}
-                  title="Muestra las barras de volumen Radar del período del modelo Indirecto"
-                  className={`px-3 py-1.5 rounded-lg border text-xs font-medium transition-colors ${
-                    ventasIndirecto
-                      ? "border-[#8a6d3b] bg-[#8a6d3b] text-white"
-                      : "border-slate-200 bg-white text-slate-500 hover:bg-slate-50"
-                  }`}
-                >
-                  Ventas Indirecto
-                </button>
-                {/* Mismas barras pero por ciudad — la etiqueta lleva kg + ciudad. */}
-                <button
-                  onClick={() => setVentasCumana((v) => !v)}
-                  title="Muestra las barras de volumen Radar del período de Cumaná (solo kg; la ciudad se identifica por color)"
-                  className={`px-3 py-1.5 rounded-lg border text-xs font-medium transition-colors ${
-                    ventasCumana
-                      ? "border-sky-700 bg-sky-700 text-white"
-                      : "border-slate-200 bg-white text-slate-500 hover:bg-slate-50"
-                  }`}
-                >
-                  Ventas Cumaná
-                </button>
-                <button
-                  onClick={() => setVentasCabudare((v) => !v)}
-                  title="Muestra las barras de volumen Radar del período de Cabudare (solo kg; la ciudad se identifica por color)"
-                  className={`px-3 py-1.5 rounded-lg border text-xs font-medium transition-colors ${
-                    ventasCabudare
-                      ? "border-blue-900 bg-blue-900 text-white"
-                      : "border-slate-200 bg-white text-slate-500 hover:bg-slate-50"
-                  }`}
-                >
-                  Ventas Cabudare
-                </button>
-                {/* Prende/apaga la línea de efectividad total (la de la métrica activa). */}
-                <button
-                  onClick={() => setShowEfectividadTotal((v) => !v)}
-                  title="Muestra u oculta la línea de efectividad total (Radar / Facturado / Pedidos)"
-                  className={`px-3 py-1.5 rounded-lg border text-xs font-medium transition-colors ${
-                    showEfectividadTotal
-                      ? "border-slate-900 bg-slate-900 text-white"
-                      : "border-slate-200 bg-white text-slate-500 hover:bg-slate-50"
-                  }`}
-                >
-                  Línea total: {showEfectividadTotal ? "Visible" : "Oculta"}
-                </button>
-                {/* Capas de efectividad por ciudad, superpuestas a la total (independientes). */}
-                <button
-                  onClick={() => setCiudadAcum((v) => !v)}
-                  title="Superpone la efectividad ACUMULADA de cada ciudad (Cumaná / Cabudare)"
-                  className={`px-3 py-1.5 rounded-lg border text-xs font-medium transition-colors ${
-                    ciudadAcum
-                      ? "border-sky-700 bg-sky-700 text-white"
-                      : "border-slate-200 bg-white text-slate-500 hover:bg-slate-50"
-                  }`}
-                >
-                  Ciudad Acum.
-                </button>
-                <button
-                  onClick={() => setCiudadDia((v) => !v)}
-                  title="Superpone la efectividad DIARIA (no acumulada) de cada ciudad (Cumaná / Cabudare)"
-                  className={`px-3 py-1.5 rounded-lg border text-xs font-medium transition-colors ${
-                    ciudadDia
-                      ? "border-blue-900 bg-blue-900 text-white"
-                      : "border-slate-200 bg-white text-slate-500 hover:bg-slate-50"
-                  }`}
-                >
-                  Ciudad Día
-                </button>
-                {/* Cuál ciudad se superpone (aplica a ambas capas de ciudad). */}
-                <select
-                  value={ciudadSel}
-                  onChange={(e) => setCiudadSel(e.target.value as "ambas" | "cumana" | "barquisimeto_este")}
-                  className="text-xs border border-slate-200 rounded-lg px-2 py-1.5 bg-white text-slate-700"
-                >
-                  <option value="ambas">Ambas ciudades</option>
-                  <option value="cumana">Solo Cumaná</option>
-                  <option value="barquisimeto_este">Solo Cabudare</option>
-                </select>
-              </div>
-              <ExportExcelButton
-                filename="Cartera total acumulado"
-                rows={carteraPorSegmento.totalPorDia[totalGranularity]}
-                chart={TOTAL_ACUM_CHART}
-                columns={TOTAL_ACUM_COLUMNS}
-              />
-            </div>
-          </CardHeader>
-          <CardContent>
-            <CarteraTotalDiaChart
-              data={carteraTotalDiaData}
-              showEfectividad={showEfectividadTotal}
-              showDirecto={showDirectoTotal}
-              showIndirecto={showIndirectoTotal}
-              efectividadColor={efectividadColor}
-              showVentasDirecto={ventasDirecto}
-              showVentasIndirecto={ventasIndirecto}
-              showVentasCumana={ventasCumana}
-              showVentasCabudare={ventasCabudare}
-              showCiudadAcum={ciudadAcum}
-              showCiudadDia={ciudadDia}
-              showCumana={ciudadSel !== "barquisimeto_este"}
-              showCabudare={ciudadSel !== "cumana"}
-            />
-          </CardContent>
-        </Card>
-      )}
-
-      {/* ── Comparativo por sector: mismo total acumulado, Cumaná vs Cabudare ── */}
-      {carteraTotalPorSectorData.some((s) => s.data.length > 0) && (
-        <div className="grid grid-cols-1 gap-6 mb-6 lg:grid-cols-2">
-          {carteraTotalPorSectorData.map((s) => (
-            <Card key={s.sector} className="print-avoid-break">
-              <CardHeader className="flex flex-row items-start justify-between gap-3 space-y-0">
-                <div>
-                  <CardTitle>Total acumulado — {s.label}</CardTitle>
-                  <p className="text-xs text-slate-400 mt-1">
-                    Mismo gráfico, acotado a {s.label}. Usa los filtros de arriba (métrica, granularidad y series por
-                    modelo).
-                  </p>
-                </div>
-                <ExportExcelButton
-                  filename={`Total acumulado — ${s.label}`}
-                  rows={carteraPorSegmento.totalPorSector[s.sector][totalGranularity]}
-                  chart={sectorAcumChart(s.label)}
-                  columns={SECTOR_ACUM_COLUMNS}
-                />
-              </CardHeader>
-              <CardContent>
-                <CarteraTotalDiaChart
-                  data={s.data}
-                  showEfectividad={showEfectividadTotal}
-                  showDirecto={showDirectoTotal}
-                  showIndirecto={showIndirectoTotal}
-                  efectividadColor={efectividadColor}
-                  showVentasDirecto={ventasDirecto}
-                  showVentasIndirecto={ventasIndirecto}
-                />
-              </CardContent>
-            </Card>
-          ))}
-        </div>
-      )}
-
-      <Separator className="mb-6 print:hidden" />
-
-      {/* ── Gráfico 3: Sell-In (SAP) vs Inventario PDV vs Sell-Out ────────── */}
-      <div className="mb-2 flex flex-wrap items-center justify-between gap-3">
-        <div>
-          <h2 className="text-lg font-bold text-slate-900">Sell-In (SAP) vs Sell-Out (PDV)</h2>
-          <p className="text-sm text-slate-400">
-            Comparativo agregado: reporte SAP (Radar), inventario contado en PDV por el mercaderista, y el Sell-Out
-            como su diferencia. Una sola visita — no depende de dos rondas.
-          </p>
-        </div>
-        <div className="flex flex-wrap gap-2 print:hidden">
-          <select
-            value={zonaFilter}
-            onChange={(e) => setZonaFilter(e.target.value)}
-            className="text-sm border border-slate-200 rounded-lg px-3 py-1.5 bg-white text-slate-700"
-          >
-            <option value="">Todas las zonas</option>
-            {zonas.map((z) => (
-              <option key={z} value={z}>
-                {z}
-              </option>
-            ))}
-          </select>
-          <select
-            value={asesorFilter}
-            onChange={(e) => setAsesorFilter(e.target.value)}
-            className="text-sm border border-slate-200 rounded-lg px-3 py-1.5 bg-white text-slate-700"
-          >
-            <option value="">Todos los asesores</option>
-            {asesores.map((a) => (
-              <option key={a} value={a}>
-                {a}
-              </option>
-            ))}
-          </select>
-          <div className="flex rounded-lg border border-slate-200 overflow-hidden text-xs font-medium">
-            {(
-              [
-                { key: "TODOS", label: "Ver Todo" },
-                { key: "Calculado", label: "Solo Tradicional" },
-                { key: "Reportado_B2B", label: "Solo Cadenas" },
-              ] as const
-            ).map((opt) => (
-              <button
-                key={opt.key}
-                onClick={() => setFuenteFilter(opt.key)}
-                className={`px-3 py-1.5 transition-colors ${
-                  fuenteFilter === opt.key ? "bg-slate-900 text-white" : "bg-white text-slate-500 hover:bg-slate-50"
-                }`}
-              >
-                {opt.label}
-              </button>
-            ))}
-          </div>
-          <ExportExcelButton
-            filename="datos_sell_in_sell_out"
-            rows={sellOutResumen}
-            columns={[
-              { header: "Concepto", value: (r) => r.concepto, width: 20 },
-              { header: "Total (kg)", value: (r) => r.kg, width: 16 },
-            ]}
-          />
-        </div>
-      </div>
-
-      <Card className="mb-6 print-avoid-break">
-        <CardContent className="pt-6">
-          {sellOutPorCliente.length > 0 ? (
-            <SellOutResumenChart data={sellOutResumen} />
-          ) : (
-            <div className="h-[300px] flex items-center justify-center text-slate-400">
-              <div className="text-center">
-                <p className="text-4xl mb-2">📦</p>
-                <p>Sin visitas de mercaderista para el corte de filtros vigente.</p>
-                <p className="text-xs mt-1">
-                  El Sell-Out se calcula como reporte SAP (Radar) − inventario contado en PDV.
-                </p>
-              </div>
-            </div>
-          )}
-        </CardContent>
-      </Card>
 
       {/* ── Lista desplegable: Sell-Out por cliente (descargable) ──────── */}
       <Card className="mb-6 print:hidden">
@@ -2164,73 +2141,136 @@ export function DiennDashboardClient({
         </CardContent>
       </Card>
 
-      {/* ── Rendimiento vs. Margarina/Mayonesa (Mavesa) ────────────────── */}
+      {/* ── Gráfico 3: Sell-In (SAP) vs Inventario PDV vs Sell-Out ────────── */}
+      <div className="mb-2 flex flex-wrap items-center justify-between gap-3">
+        <div>
+          <h2 className="text-lg font-bold text-slate-900">Sell-In (SAP) vs Sell-Out (PDV)</h2>
+          <p className="text-sm text-slate-400">
+            Comparativo agregado: reporte SAP (Radar), inventario contado en PDV por el mercaderista, y el Sell-Out
+            como su diferencia. Una sola visita — no depende de dos rondas.
+          </p>
+        </div>
+        <div className="flex flex-wrap gap-2 print:hidden">
+          <select
+            value={zonaFilter}
+            onChange={(e) => setZonaFilter(e.target.value)}
+            className="text-sm border border-slate-200 rounded-lg px-3 py-1.5 bg-white text-slate-700"
+          >
+            <option value="">Todas las zonas</option>
+            {zonas.map((z) => (
+              <option key={z} value={z}>
+                {z}
+              </option>
+            ))}
+          </select>
+          <select
+            value={asesorFilter}
+            onChange={(e) => setAsesorFilter(e.target.value)}
+            className="text-sm border border-slate-200 rounded-lg px-3 py-1.5 bg-white text-slate-700"
+          >
+            <option value="">Todos los asesores</option>
+            {asesores.map((a) => (
+              <option key={a} value={a}>
+                {a}
+              </option>
+            ))}
+          </select>
+          <div className="flex rounded-lg border border-slate-200 overflow-hidden text-xs font-medium">
+            {(
+              [
+                { key: "TODOS", label: "Ver Todo" },
+                { key: "Calculado", label: "Solo Tradicional" },
+                { key: "Reportado_B2B", label: "Solo Cadenas" },
+              ] as const
+            ).map((opt) => (
+              <button
+                key={opt.key}
+                onClick={() => setFuenteFilter(opt.key)}
+                className={`px-3 py-1.5 transition-colors ${
+                  fuenteFilter === opt.key ? "bg-slate-900 text-white" : "bg-white text-slate-500 hover:bg-slate-50"
+                }`}
+              >
+                {opt.label}
+              </button>
+            ))}
+          </div>
+          <ExportExcelButton
+            filename="datos_sell_in_sell_out"
+            rows={sellOutResumen}
+            columns={[
+              { header: "Concepto", value: (r) => r.concepto, width: 20 },
+              { header: "Total (kg)", value: (r) => r.kg, width: 16 },
+            ]}
+          />
+        </div>
+      </div>
+
+      <Card className="mb-6 print-avoid-break">
+        <CardContent className="pt-6">
+          {sellOutPorCliente.length > 0 ? (
+            <SellOutResumenChart data={sellOutResumen} />
+          ) : (
+            <div className="h-[300px] flex items-center justify-center text-slate-400">
+              <div className="text-center">
+                <p className="text-4xl mb-2">📦</p>
+                <p>Sin visitas de mercaderista para el corte de filtros vigente.</p>
+                <p className="text-xs mt-1">
+                  El Sell-Out se calcula como reporte SAP (Radar) − inventario contado en PDV.
+                </p>
+              </div>
+            </div>
+          )}
+        </CardContent>
+      </Card>
+
+      {/* ── Panquecitas vs Harina PAN ──────────────────────────────────── */}
       <Card className="mb-6 print-avoid-break">
         <CardHeader className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between space-y-0">
           <div>
-            <CardTitle>Rendimiento Diario vs. Margarina/Mayonesa</CardTitle>
+            <CardTitle>Panquecitas vs Harina PAN</CardTitle>
             <p className="text-xs text-slate-400 mt-1">
-              Misma mecánica que el gráfico de PAN: venta diaria de Panquecitas (Carga Radar) contra el promedio de
-              ventas diarias de la categoría elegida (Mavesa), calculado con el período real cargado en su reporte de
-              referencia. La línea continua es ese promedio y la punteada su 4%. El porcentaje sobre cada punto es el
-              ratio del día. Con <span className="font-medium">Cumaná</span> o <span className="font-medium">Cabudare</span>{" "}
-              el gráfico se acota a esa ciudad.
+              Despachado confirmado por Carga Radar de ambos productos — misma fuente para los dos, desde la
+              primera hasta la última fecha cargada.{" "}
+              {panPoblacion === "clientes"
+                ? "Solo clientes con Radar > 0 de Panquecitas."
+                : "Todos los clientes del universo del piloto vigente en cada fecha, hayan comprado Panquecitas o no."}
             </p>
           </div>
           <div className="flex flex-wrap items-center gap-2 print:hidden">
             <div className="flex rounded-lg border border-slate-200 overflow-hidden text-xs font-medium">
-              {(
-                [
-                  ["margarina", "vs. Margarina"],
-                  ["mayonesa", "vs. Mayonesa"],
-                ] as const
-              ).map(([key, label]) => (
+              {PAN_POBLACION_OPTIONS.map((opt) => (
                 <button
-                  key={key}
-                  onClick={() => setCategoriaMavesa(key)}
+                  key={opt.key}
+                  onClick={() => setPanPoblacion(opt.key)}
                   className={`px-3 py-1.5 transition-colors ${
-                    categoriaMavesa === key ? "bg-slate-900 text-white" : "bg-white text-slate-500 hover:bg-slate-50"
+                    panPoblacion === opt.key ? "bg-slate-900 text-white" : "bg-white text-slate-500 hover:bg-slate-50"
                   }`}
                 >
-                  {label}
+                  {opt.label}
                 </button>
               ))}
             </div>
             <div className="flex rounded-lg border border-slate-200 overflow-hidden text-xs font-medium">
-              {(
-                [
-                  ["TOTAL", "Total"],
-                  ["cumana", "Cumaná"],
-                  ["barquisimeto_este", "Cabudare"],
-                ] as const
-              ).map(([key, label]) => (
+              {PAN_GRANULARITY_OPTIONS.map((opt) => (
                 <button
-                  key={key}
-                  onClick={() => setCiudadMavesa(key)}
+                  key={opt.key}
+                  onClick={() => setPanGranularity(opt.key)}
                   className={`px-3 py-1.5 transition-colors ${
-                    ciudadMavesa === key ? "bg-sky-700 text-white" : "bg-white text-slate-500 hover:bg-slate-50"
+                    panGranularity === opt.key
+                      ? "bg-slate-900 text-white"
+                      : "bg-white text-slate-500 hover:bg-slate-50"
                   }`}
                 >
-                  {label}
+                  {opt.label}
                 </button>
               ))}
             </div>
+            {/* Ratio acumulado por ciudad, superpuesto (eje propio en %). */}
             <button
-              onClick={() => setShowReferenciaMavesaDiario((v) => !v)}
-              title="Muestra u oculta la línea del promedio diario de la categoría elegida"
+              onClick={() => setRatioPorCiudadPan((v) => !v)}
+              title="Superpone el ratio Panquecitas/Harina PAN acumulado de cada ciudad"
               className={`px-3 py-1.5 rounded-lg border text-xs font-medium transition-colors ${
-                showReferenciaMavesaDiario
-                  ? "border-slate-900 bg-slate-900 text-white"
-                  : "border-slate-200 bg-white text-slate-500 hover:bg-slate-50"
-              }`}
-            >
-              Línea referencia: {showReferenciaMavesaDiario ? "Visible" : "Oculta"}
-            </button>
-            <button
-              onClick={() => setRatioPorCiudadMavesa((v) => !v)}
-              title="Superpone el ratio acumulado de cada ciudad contra su propio promedio"
-              className={`px-3 py-1.5 rounded-lg border text-xs font-medium transition-colors ${
-                ratioPorCiudadMavesa
+                ratioPorCiudadPan
                   ? "border-sky-700 bg-sky-700 text-white"
                   : "border-slate-200 bg-white text-slate-500 hover:bg-slate-50"
               }`}
@@ -2238,73 +2278,33 @@ export function DiennDashboardClient({
               Ratio acum. por ciudad
             </button>
             <ExportExcelButton
-              filename={`Rendimiento vs ${categoriaMavesa} — ${filtroTexto}`}
-              rows={rendimientoVsMavesaData.puntos}
+              filename="datos_panquecitas_vs_harina_pan"
+              rows={panPoints}
               columns={[
-                { header: "Día", value: (r) => r.dia, width: 14 },
-                { header: "Panquecitas (kg)", value: (r) => r.panquecitasKg, width: 18 },
-                { header: `Ratio vs promedio ${categoriaMavesa} (%)`, value: (r) => r.ratioPct, width: 26 },
+                { header: "Período", value: (r) => r.label },
+                { header: "Panquecitas (kg)", value: (r) => r.panquecitasKg },
+                { header: "Harina PAN (kg)", value: (r) => r.harinaPanKg },
+                { header: "Ratio acum. Cumaná (%)", value: (r) => r.ratioCumanaAcum ?? "" },
+                { header: "Ratio acum. Cabudare (%)", value: (r) => r.ratioCabudareAcum ?? "" },
               ]}
             />
           </div>
         </CardHeader>
         <CardContent>
-          {rendimientoVsMavesaData.puntos.length > 0 ? (
-            <>
-              <div className="relative">
-                {ratioAcumuladoMavesa && (
-                  <div
-                    className="absolute right-0 top-0 z-10 rounded-lg border border-slate-200 bg-white/90 px-3 py-1.5 pointer-events-none"
-                    title={`Promedio de los ${ratioAcumuladoMavesa.dias} ratios diarios del período.`}
-                  >
-                    <p className="text-[10px] uppercase tracking-wide text-slate-400 leading-none">
-                      Ratio acumulado
-                    </p>
-                    <p
-                      className={`text-sm font-semibold leading-tight ${
-                        ratioAcumuladoMavesa.pct >= 4 ? "text-emerald-700" : "text-slate-900"
-                      }`}
-                    >
-                      {ratioAcumuladoMavesa.pct.toLocaleString("es-VE", { maximumFractionDigits: 1 })}%
-                      <span className="text-[10px] font-normal text-slate-400"> · meta 4%</span>
-                    </p>
-                  </div>
-                )}
-                <RendimientoVsMavesaChart
-                  data={rendimientoVsMavesaData}
-                  categoriaLabel={categoriaMavesa === "margarina" ? "Margarina" : "Mayonesa"}
-                  showReferenciaDiario={showReferenciaMavesaDiario}
-                  ratiosCiudad={ratiosMavesaPorCiudad}
-                  showRatioCiudades={ratioPorCiudadMavesa}
-                />
-              </div>
-              <p className="text-xs text-slate-400 mt-2">
-                Promedio {categoriaMavesa === "margarina" ? "Margarina" : "Mayonesa"}:{" "}
-                <span className="font-medium text-slate-600">
-                  {rendimientoVsMavesaData.promedioReferencia.toLocaleString("es-VE", { maximumFractionDigits: 1 })}{" "}
-                  kg/día
-                </span>{" "}
-                ({rendimientoVsMavesaData.totalReferenciaKg.toLocaleString("es-VE", { maximumFractionDigits: 0 })} kg ÷{" "}
-                {rendimientoVsMavesaData.diasPeriodo} días hábiles, del {rendimientoVsMavesaData.desde} al{" "}
-                {rendimientoVsMavesaData.hasta}) · aportado por{" "}
-                <span className="font-medium text-slate-600">
-                  {rendimientoVsMavesaData.clientesConCompra} de {rendimientoVsMavesaData.clientesEnCartera} PDV
-                </span>{" "}
-                de la cartera del corte
-              </p>
-            </>
+          {panPoints.length > 0 ? (
+            <PanVsHarinaPanChart data={panPoints} showRatioCiudades={ratioPorCiudadPan} />
           ) : (
-            <div className="h-[340px] flex items-center justify-center text-slate-400">
+            <div className="h-[300px] flex items-center justify-center text-slate-400">
               <div className="text-center">
-                <p className="text-4xl mb-2">📉</p>
-                <p>Sin datos todavía.</p>
-                <p className="text-xs mt-1">
-                  Falta cargar el reporte de referencia de {categoriaMavesa === "margarina" ? "Margarina" : "Mayonesa"}.
-                </p>
+                <p className="text-4xl mb-2">📊</p>
+                <p>Sin datos de Panquecitas o Harina PAN todavía.</p>
+                <p className="text-xs mt-1">Carga Radar de ambos productos (Panquecitas y Harina PAN).</p>
               </div>
             </div>
           )}
         </CardContent>
+      </Card>
+
       </Card>
 
     </div>
