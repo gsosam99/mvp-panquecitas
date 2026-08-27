@@ -28,6 +28,8 @@ export interface RadarCategoriaUploadResult {
   /** 0 si `finalizar: false` — la limpieza de filas viejas se hace una sola vez, en la última tanda. */
   reemplazadas: number;
   clientes_en_cartera: number;
+  /** Tamaño de la cartera del piloto, para poder leer "N de <cartera_total>". */
+  cartera_total: number;
   clientes_descartados_fuera_cartera: number;
   clientes_en_archivo: number;
   meses: string[];
@@ -64,9 +66,14 @@ export async function processRadarCategoriaUpload(
   finalizar = true
 ): Promise<RadarCategoriaUploadResult | { error: string; status: number }> {
   const locations = await getUniverseLocations();
-  const locationIdBySapCode = new Map(locations.map((l) => [l.sap_code, l.id]));
+  // Trim en los DOS lados: el parser ya recorta el código del archivo, pero en
+  // `locations` pueden quedar valores con espacios de cargas viejas. Un código
+  // que no calza se descarta en silencio y ese cliente desaparece del promedio
+  // para siempre — es justo el fallo que hace que el promedio no se mueva
+  // cuando la cartera crece.
+  const locationIdBySapCode = new Map(locations.map((l) => [l.sap_code.trim(), l.id]));
 
-  const sapCodesEnArchivo = new Set(rows.map((r) => r.sap_code));
+  const sapCodesEnArchivo = new Set(rows.map((r) => r.sap_code.trim()));
   const codigosFueraDeCartera = new Set<string>();
   const materialesNoMapeados = new Set<string>();
 
@@ -97,9 +104,9 @@ export async function processRadarCategoriaUpload(
   >();
 
   for (const r of rows) {
-    const location_id = locationIdBySapCode.get(r.sap_code);
+    const location_id = locationIdBySapCode.get(r.sap_code.trim());
     if (!location_id) {
-      codigosFueraDeCartera.add(r.sap_code);
+      codigosFueraDeCartera.add(r.sap_code.trim());
       continue; // cartera-only: se descarta, no se guarda con location_id null
     }
 
@@ -172,6 +179,7 @@ export async function processRadarCategoriaUpload(
     inserted: toInsert.length,
     reemplazadas,
     clientes_en_cartera: new Set(toInsert.map((r) => r.location_id)).size,
+    cartera_total: locations.length,
     clientes_descartados_fuera_cartera: codigosFueraDeCartera.size,
     clientes_en_archivo: sapCodesEnArchivo.size,
     meses: [...new Set(rows.map((r) => r.fecha.slice(0, 7)))].sort(),

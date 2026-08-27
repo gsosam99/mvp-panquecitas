@@ -108,6 +108,7 @@ export function RadarCategoriaDropzone({
       inserted?: number;
       reemplazadas?: number;
       clientes_en_cartera?: number;
+      cartera_total?: number;
       clientes_descartados_fuera_cartera?: number;
       meses?: string[];
       desde?: string;
@@ -120,6 +121,7 @@ export function RadarCategoriaDropzone({
       inserted: 0,
       reemplazadas: 0,
       clientes_en_cartera: 0,
+      cartera_total: 0,
       clientes_descartados_fuera_cartera: 0,
       meses: new Set<string>(),
       desde: "",
@@ -147,6 +149,8 @@ export function RadarCategoriaDropzone({
         acumulado.inserted += data.inserted ?? 0;
         acumulado.reemplazadas += data.reemplazadas ?? 0;
         acumulado.clientes_en_cartera += data.clientes_en_cartera ?? 0;
+        // Igual en todas las tandas, no se acumula.
+        acumulado.cartera_total = data.cartera_total ?? acumulado.cartera_total;
         acumulado.clientes_descartados_fuera_cartera += data.clientes_descartados_fuera_cartera ?? 0;
         for (const m of data.meses ?? []) acumulado.meses.add(m);
         if (data.desde && (!acumulado.desde || data.desde < acumulado.desde)) acumulado.desde = data.desde;
@@ -159,7 +163,7 @@ export function RadarCategoriaDropzone({
       const meses = [...acumulado.meses].sort();
       const partes = [
         `${acumulado.inserted} registros guardados`,
-        `${acumulado.clientes_en_cartera} clientes de la cartera (de ${clientesEnArchivo} en el archivo)`,
+        `${acumulado.clientes_en_cartera} de ${acumulado.cartera_total} clientes de la cartera (el archivo trae ${clientesEnArchivo})`,
         `${meses.length} meses: ${meses.join(", ") || "—"}`,
         `rango ${acumulado.desde} → ${acumulado.hasta}`,
         `total ${acumulado.total_kg.toLocaleString("es-VE", { maximumFractionDigits: 0 })} kg`,
@@ -169,6 +173,14 @@ export function RadarCategoriaDropzone({
       }
       if (acumulado.reemplazadas) partes.push(`${acumulado.reemplazadas} filas de la carga anterior reemplazadas`);
       if (tandas.length > 1) partes.push(`subido en ${tandas.length} tandas`);
+      // Si la carga no cubrio la cartera completa, el promedio de referencia de
+      // esta categoria sale corto y su grafico de ratio compara contra una
+      // base incompleta.
+      if (acumulado.cartera_total > 0 && acumulado.clientes_en_cartera < acumulado.cartera_total) {
+        partes.push(
+          `ATENCIÓN: faltan ${acumulado.cartera_total - acumulado.clientes_en_cartera} clientes de la cartera — el archivo no los trae`
+        );
+      }
       setDoneSummary(partes.join(" · "));
       toast.success("Carga completada");
     } catch {

@@ -1,6 +1,7 @@
 import { createSupabaseServiceClient } from "@/lib/supabase/server";
 import { hasDashboardSession } from "@/lib/session";
 import { SAP_RADAR_MATERIAL_PRODUCT_MAP } from "@/data/catalog";
+import { getUniverseLocations } from "@/lib/universe";
 import type { ParsedSapRadarRow } from "@/types";
 
 // ── "Radar últimos 3 Meses" ────────────────────────────────────────
@@ -32,8 +33,13 @@ export async function POST(req: Request) {
     }
     const supabase = createSupabaseServiceClient();
 
-    const body = (await req.json()) as { rows?: ParsedSapRadarRow[]; batchId?: string };
-    const { rows, batchId } = body;
+    const body = (await req.json()) as {
+      rows?: ParsedSapRadarRow[];
+      batchId?: string;
+      /** `false` mientras queden tandas: el borrado de lo viejo corre una sola vez, en la ultima. */
+      finalizar?: boolean;
+    };
+    const { rows, batchId, finalizar = true } = body;
     if (!rows?.length || !batchId) {
       return Response.json({ error: "Datos inválidos" }, { status: 400 });
     }
@@ -41,9 +47,20 @@ export async function POST(req: Request) {
     // Se resuelve el cliente contra la cartera solo para poder marcar
     // location_id (lo usa el filtro "PAN Cliente"). Los que no calzan igual se
     // guardan: el promedio de referencia es la venta total del reporte.
-    const sapCodes = [...new Set(rows.map((r) => r.sap_code))];
+    // Se compara SIEMPRE con trim en los dos lados: el parser ya recorta el
+    // codigo del archivo, pero en `locations` pueden quedar valores con
+    // espacios de cargas viejas, y un cliente que no calza se descarta en
+    // silencio — justo el fallo que hace que un promedio no se mueva cuando
+    // la cartera crece.
+    const sapCodes = [...new Set(rows.map((r) => r.sap_code.trim()))];
     // Por tandas: el .in() viaja en la URL y con ~700 códigos se pasa del largo
     // máximo de una petición, que la haría fallar entera.
+    // La cartera del piloto, para poder reportar "N de <cartera_total>". Se
+    // resuelve el location_id contra TODA la tabla `locations` (asi las filas
+    // de clientes que hoy no son cartera igual quedan guardadas y se pueden
+    // reportar), pero el CONTEO que se devuelve se hace contra esta cartera.
+    const idsCartera = new Set((await getUniverseLocations()).map((l) => l.id));
+
     const locationIds = new Map<string, string>();
     const TANDA_CODIGOS = 200;
     for (let i = 0; i < sapCodes.length; i += TANDA_CODIGOS) {
@@ -53,7 +70,7 @@ export async function POST(req: Request) {
         .in("sap_code", sapCodes.slice(i, i + TANDA_CODIGOS));
       if (locError) throw locError;
       for (const l of (locs ?? []) as { id: string; sap_code: string }[]) {
-        locationIds.set(l.sap_code, l.id);
+        locationIds.set(l.sap_code.trim(), l.id);
       }
     }
 
@@ -84,8 +101,8 @@ export async function POST(req: Request) {
       // Los clientes fuera de la cartera se guardan igual (para poder reportarlos),
       // pero quedan sin location_id y por eso NO entran en el promedio: PAN
       // Universo son los clientes de la cartera. Ver getRendimiento3M.
-      const location_id = locationIds.get(r.sap_code) ?? null;
-      if (!location_id) codigosFuera.add(r.sap_code);
+      const location_id = locationIds.get(r.sap_code.trim()) ?? null;
+      if (!location_id) codigosFuera.add(r.sap_code.trim());
 
       const product_id = SAP_RADAR_MATERIAL_PRODUCT_MAP[r.material_code];
       if (!product_id) {
@@ -150,20 +167,35 @@ export async function POST(req: Request) {
       if (upsertError) throw upsertError;
     }
 
-    const { data: borradas, error: staleError } = await supabase
-      .from("radar_3m_records")
-      .delete()
-      .or(`upload_batch_id.is.null,upload_batch_id.neq.${batchId}`)
-      .select("id");
-    if (staleError) throw staleError;
+    // Solo en la ultima tanda. Correrlo en cada una dejaria la tabla
+    // momentaneamente incompleta: borraria los clientes que la tanda
+    // siguiente todavia no reinserto. Mismo criterio que la carga de Mavesa.
+    let reemplazadas = 0;
+    if (finalizar) {
+      const { data: borradas, error: staleError } = await supabase
+        .from("radar_3m_records")
+        .delete()
+        .or(`upload_batch_id.is.null,upload_batch_id.neq.${batchId}`)
+        .select("id");
+      if (staleError) throw staleError;
+      reemplazadas = (borradas ?? []).length;
+    }
 
     // Diagnóstico: sin esto, un "10 registros" no dice si el archivo venía
     // corto, si los clientes no calzan con la cartera o si faltan meses.
     const fechas = toInsert.map((r) => r.date_of_sale).sort();
     return Response.json({
       inserted: toInsert.length,
-      reemplazadas: (borradas ?? []).length,
-      clientes_en_cartera: new Set(toInsert.filter((r) => r.location_id).map((r) => r.location_id)).size,
+      reemplazadas,
+      // Contra la CARTERA de verdad (getUniverseLocations: sectores piloto,
+      // sin distribuidoras/franquiciadas, sin cohorte "Fuera de cartera"), no
+      // contra cualquier sap_code que exista en `locations`. Ese conteo viejo
+      // salia siempre mas alto que la cartera y no servia justo para lo que
+      // hace falta: comprobar que la carga tomo todos los clientes.
+      clientes_en_cartera: new Set(
+        toInsert.filter((r) => r.location_id && idsCartera.has(r.location_id)).map((r) => r.location_id)
+      ).size,
+      cartera_total: idsCartera.size,
       clientes_fuera_cartera: codigosFuera.size,
       clientes_en_archivo: sapCodes.length,
       meses: [...new Set(toInsert.map((r) => monthKey(r.date_of_sale)))].sort(),

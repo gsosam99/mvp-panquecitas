@@ -54,36 +54,128 @@ export function Radar3MDropzone() {
     }
   }, []);
 
+  // Vercel rechaza payloads de más de ~4,5 MB por función. Con la cartera
+  // ampliada (1102 clientes × 3 meses × 2 materiales × un corte por día) el
+  // archivo entero en un solo POST se pasa y la carga falla con 413. Por eso
+  // se parte, con el mismo mecanismo que ya usa la carga de Mavesa.
+  //
+  // Se parte por CLIENTE, nunca por fila suelta: el servidor colapsa por
+  // cliente+material+mes quedándose con el último corte, así que todas las
+  // filas de un mismo cliente tienen que viajar juntas. Partidas al medio, el
+  // colapso vería solo una parte de sus cortes y se quedaría con el corte
+  // equivocado.
+  //
+  // Todas las tandas comparten batchId; el borrado de lo viejo ("finalizar")
+  // corre solo en la última, para que una tanda a medias nunca deje la tabla
+  // con clientes borrados y todavía sin reemplazar.
+  const CLIENTES_POR_TANDA = 200;
+
+  function partirPorCliente(filas: ParsedSapRadarRow[]): ParsedSapRadarRow[][] {
+    const porCliente = new Map<string, ParsedSapRadarRow[]>();
+    for (const f of filas) {
+      const grupo = porCliente.get(f.sap_code);
+      if (grupo) grupo.push(f);
+      else porCliente.set(f.sap_code, [f]);
+    }
+    const clientes = [...porCliente.keys()];
+    const tandas: ParsedSapRadarRow[][] = [];
+    for (let i = 0; i < clientes.length; i += CLIENTES_POR_TANDA) {
+      tandas.push(clientes.slice(i, i + CLIENTES_POR_TANDA).flatMap((c) => porCliente.get(c)!));
+    }
+    return tandas;
+  }
+
   async function handleCommit() {
     if (!rows.length) return;
     setState("uploading");
+    const batchId = crypto.randomUUID();
+    const tandas = partirPorCliente(rows);
+
+    type Resultado = {
+      inserted?: number;
+      reemplazadas?: number;
+      clientes_en_cartera?: number;
+      cartera_total?: number;
+      clientes_fuera_cartera?: number;
+      clientes_en_archivo?: number;
+      meses?: string[];
+      meses_en_archivo?: string[];
+      sin_volumen_por_mes?: Record<string, number>;
+      total_kg_por_mes?: Record<string, number>;
+      desde?: string;
+      hasta?: string;
+      total_kg?: number;
+      error?: string;
+      detail?: string;
+    };
+
+    const acumulado = {
+      inserted: 0,
+      reemplazadas: 0,
+      clientes_en_cartera: 0,
+      cartera_total: 0,
+      clientes_fuera_cartera: 0,
+      meses: new Set<string>(),
+      meses_en_archivo: new Set<string>(),
+      sin_volumen_por_mes: {} as Record<string, number>,
+      total_kg_por_mes: {} as Record<string, number>,
+      desde: "",
+      hasta: "",
+      total_kg: 0,
+    };
+
     try {
-      const res = await fetch("/api/radar-3m-upload", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ rows, batchId: crypto.randomUUID() }),
-      });
-      const data = (await res.json()) as {
-        inserted?: number;
-        reemplazadas?: number;
-        clientes_en_cartera?: number;
-        clientes_fuera_cartera?: number;
-        clientes_en_archivo?: number;
-        meses?: string[];
-        meses_en_archivo?: string[];
-        sin_volumen_por_mes?: Record<string, number>;
-        total_kg_por_mes?: Record<string, number>;
-        desde?: string;
-        hasta?: string;
-        total_kg?: number;
-        error?: string;
-        detail?: string;
-      };
-      if (!res.ok) {
-        toast.error(data.detail ? `${data.error}: ${data.detail}` : (data.error ?? "Error al guardar"));
-        setState("previewing");
-        return;
+      for (let i = 0; i < tandas.length; i++) {
+        const esUltima = i === tandas.length - 1;
+        const res = await fetch("/api/radar-3m-upload", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ rows: tandas[i], batchId, finalizar: esUltima }),
+        });
+        const parcial = (await res.json()) as Resultado;
+        if (!res.ok) {
+          toast.error(
+            (parcial.detail ? `${parcial.error}: ${parcial.detail}` : (parcial.error ?? "Error al guardar")) +
+              (tandas.length > 1 ? ` (tanda ${i + 1} de ${tandas.length})` : "")
+          );
+          setState("previewing");
+          return;
+        }
+        // Los conteos de clientes se SUMAN entre tandas sin riesgo de doble
+        // conteo: partirPorCliente garantiza que un cliente cae en una sola.
+        acumulado.inserted += parcial.inserted ?? 0;
+        acumulado.reemplazadas += parcial.reemplazadas ?? 0;
+        acumulado.clientes_en_cartera += parcial.clientes_en_cartera ?? 0;
+        acumulado.clientes_fuera_cartera += parcial.clientes_fuera_cartera ?? 0;
+        // La cartera total es la misma en todas las tandas, no se acumula.
+        acumulado.cartera_total = parcial.cartera_total ?? acumulado.cartera_total;
+        for (const m of parcial.meses ?? []) acumulado.meses.add(m);
+        for (const m of parcial.meses_en_archivo ?? []) acumulado.meses_en_archivo.add(m);
+        for (const [m, n] of Object.entries(parcial.sin_volumen_por_mes ?? {}))
+          acumulado.sin_volumen_por_mes[m] = (acumulado.sin_volumen_por_mes[m] ?? 0) + n;
+        for (const [m, kg] of Object.entries(parcial.total_kg_por_mes ?? {}))
+          acumulado.total_kg_por_mes[m] = Math.round(((acumulado.total_kg_por_mes[m] ?? 0) + kg) * 10) / 10;
+        if (parcial.desde && (!acumulado.desde || parcial.desde < acumulado.desde)) acumulado.desde = parcial.desde;
+        if (parcial.hasta && parcial.hasta > acumulado.hasta) acumulado.hasta = parcial.hasta;
+        acumulado.total_kg += parcial.total_kg ?? 0;
       }
+
+      const data = {
+        inserted: acumulado.inserted,
+        reemplazadas: acumulado.reemplazadas,
+        clientes_en_cartera: acumulado.clientes_en_cartera,
+        cartera_total: acumulado.cartera_total,
+        clientes_fuera_cartera: acumulado.clientes_fuera_cartera,
+        clientes_en_archivo: new Set(rows.map((r) => r.sap_code)).size,
+        meses: [...acumulado.meses].sort(),
+        meses_en_archivo: [...acumulado.meses_en_archivo].sort(),
+        sin_volumen_por_mes: acumulado.sin_volumen_por_mes,
+        total_kg_por_mes: acumulado.total_kg_por_mes,
+        desde: acumulado.desde,
+        hasta: acumulado.hasta,
+        total_kg: acumulado.total_kg,
+      };
+
       setState("done");
       // Resumen detallado a propósito: el promedio de referencia del gráfico
       // sale de estos números, así que hay que poder auditar de dónde salen.
@@ -92,7 +184,7 @@ export function Radar3MDropzone() {
         .join(" · ");
       const partes = [
         `${data.inserted} registros guardados`,
-        `${data.clientes_en_cartera} clientes de la cartera (de ${data.clientes_en_archivo} en el archivo)`,
+        `${data.clientes_en_cartera} de ${data.cartera_total} clientes de la cartera (el archivo trae ${data.clientes_en_archivo})`,
         `${data.meses?.length ?? 0} meses con volumen: ${data.meses?.join(", ") ?? "—"}`,
         `rango ${data.desde} → ${data.hasta}`,
         `total ${(data.total_kg ?? 0).toLocaleString("es-VE", { maximumFractionDigits: 0 })} kg`,
@@ -114,6 +206,15 @@ export function Radar3MDropzone() {
         partes.push(`${data.clientes_fuera_cartera} clientes del archivo NO están en la cartera (ignorados)`);
       }
       if (data.reemplazadas) partes.push(`${data.reemplazadas} filas de la carga anterior reemplazadas`);
+      if (tandas.length > 1) partes.push(`subido en ${tandas.length} tandas`);
+      // Lo único que hay que mirar para saber si la carga sirve: si no cubrió
+      // la cartera completa, el promedio de referencia va a salir corto y el
+      // gráfico de ratio va a comparar contra una base incompleta.
+      if (data.cartera_total > 0 && data.clientes_en_cartera < data.cartera_total) {
+        partes.push(
+          `ATENCIÓN: faltan ${data.cartera_total - data.clientes_en_cartera} clientes de la cartera — el archivo no los trae`
+        );
+      }
       setDoneSummary(partes.join(" · "));
       toast.success("Carga completada");
     } catch {
