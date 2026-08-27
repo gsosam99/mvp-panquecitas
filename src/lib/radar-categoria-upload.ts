@@ -77,16 +77,27 @@ export async function processRadarCategoriaUpload(
   const codigosFueraDeCartera = new Set<string>();
   const materialesNoMapeados = new Set<string>();
 
-  // "Venta Acumulada" se reinicia cada mes, así que el ÚLTIMO corte de cada
-  // mes ES el total de ese mes, y sumar los meses da el total del período —
-  // exactamente el mismo criterio que radar-3m-upload (Harina PAN).
+  // NO se colapsa por "último corte". El archivo de referencia de Mavesa trae
+  // UNA SOLA columna "Venta Acumulada" y ese número YA ES el acumulado de los
+  // tres meses: cada fila es un aporte independiente que hay que sumar
+  // completo, no una fotografía acumulada de la que solo valga la más
+  // reciente (usuario, 27-08-2026). Verificado además contra la fila
+  // "Resultado total" que el propio SAP calcula al final del archivo: la suma
+  // de "Venta Acumulada" de TODAS las filas, sin filtrar por fecha ni por mes,
+  // es exactamente el total que reporta SAP.
   //
-  // Antes acá se sumaban TODAS las filas del archivo. Eso contaba cada corte
-  // diario como si fuera una venta nueva e inflaba el total, y además dejaba
-  // a Margarina/Mayonesa con una definición de "venta acumulada" distinta a
-  // la de PAN, así que sus promedios no eran comparables (decisión del
-  // usuario, 26-08-2026: "el promedio de todos debe ser su venta acumulada de
-  // los tres meses, ese número final de venta acumulada").
+  // Esto NO es lo mismo que radar-3m-upload (Harina PAN), y esa diferencia es
+  // real, no una inconsistencia: el reporte de PAN trae UNA COLUMNA DE VENTA
+  // ACUMULADA POR MES (ver findRadarRatioColumns en sap-mhtml-parser.ts), así
+  // que ahí sí hay cortes por mes y quedarse con el último de cada uno es lo
+  // correcto. Son dos formatos de archivo distintos. Unificar el criterio —
+  // que se probó el 26-08-2026 y se revirtió— hundía el total de Mavesa,
+  // porque descartaba todas las filas del mes menos una.
+  //
+  // Sí se colapsa por cliente+material+FECHA exacta (sumando, no
+  // reemplazando): si el archivo repite la misma fila exacta, la unique
+  // constraint de la tabla (sap_code, material_code, date_of_sale) exige un
+  // solo registro para esa combinación.
   //
   // Por MATERIAL y no por producto: una categoría puede tener varias
   // presentaciones y colapsando por producto un cliente con dos de ellas
@@ -116,9 +127,11 @@ export async function processRadarCategoriaUpload(
       continue;
     }
 
-    const key = `${r.sap_code}|${r.material_code}|${r.fecha.slice(0, 7)}`;
+    const key = `${r.sap_code}|${r.material_code}|${r.fecha}`;
     const prev = byKey.get(key);
-    if (!prev || r.fecha > prev.date_of_sale) {
+    if (prev) {
+      prev.quantity_kg += r.quantity_kg;
+    } else {
       byKey.set(key, {
         sap_code: r.sap_code,
         material_code: r.material_code,
