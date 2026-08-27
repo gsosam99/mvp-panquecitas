@@ -124,26 +124,24 @@ export async function getSellInTotalsByLocation(
   // Paginado: PostgREST corta las respuestas (1000 filas por defecto en
   // Supabase) y sap_sell_in_records supera ese tope con pocos meses de carga
   // (una fila por cliente + presentación + mes). Sin paginar, los totales
-  // salían incompletos en silencio — y como el recorte depende del orden que
-  // devuelva la base, podía castigar sistemáticamente a unos clientes sobre
-  // otros, hundiendo el total de una ciudad entera.
-  const PAGINA = 1000;
-  const totals = new Map<string, number>();
-
-  for (let desde = 0; ; desde += PAGINA) {
+  // salían incompletos en silencio.
+  //
+  // Vía fetchAllRows y NO con un paginado a mano: antes se ordenaba por
+  // `location_id`, que en esta tabla NO es único (hay muchas filas por
+  // cliente). Con una clave de orden no única PostgREST no garantiza el mismo
+  // orden entre una página y la siguiente, así que el paginado podía saltarse
+  // o duplicar filas — y el total de un cliente salía distinto entre recargas.
+  // fetchAllRows ordena por `id`, único y estable.
+  const rows = await fetchAllRows<{ location_id: string; quantity_kg: number }>(() => {
     let query = supabase.from("sap_sell_in_records").select("location_id, quantity_kg").eq("product_id", productId);
-
     if (filter?.from) query = query.gte("date_of_sale", filter.from);
     if (filter?.to) query = query.lte("date_of_sale", filter.to);
+    return query;
+  });
 
-    const { data } = await query.order("location_id", { ascending: true }).range(desde, desde + PAGINA - 1);
-    const pagina = (data ?? []) as { location_id: string; quantity_kg: number }[];
-    if (pagina.length === 0) break;
-
-    for (const row of pagina) {
-      totals.set(row.location_id, (totals.get(row.location_id) ?? 0) + row.quantity_kg);
-    }
-    if (pagina.length < PAGINA) break;
+  const totals = new Map<string, number>();
+  for (const row of rows) {
+    totals.set(row.location_id, (totals.get(row.location_id) ?? 0) + row.quantity_kg);
   }
 
   return totals;

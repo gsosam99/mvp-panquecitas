@@ -915,50 +915,35 @@ export async function getRendimiento3M(
   // Harina PAN del reporte de 3 meses. Si la tabla todavía no existe (falta el
   // migration 017) o no se ha cargado nada, el gráfico queda vacío en vez de
   // romper la página.
-  // Paginado a propósito: PostgREST corta las respuestas (1000 filas por
-  // defecto en Supabase) y esta tabla tiene ~1 fila por cliente y mes — con 734
-  // clientes × 3 meses se pasa del tope y solo llegaban las primeras, que son
-  // las de mayo. De ahí que el promedio saliera calculado sobre un solo mes.
-  const PAGINA = 1000;
-  const pan3mData: { location_id: string | null; quantity_kg: number; date_of_sale: string }[] = [];
-  for (let desde = 0; ; desde += PAGINA) {
-    const { data: pagina } = await supabase
+  //
+  // Vía fetchAllRows y NO con un paginado a mano. Antes se paginaba ordenando
+  // por `date_of_sale`, que NO es único —hay un puñado de fechas repartidas
+  // entre miles de filas—, y con una clave de orden no única PostgREST no
+  // garantiza el mismo orden entre una página y la siguiente: las filas
+  // empatadas se reordenan y el paginado se salta o duplica filas. O sea que
+  // el promedio de PAN podía cambiar entre recargas sin que nadie tocara nada.
+  // fetchAllRows ordena por `id`, que sí es único y estable. Ver la nota de
+  // src/lib/supabase/fetch-all.ts.
+  //
+  // Se lee `sap_code` en vez de `location_id`: ver la resolución más abajo.
+  const pan3m = await fetchAllRows<{ sap_code: string; quantity_kg: number; date_of_sale: string }>(() =>
+    supabase
       .from("radar_3m_records")
-      .select("location_id, product_id, quantity_kg, date_of_sale")
+      .select("sap_code, quantity_kg, date_of_sale")
       .eq("product_id", PRODUCT_IDS.HARINA_PAN)
-      .order("date_of_sale", { ascending: true })
-      .range(desde, desde + PAGINA - 1);
-    if (!pagina || pagina.length === 0) break;
-    pan3mData.push(...(pagina as typeof pan3mData));
-    if (pagina.length < PAGINA) break;
-  }
-
-  // El recorte por cartera se hace más abajo, al elegir la población: acá se
-  // conservan todas las filas leídas.
-  const pan3m = (pan3mData ?? []) as {
-    location_id: string | null;
-    quantity_kg: number;
-    date_of_sale: string;
-  }[];
+  );
   if (pan3m.length === 0) return RENDIMIENTO_3M_VACIO;
 
-  // Panquecitas por día (Carga Radar viva), acotadas al sector. Paginado por el
-  // mismo motivo que arriba: sap_sell_in_records pasa de 1000 filas y sin
-  // paginar la serie diaria salía recortada.
+  // Panquecitas por día (Carga Radar viva). Mismo cambio y por el mismo motivo
+  // que arriba: sap_sell_in_records tiene muchísimas filas por fecha.
+  // Sin filtrar por cantidad > 0: una devolución resta del volumen del día.
   const panqTotals = await getSellInTotalsByLocation(PRODUCT_IDS.PANQUECITAS);
-  const panqData: { location_id: string; quantity_kg: number; date_of_sale: string }[] = [];
-  for (let desde = 0; ; desde += PAGINA) {
-    const { data: pagina } = await supabase
+  const panqData = await fetchAllRows<{ location_id: string; quantity_kg: number; date_of_sale: string }>(() =>
+    supabase
       .from("sap_sell_in_records")
       .select("location_id, quantity_kg, date_of_sale")
       .eq("product_id", PRODUCT_IDS.PANQUECITAS)
-      // Sin filtrar por cantidad > 0: una devolución resta del volumen del día.
-      .order("date_of_sale", { ascending: true })
-      .range(desde, desde + PAGINA - 1);
-    if (!pagina || pagina.length === 0) break;
-    panqData.push(...(pagina as typeof panqData));
-    if (pagina.length < PAGINA) break;
-  }
+  );
 
   // El VOLUMEN diario de Panquecitas suma también los PDV fuera de cartera,
   // para que esta serie calce con la tarjeta y con el resto del dashboard. El
@@ -975,13 +960,31 @@ export async function getRendimiento3M(
   //   - "universo": todos los PDV de la cartera del corte activo, hayan
   //     comprado Panquecitas o no.
   //   - "clientes": solo los que además compran Panquecitas.
-  // El reporte trae bastantes más clientes que la cartera (734 vs 358); esas
-  // filas se guardan igual pero vienen con location_id null y quedan fuera.
+  // El reporte trae bastantes más clientes que la cartera; las filas de los que
+  // no lo son se guardan igual pero quedan fuera de este recorte.
   const idsClientesPanq = new Set(
     universo.filter((l) => (panqTotals.get(l.id) ?? 0) > 0).map((l) => l.id)
   );
   const idsPan = poblacion === "universo" ? idsUniverso : idsClientesPanq;
-  const panFiltrado = pan3m.filter((r) => r.location_id !== null && idsPan.has(r.location_id));
+
+  // El cliente se resuelve por SAP_CODE contra la cartera de HOY, no por el
+  // `location_id` que quedó guardado en la fila.
+  //
+  // Ese location_id se resuelve una sola vez, en el momento de la carga: un
+  // cliente que todavía no existía en `locations` se guardó con null y ahí se
+  // quedó para siempre. Cuando la cartera se amplió (14-08 y 24-08-2026), esos
+  // clientes seguían invisibles para el promedio aunque ya fueran cartera — el
+  // síntoma era que el promedio de PAN no se movía al crecer la cartera.
+  // Resolviendo acá, el promedio se recalcula solo cada vez que entra una
+  // tanda nueva, sin tener que volver a cargar el reporte.
+  //
+  // Contra `universoTotal` (la cartera completa) y no contra `universo`: el
+  // recorte por sector y por población lo hace `idsPan` justo abajo.
+  // Con trim en los dos lados, igual que en la carga.
+  const locIdBySapCode = new Map(universoTotal.map((l) => [l.sap_code.trim(), l.id]));
+  const panFiltrado = pan3m
+    .map((r) => ({ ...r, locId: locIdBySapCode.get(r.sap_code.trim()) }))
+    .filter((r): r is typeof r & { locId: string } => r.locId !== undefined && idsPan.has(r.locId));
   // Con población "clientes" puede quedar vacío (ningún cliente con Panquecitas
   // tiene PAN en el reporte de 3 meses): sin filas no hay promedio que calcular
   // y fechasPan[0] sería undefined.
@@ -1034,7 +1037,7 @@ export async function getRendimiento3M(
     desde: inicioPeriodo,
     hasta: finPeriodo,
     totalPanKg: Math.round(totalPanKg * 10) / 10,
-    clientesPan: new Set(panFiltrado.map((r) => r.location_id)).size,
+    clientesPan: new Set(panFiltrado.map((r) => r.locId)).size,
     clientesPoblacion: idsPan.size,
     panquecitasFueraKg: Math.round(panqFueraKg * 10) / 10,
     puntos,
