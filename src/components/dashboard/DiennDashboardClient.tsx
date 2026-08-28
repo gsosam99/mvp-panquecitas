@@ -2157,12 +2157,11 @@ export function DiennDashboardClient({
           <div>
             <CardTitle>Ventas Últimos 3 Meses — Margarina, Mayonesa y Harina PAN</CardTitle>
             <p className="text-xs text-slate-400 mt-1">
-              Mayo-julio (reporte de referencia), por ciudad — toda la cartera del piloto. Debajo de cada barra va el{" "}
-              <span className="font-medium">ratio acumulado de Panquecitas contra esa categoría en esa ciudad</span>{" "}
-              (el mismo de los gráficos de rendimiento diario: promedio de los ratios diarios del período). Con{" "}
+              Mayo-julio (reporte de referencia), por ciudad — toda la cartera del piloto. Con{" "}
               <span className="font-medium">Cumaná = 100%</span> se superpone una línea que toma el volumen de Cumaná
               como base y muestra cuánto representa Cabudare frente a él, categoría por categoría (siempre en kg,
-              aunque las barras estén en % del total).
+              aunque las barras estén en % del total). Los porcentajes debajo de las barras están explicados al pie
+              del gráfico.
             </p>
           </div>
           <div className="flex flex-wrap items-center gap-2 print:hidden">
@@ -2200,14 +2199,27 @@ export function DiennDashboardClient({
         </CardHeader>
         <CardContent>
           {ventas3MesesPorCiudad.length > 0 ? (
+            <>
             <Ventas3MesesPorCiudadChart
               data={ventas3MesesPorCiudad}
               comoPct={ventas3MesesComoPct}
               showIndiceCumana={ventas3MesesIndiceCumana}
               ratiosPanquecitas={ratiosPanquecitas3Meses}
             />
+            {/* Los % de abajo no se explican solos: hay que decir contra qué se
+                miden y en qué unidad se leen. */}
+            <p className="text-xs text-slate-400 mt-2">
+              Los porcentajes <span className="font-medium text-slate-600">debajo</span> de cada barra son el{" "}
+              <span className="font-medium text-slate-600">ratio acumulado de Panquecitas contra esa categoría, en
+              esa ciudad</span>: por cada 100 kg de Margarina, Mayonesa o Harina PAN que vende la ciudad, cuántos kg
+              de Panquecitas vende. No son parte de la barra —la barra son los kg de la categoría en mayo-julio— y van
+              en el color de su ciudad. Es el mismo número del cuadro{" "}
+              <span className="font-medium">Ratio acumulado</span> de los gráficos de rendimiento diario (promedio de
+              los ratios diarios del período).
+            </p>
+            </>
           ) : (
-            <div className="h-[380px] flex items-center justify-center text-slate-400">
+            <div className="h-[400px] flex items-center justify-center text-slate-400">
               <div className="text-center">
                 <p className="text-4xl mb-2">📊</p>
                 <p>Sin datos todavía.</p>

@@ -100,6 +100,11 @@ const Inner = dynamic(
        * la línea del eje, así que "bottom" lo dejaría pisando el nombre de la
        * categoría. Con la geometría de la barra (y + height = la base) el texto
        * se ancla debajo de ese nombre, alineado con SU columna.
+       *
+       * Dos renglones: arriba "Panquecitas" y abajo el %. Solo el número
+       * suelto no decía de qué era —quien ve el gráfico por primera vez no
+       * tiene cómo saber que es Panquecitas sobre ESA categoría—; con el
+       * nombre encima y la nota al pie de la tarjeta queda explícito.
        */
       function etiquetaRatioDebajo(props: unknown) {
         // `fill` llega tal cual desde el LabelList: así el color de la ciudad
@@ -113,27 +118,28 @@ const Inner = dynamic(
           fill?: string;
         };
         if (value == null) return null;
+        const cx = x + width / 2;
+        const base = y + height;
         return (
-          <text
-            x={x + width / 2}
-            y={y + height + 40}
-            textAnchor="middle"
-            fill={fill ?? "#64748b"}
-            fontSize={11}
-            fontWeight={600}
-          >
-            {`${Number(value).toLocaleString("es-VE", { maximumFractionDigits: 1 })}%`}
+          <text textAnchor="middle">
+            <tspan x={cx} y={base + 38} fill="#94a3b8" fontSize={9}>
+              Panquecitas
+            </tspan>
+            <tspan x={cx} y={base + 53} fill={fill ?? "#64748b"} fontSize={13} fontWeight={700}>
+              {`${Number(value).toLocaleString("es-VE", { maximumFractionDigits: 1 })}%`}
+            </tspan>
           </text>
         );
       }
 
       return (
-        <ResponsiveContainer width="100%" height={380}>
+        <ResponsiveContainer width="100%" height={400}>
           <ComposedChart data={chartData} margin={{ top: 20, right: 20, left: 10, bottom: 5 }}>
             <CartesianGrid strokeDasharray="3 3" stroke="#f1f5f9" vertical={false} />
             {/* Alto extra en el eje X: debajo del nombre de la categoría van los
-                ratios acumulados de Panquecitas de cada ciudad. */}
-            <XAxis dataKey="categoria" tick={{ fontSize: 13, fill: "#64748b" }} height={58} />
+                ratios acumulados de Panquecitas de cada ciudad, en dos renglones
+                ("Panquecitas" + el %). */}
+            <XAxis dataKey="categoria" tick={{ fontSize: 13, fill: "#64748b" }} height={72} />
             <YAxis yAxisId="vol" hide />
             {/* Eje propio del índice (Cumaná = 100), en % y separado del volumen. */}
             <YAxis yAxisId="idx" hide domain={[0, Math.ceil(maxIndice * 1.2)]} />
@@ -219,7 +225,7 @@ const Inner = dynamic(
   },
   {
     ssr: false,
-    loading: () => <div className="h-[380px] bg-slate-50 rounded-lg animate-pulse" />,
+    loading: () => <div className="h-[400px] bg-slate-50 rounded-lg animate-pulse" />,
   }
 );
 
