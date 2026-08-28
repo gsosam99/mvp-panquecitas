@@ -16,6 +16,10 @@ const COLOR_POR_SECTOR: Record<string, string> = {
 
 const CATEGORIAS = ["Margarina", "Mayonesa", "Harina PAN"];
 
+// Franja izquierda reservada para el rótulo de la fila de ratios. Da para
+// "Panquecitas vs categoría" a 13px, que es el renglón más largo.
+const MARGEN_ROTULO = 168;
+
 const Inner = dynamic(
   async () => {
     const {
@@ -101,10 +105,9 @@ const Inner = dynamic(
        * categoría. Con la geometría de la barra (y + height = la base) el texto
        * se ancla debajo de ese nombre, alineado con SU columna.
        *
-       * Dos renglones: arriba "Panquecitas" y abajo el %. Solo el número
-       * suelto no decía de qué era —quien ve el gráfico por primera vez no
-       * tiene cómo saber que es Panquecitas sobre ESA categoría—; con el
-       * nombre encima y la nota al pie de la tarjeta queda explícito.
+       * El número va solo, sin repetir "Panquecitas" en cada barra: quién es
+       * el numerador lo dice el rótulo de la fila, a la izquierda (ver
+       * rotuloFilaRatio), que se lee ANTES que los números.
        */
       function etiquetaRatioDebajo(props: unknown) {
         // `fill` llega tal cual desde el LabelList: así el color de la ciudad
@@ -118,28 +121,59 @@ const Inner = dynamic(
           fill?: string;
         };
         if (value == null) return null;
-        const cx = x + width / 2;
+        return (
+          <text
+            x={x + width / 2}
+            y={y + height + 48}
+            textAnchor="middle"
+            fill={fill ?? "#64748b"}
+            fontSize={17}
+            fontWeight={700}
+          >
+            {`${Number(value).toLocaleString("es-VE", { maximumFractionDigits: 1 })}%`}
+          </text>
+        );
+      }
+
+      /**
+       * Rótulo de la fila de ratios, en el margen IZQUIERDO (MARGEN_ROTULO), a
+       * la altura de los números. Hace que la fila se lea como la de una tabla:
+       * primero qué es, después los valores.
+       *
+       * Se dibuja desde el label de la PRIMERA barra y solo en la primera
+       * categoría (index 0); si se dibujara desde las dos barras saldría dos
+       * veces, una encima de la otra. La `y` de la barra da la línea del eje,
+       * que es lo único que hace falta para alinearlo con los ratios.
+       */
+      function rotuloFilaRatio(props: unknown) {
+        const { index, y, height } = props as { index: number; y: number; height: number };
+        if (index !== 0) return etiquetaRatioDebajo(props);
         const base = y + height;
         return (
-          <text textAnchor="middle">
-            <tspan x={cx} y={base + 38} fill="#94a3b8" fontSize={9}>
-              Panquecitas
-            </tspan>
-            <tspan x={cx} y={base + 53} fill={fill ?? "#64748b"} fontSize={13} fontWeight={700}>
-              {`${Number(value).toLocaleString("es-VE", { maximumFractionDigits: 1 })}%`}
-            </tspan>
-          </text>
+          <>
+            <text x={4} textAnchor="start">
+              <tspan x={4} y={base + 34} fill="#64748b" fontSize={13} fontWeight={700}>
+                Ratio acumulado
+              </tspan>
+              <tspan x={4} y={base + 51} fill="#94a3b8" fontSize={13}>
+                Panquecitas vs categoría
+              </tspan>
+            </text>
+            {etiquetaRatioDebajo(props)}
+          </>
         );
       }
 
       return (
         <ResponsiveContainer width="100%" height={400}>
-          <ComposedChart data={chartData} margin={{ top: 20, right: 20, left: 10, bottom: 5 }}>
+          {/* El margen izquierdo reserva la franja del rótulo de la fila de
+              ratios ("Ratio acumulado / Panquecitas vs categoría"), que vive
+              fuera del área de dibujo. Ver rotuloFilaRatio. */}
+          <ComposedChart data={chartData} margin={{ top: 20, right: 20, left: MARGEN_ROTULO, bottom: 5 }}>
             <CartesianGrid strokeDasharray="3 3" stroke="#f1f5f9" vertical={false} />
-            {/* Alto extra en el eje X: debajo del nombre de la categoría van los
-                ratios acumulados de Panquecitas de cada ciudad, en dos renglones
-                ("Panquecitas" + el %). */}
-            <XAxis dataKey="categoria" tick={{ fontSize: 13, fill: "#64748b" }} height={72} />
+            {/* Alto extra en el eje X: debajo del nombre de la categoría va la
+                fila de ratios acumulados de Panquecitas de cada ciudad. */}
+            <XAxis dataKey="categoria" tick={{ fontSize: 13, fill: "#64748b" }} height={70} />
             <YAxis yAxisId="vol" hide />
             {/* Eje propio del índice (Cumaná = 100), en % y separado del volumen. */}
             <YAxis yAxisId="idx" hide domain={[0, Math.ceil(maxIndice * 1.2)]} />
@@ -155,7 +189,7 @@ const Inner = dynamic(
               formatter={(value: string) => (value === "indiceCabudare" ? "Cabudare vs Cumaná (Cumaná = 100%)" : value)}
               wrapperStyle={{ fontSize: 12 }}
             />
-            {data.map((row) => (
+            {data.map((row, i) => (
               <Bar
                 key={row.sector}
                 yAxisId="vol"
@@ -163,12 +197,20 @@ const Inner = dynamic(
                 fill={COLOR_POR_SECTOR[row.sector] ?? "#94a3b8"}
                 radius={[3, 3, 0, 0]}
               >
-                <LabelList dataKey={row.label} position="top" fontSize={11} formatter={(v) => formatLabel(Number(v ?? 0))} />
-                {/* Ratio acumulado de Panquecitas vs. esta categoría, debajo de la barra. */}
+                <LabelList
+                  dataKey={row.label}
+                  position="top"
+                  fontSize={15}
+                  fontWeight={600}
+                  formatter={(v) => formatLabel(Number(v ?? 0))}
+                />
+                {/* Ratio acumulado de Panquecitas vs. esta categoría, debajo de la
+                    barra. Solo la PRIMERA ciudad dibuja además el rótulo de la
+                    fila, para que no salga duplicado. */}
                 <LabelList
                   dataKey={`ratioPanq_${row.sector}`}
                   fill={COLOR_POR_SECTOR[row.sector] ?? "#94a3b8"}
-                  content={etiquetaRatioDebajo}
+                  content={i === 0 ? rotuloFilaRatio : etiquetaRatioDebajo}
                 />
               </Bar>
             ))}
@@ -184,15 +226,19 @@ const Inner = dynamic(
                   value: "Cumaná = 100%",
                   position: "insideTopLeft",
                   fill: COLOR_POR_SECTOR.cumana,
-                  fontSize: 12,
-                  fontWeight: 600,
+                  fontSize: 14,
+                  fontWeight: 700,
                 }}
               />
             )}
+            {/* Recta, no curva: `monotone` inventaba una curva entre tres
+                categorías que no tienen continuidad entre sí (Margarina →
+                Mayonesa → Harina PAN no es una serie temporal), y sugería un
+                recorrido que no existe. */}
             {showIndiceCumana && (
               <Line
                 yAxisId="idx"
-                type="monotone"
+                type="linear"
                 dataKey="indiceCabudare"
                 stroke={COLOR_POR_SECTOR.barquisimeto_este}
                 strokeWidth={2}
@@ -203,9 +249,9 @@ const Inner = dynamic(
                 <LabelList
                   dataKey="indiceCabudare"
                   position="top"
-                  offset={10}
+                  offset={12}
                   fill="#b45309"
-                  fontSize={12}
+                  fontSize={16}
                   fontWeight={700}
                   stroke="#ffffff"
                   strokeWidth={3}

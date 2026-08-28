@@ -2209,11 +2209,10 @@ export function DiennDashboardClient({
             {/* Los % de abajo no se explican solos: hay que decir contra qué se
                 miden y en qué unidad se leen. */}
             <p className="text-xs text-slate-400 mt-2">
-              Los porcentajes <span className="font-medium text-slate-600">debajo</span> de cada barra son el{" "}
-              <span className="font-medium text-slate-600">ratio acumulado de Panquecitas contra esa categoría, en
-              esa ciudad</span>: por cada 100 kg de Margarina, Mayonesa o Harina PAN que vende la ciudad, cuántos kg
-              de Panquecitas vende. No son parte de la barra —la barra son los kg de la categoría en mayo-julio— y van
-              en el color de su ciudad. Es el mismo número del cuadro{" "}
+              La fila rotulada <span className="font-medium text-slate-600">Ratio acumulado · Panquecitas vs
+              categoría</span>, debajo de las barras, se lee así: por cada 100 kg de Margarina, Mayonesa o Harina PAN
+              que vende la ciudad, cuántos kg de Panquecitas vende. No son parte de la barra —la barra son los kg de
+              la categoría en mayo-julio— y cada número va en el color de su ciudad. Es el mismo número del cuadro{" "}
               <span className="font-medium">Ratio acumulado</span> de los gráficos de rendimiento diario (promedio de
               los ratios diarios del período).
             </p>
