@@ -1,7 +1,43 @@
 "use client";
 
 import dynamic from "next/dynamic";
+import type { ReactElement } from "react";
 import type { Rendimiento3MResult } from "@/lib/dienn-queries";
+
+/**
+ * Texto de la meta del 4%, en DOS líneas ("Meta 4%" / "718 kg").
+ *
+ * Vive fuera del área de dibujo, en el margen derecho (MARGEN_META). En una
+ * sola línea el texto a 17px pedía ~150px de franja y el área de dibujo se
+ * quedaba corta: con `minTickGap` el eje X empezaba a botar días (se perdió el
+ * 24 de agosto). Partido en dos líneas la franja baja a ~104px —menos que los
+ * 118px que ocupaba el texto chico original— y el eje recupera ancho sin que
+ * el texto vuelva a achicarse.
+ *
+ * Recharts inyecta `viewBox` al clonar el elemento: es el rectángulo de la
+ * línea de referencia, así que `x + width` es el borde derecho del área de
+ * dibujo y `y` la altura exacta de la línea punteada.
+ */
+function EtiquetaMeta({
+  viewBox,
+  kg,
+}: {
+  viewBox?: { x: number; y: number; width: number; height: number };
+  kg: string;
+}) {
+  if (!viewBox) return null;
+  const x = viewBox.x + viewBox.width + 8;
+  return (
+    <text fill="#15803d" fontSize={17} fontWeight={700}>
+      <tspan x={x} y={viewBox.y - 3}>
+        Meta 4%
+      </tspan>
+      <tspan x={x} y={viewBox.y + 15}>
+        {kg}
+      </tspan>
+    </text>
+  );
+}
 
 /** Ratio ACUMULADO por ciudad, alineado por día con data.puntos. */
 export interface Rendimiento3MRatioCiudad {
@@ -77,8 +113,9 @@ const Inner = dynamic(
       // debajo de la línea se pasa arriba. En los dos casos queda pegado a la
       // línea punteada, que es lo que hace que se entienda a qué se refiere.
       // Franja reservada a la derecha para el texto de la meta, que vive fuera
-      // del área de dibujo. Da para "Meta 4%: 1.234 kg" a 17px (se subió de 13px
-      // porque no se leía; la franja creció en la misma proporción).
+      // del área de dibujo. Da para "Meta 4%" / "1.234 kg" a 17px en DOS líneas
+      // (ver EtiquetaMeta): en una sola línea pedía ~150px y el eje X se
+      // quedaba sin ancho para mostrar todos los días.
       //
       // No hay heurística de colisión acá. Se intentó —estimar en qué píxel
       // cae cada número y mover el texto al lado con más holgura— y no
@@ -86,7 +123,7 @@ const Inner = dynamic(
       // posicionar la etiqueta, así que la estimación erraba y el solapamiento
       // volvía. Sacar el texto del área no estima nada: donde va no hay
       // ratios, y el solapamiento deja de ser posible.
-      const MARGEN_META = 152;
+      const MARGEN_META = 104;
 
       return (
         <ResponsiveContainer width="100%" height={370}>
@@ -171,13 +208,11 @@ const Inner = dynamic(
               stroke="#16a34a"
               strokeWidth={2}
               strokeDasharray="6 4"
-              label={{
-                value: `Meta 4%: ${data.meta4Pct.toLocaleString("es-VE", { maximumFractionDigits: 0 })} kg`,
-                position: "right",
-                fill: "#15803d",
-                fontSize: 17,
-                fontWeight: 700,
-              }}
+              label={
+                (
+                  <EtiquetaMeta kg={`${data.meta4Pct.toLocaleString("es-VE", { maximumFractionDigits: 0 })} kg`} />
+                ) as unknown as ReactElement<SVGElement>
+              }
             />
             {/* Suavizada y con el mismo grosor/puntos que Panquecitas vs Harina PAN. */}
             <Line
