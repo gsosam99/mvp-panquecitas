@@ -311,6 +311,8 @@ export function DiennDashboardClient({
   const [portafolioIncluirHarinaPan, setPortafolioIncluirHarinaPan] = useState(false);
   // Barras de Margarina/Mayonesa/Harina PAN de los últimos 3 meses (referencia).
   const [ventas3MesesComoPct, setVentas3MesesComoPct] = useState(false);
+  // Línea opcional sobre esas barras: Cumaná = 100% y Cabudare como % de Cumaná.
+  const [ventas3MesesIndiceCumana, setVentas3MesesIndiceCumana] = useState(false);
   // Ranking por segmento: volumen en kg o como % del total.
   const [rankingComoPct, setRankingComoPct] = useState(false);
   const [panGranularity, setPanGranularity] = useState<PanComparisonGranularity>("month");
@@ -642,6 +644,32 @@ export function DiennDashboardClient({
     });
   }, [rendimientoVsMavesaData, bundles, categoriaMavesa]);
 
+  // Ratio ACUMULADO de Panquecitas contra cada categoría, por ciudad. No es un
+  // cálculo nuevo: es exactamente el mismo número que ya muestran los gráficos
+  // de rendimiento diario (promedio de los ratios diarios del período), solo
+  // que resumido en un valor por categoría × ciudad para colgarlo debajo de
+  // cada barra de "Ventas Últimos 3 Meses".
+  //
+  // La clave es `${categoría}|${sector}` y usa los mismos nombres de categoría
+  // que el gráfico (Margarina / Mayonesa / Harina PAN). Sale de los bundles por
+  // sector, así que no depende de las pestañas de arriba — igual que las barras.
+  const ratiosPanquecitas3Meses = useMemo<Record<string, number | null>>(() => {
+    const promedio = (puntos: readonly { ratioPct: number }[]) =>
+      puntos.length === 0
+        ? null
+        : Math.round((puntos.reduce((s, p) => s + p.ratioPct, 0) / puntos.length) * 10) / 10;
+
+    const salida: Record<string, number | null> = {};
+    for (const s of pilotSectors) {
+      salida[`Margarina|${s}`] = promedio(bundles[s].rendimientoVsMavesa.margarina.puntos);
+      salida[`Mayonesa|${s}`] = promedio(bundles[s].rendimientoVsMavesa.mayonesa.puntos);
+      // Harina PAN: población por defecto (PAN Cliente), la misma que abre el
+      // gráfico de rendimiento vs. promedio 3M.
+      salida[`Harina PAN|${s}`] = promedio(bundles[s].rendimiento3M.clientes.puntos);
+    }
+    return salida;
+  }, [bundles, pilotSectors]);
+
   const comboPoints = bundle.ventaRecompraActivacion[comboGranularity];
   // Kg de PDV fuera de cartera incluidos en el volumen. Es acumulado, así que
   // el último punto trae el total del período.
@@ -655,6 +683,22 @@ export function DiennDashboardClient({
           (bundle.volumenRadarAcumulado.panquecitasTon / bundle.volumenRadarAcumulado.harinaPanTon) * 1000
         ) / 10
       : 0;
+
+  // Ratio ACUMULADO contra el promedio de PAN de los ÚLTIMOS 3 MESES (la carga
+  // aparte "Radar últimos 3 Meses"), para la tarjeta de volumen. Es otra
+  // referencia que la línea de arriba: esa compara contra el PAN del propio
+  // período (Radar), esta contra el histórico de 3 meses.
+  //
+  // Misma definición que el gráfico de más abajo: promedio de los ratios
+  // diarios. Se fija a la población por defecto (PAN Cliente) para que la
+  // tarjeta no cambie con los toggles internos del gráfico; sí sigue el corte
+  // de las pestañas de arriba, como el resto de la tarjeta.
+  const ratioAcum3MTarjeta = useMemo(() => {
+    const puntos = bundle.rendimiento3M.clientes.puntos;
+    if (puntos.length === 0) return null;
+    const suma = puntos.reduce((s, p) => s + p.ratioPct, 0);
+    return Math.round((suma / puntos.length) * 10) / 10;
+  }, [bundle]);
 
   const filtroTexto = filter === "TOTAL" ? "Total sectores piloto" : sectorLabels[filter];
 
@@ -714,6 +758,11 @@ export function DiennDashboardClient({
           annotation={[
             `Activación de cliente ${bundle.penetracionRadarVsHpm.radarPanquecitasPct}%`,
             `Proporción vs Harina PAN ${proporcionPanqVsHpm}%`,
+            // Segunda referencia: el mismo ratio pero contra el promedio de PAN
+            // de los últimos 3 meses (carga "Radar últimos 3 Meses").
+            ...(ratioAcum3MTarjeta != null
+              ? [`Ratio acum. vs promedio PAN 3M ${ratioAcum3MTarjeta.toLocaleString("es-VE", { maximumFractionDigits: 1 })}%`]
+              : []),
             `Volumen facturado ${bundle.totalFacturadoToneladas.toLocaleString("es-VE", { maximumFractionDigits: 2 })} Ton`,
             // Este total es el único que suma PDV fuera de la cartera. Se
             // declara para que la diferencia contra los gráficos por segmento
@@ -863,16 +912,19 @@ export function DiennDashboardClient({
                     className="absolute right-0 top-0 z-10 rounded-lg border border-slate-200 bg-white/90 px-3 py-1.5 pointer-events-none"
                     title={`Promedio de los ${ratioAcumulado3M.dias} ratios diarios del período (Panquecitas del día ÷ promedio diario de Harina PAN). Misma definición que el ratio acumulado por ciudad.`}
                   >
-                    <p className="text-[10px] uppercase tracking-wide text-slate-400 leading-none">
+                    {/* Tamaños subidos a propósito (DIENN, 28-08-2026): en
+                        text-[10px]/text-sm el ratio y la meta no se leían en la
+                        captura del gráfico. */}
+                    <p className="text-xs uppercase tracking-wide text-slate-500 leading-none">
                       Ratio acumulado
                     </p>
                     <p
-                      className={`text-sm font-semibold leading-tight ${
+                      className={`text-2xl font-bold leading-tight ${
                         ratioAcumulado3M.pct >= 4 ? "text-emerald-700" : "text-slate-900"
                       }`}
                     >
                       {ratioAcumulado3M.pct.toLocaleString("es-VE", { maximumFractionDigits: 1 })}%
-                      <span className="text-[10px] font-normal text-slate-400"> · meta 4%</span>
+                      <span className="text-sm font-medium text-slate-500"> · meta 4%</span>
                     </p>
                   </div>
                 )}
@@ -925,7 +977,7 @@ export function DiennDashboardClient({
               </p>
             </>
           ) : (
-            <div className="h-[340px] flex items-center justify-center text-slate-400">
+            <div className="h-[370px] flex items-center justify-center text-slate-400">
               <div className="text-center">
                 <p className="text-4xl mb-2">📉</p>
                 {rendimiento3MData.promedio3M > 0 ? (
@@ -1040,16 +1092,18 @@ export function DiennDashboardClient({
                     className="absolute right-0 top-0 z-10 rounded-lg border border-slate-200 bg-white/90 px-3 py-1.5 pointer-events-none"
                     title={`Promedio de los ${ratioAcumuladoMavesa.dias} ratios diarios del período.`}
                   >
-                    <p className="text-[10px] uppercase tracking-wide text-slate-400 leading-none">
+                    {/* Sin "meta 4%": Margarina/Mayonesa no tienen meta (DIENN,
+                        28-08-2026), solo el ratio. Mismos tamaños que el cuadro
+                        del gráfico de PAN, para que se lea en la captura. */}
+                    <p className="text-xs uppercase tracking-wide text-slate-500 leading-none">
                       Ratio acumulado
                     </p>
                     <p
-                      className={`text-sm font-semibold leading-tight ${
+                      className={`text-2xl font-bold leading-tight ${
                         ratioAcumuladoMavesa.pct >= 4 ? "text-emerald-700" : "text-slate-900"
                       }`}
                     >
                       {ratioAcumuladoMavesa.pct.toLocaleString("es-VE", { maximumFractionDigits: 1 })}%
-                      <span className="text-[10px] font-normal text-slate-400"> · meta 4%</span>
                     </p>
                   </div>
                 )}
@@ -1077,7 +1131,7 @@ export function DiennDashboardClient({
               </p>
             </>
           ) : (
-            <div className="h-[340px] flex items-center justify-center text-slate-400">
+            <div className="h-[370px] flex items-center justify-center text-slate-400">
               <div className="text-center">
                 <p className="text-4xl mb-2">📉</p>
                 <p>Sin datos todavía.</p>
@@ -2103,7 +2157,12 @@ export function DiennDashboardClient({
           <div>
             <CardTitle>Ventas Últimos 3 Meses — Margarina, Mayonesa y Harina PAN</CardTitle>
             <p className="text-xs text-slate-400 mt-1">
-              Mayo-julio (reporte de referencia), por ciudad — toda la cartera del piloto.
+              Mayo-julio (reporte de referencia), por ciudad — toda la cartera del piloto. Debajo de cada barra va el{" "}
+              <span className="font-medium">ratio acumulado de Panquecitas contra esa categoría en esa ciudad</span>{" "}
+              (el mismo de los gráficos de rendimiento diario: promedio de los ratios diarios del período). Con{" "}
+              <span className="font-medium">Cumaná = 100%</span> se superpone una línea que toma el volumen de Cumaná
+              como base y muestra cuánto representa Cabudare frente a él, categoría por categoría (siempre en kg,
+              aunque las barras estén en % del total).
             </p>
           </div>
           <div className="flex flex-wrap items-center gap-2 print:hidden">
@@ -2125,13 +2184,30 @@ export function DiennDashboardClient({
                 </button>
               ))}
             </div>
+            {/* Línea de índice con Cumaná como base 100. */}
+            <button
+              onClick={() => setVentas3MesesIndiceCumana((v) => !v)}
+              title="Superpone una línea que toma el volumen de Cumaná como 100% y muestra cuánto es Cabudare frente a él"
+              className={`px-3 py-1.5 rounded-lg border text-xs font-medium transition-colors ${
+                ventas3MesesIndiceCumana
+                  ? "border-amber-500 bg-amber-500 text-white"
+                  : "border-slate-200 bg-white text-slate-500 hover:bg-slate-50"
+              }`}
+            >
+              Cumaná = 100%
+            </button>
           </div>
         </CardHeader>
         <CardContent>
           {ventas3MesesPorCiudad.length > 0 ? (
-            <Ventas3MesesPorCiudadChart data={ventas3MesesPorCiudad} comoPct={ventas3MesesComoPct} />
+            <Ventas3MesesPorCiudadChart
+              data={ventas3MesesPorCiudad}
+              comoPct={ventas3MesesComoPct}
+              showIndiceCumana={ventas3MesesIndiceCumana}
+              ratiosPanquecitas={ratiosPanquecitas3Meses}
+            />
           ) : (
-            <div className="h-[320px] flex items-center justify-center text-slate-400">
+            <div className="h-[380px] flex items-center justify-center text-slate-400">
               <div className="text-center">
                 <p className="text-4xl mb-2">📊</p>
                 <p>Sin datos todavía.</p>

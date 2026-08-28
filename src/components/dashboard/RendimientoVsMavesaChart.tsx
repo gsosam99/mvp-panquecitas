@@ -73,8 +73,8 @@ const Inner = dynamic(
       const MARGEN_DERECHO = 24;
 
       return (
-        <ResponsiveContainer width="100%" height={340}>
-          <ComposedChart data={chartData} margin={{ top: 52, right: MARGEN_DERECHO, left: 10, bottom: 5 }}>
+        <ResponsiveContainer width="100%" height={370}>
+          <ComposedChart data={chartData} margin={{ top: 66, right: MARGEN_DERECHO, left: 10, bottom: 5 }}>
             <CartesianGrid strokeDasharray="3 3" stroke="#f1f5f9" vertical={false} />
             <XAxis dataKey="label" tick={{ fontSize: 13, fill: "#64748b" }} minTickGap={16} />
             <YAxis
@@ -184,7 +184,7 @@ const Inner = dynamic(
   },
   {
     ssr: false,
-    loading: () => <div className="h-[340px] bg-slate-50 rounded-lg animate-pulse" />,
+    loading: () => <div className="h-[370px] bg-slate-50 rounded-lg animate-pulse" />,
   }
 );
 

@@ -77,7 +77,8 @@ const Inner = dynamic(
       // debajo de la línea se pasa arriba. En los dos casos queda pegado a la
       // línea punteada, que es lo que hace que se entienda a qué se refiere.
       // Franja reservada a la derecha para el texto de la meta, que vive fuera
-      // del área de dibujo. Da para "Meta 4%: 1.234 kg" a 13px.
+      // del área de dibujo. Da para "Meta 4%: 1.234 kg" a 17px (se subió de 13px
+      // porque no se leía; la franja creció en la misma proporción).
       //
       // No hay heurística de colisión acá. Se intentó —estimar en qué píxel
       // cae cada número y mover el texto al lado con más holgura— y no
@@ -85,13 +86,13 @@ const Inner = dynamic(
       // posicionar la etiqueta, así que la estimación erraba y el solapamiento
       // volvía. Sacar el texto del área no estima nada: donde va no hay
       // ratios, y el solapamiento deja de ser posible.
-      const MARGEN_META = 118;
+      const MARGEN_META = 152;
 
       return (
-        <ResponsiveContainer width="100%" height={340}>
+        <ResponsiveContainer width="100%" height={370}>
           {/* El margen derecho reserva la franja donde vive el texto de la meta,
               fuera del área de dibujo. Ver MARGEN_META más abajo. */}
-          <ComposedChart data={chartData} margin={{ top: 40, right: MARGEN_META, left: 10, bottom: 5 }}>
+          <ComposedChart data={chartData} margin={{ top: 66, right: MARGEN_META, left: 10, bottom: 5 }}>
             <CartesianGrid strokeDasharray="3 3" stroke="#f1f5f9" vertical={false} />
             <XAxis dataKey="label" tick={{ fontSize: 13, fill: "#64748b" }} minTickGap={16} />
             {/* El dominio se fuerza a incluir las líneas fijas: en automático
@@ -174,8 +175,8 @@ const Inner = dynamic(
                 value: `Meta 4%: ${data.meta4Pct.toLocaleString("es-VE", { maximumFractionDigits: 0 })} kg`,
                 position: "right",
                 fill: "#15803d",
-                fontSize: 13,
-                fontWeight: 600,
+                fontSize: 17,
+                fontWeight: 700,
               }}
             />
             {/* Suavizada y con el mismo grosor/puntos que Panquecitas vs Harina PAN. */}
@@ -238,7 +239,7 @@ const Inner = dynamic(
   },
   {
     ssr: false,
-    loading: () => <div className="h-[340px] bg-slate-50 rounded-lg animate-pulse" />,
+    loading: () => <div className="h-[370px] bg-slate-50 rounded-lg animate-pulse" />,
   }
 );
 

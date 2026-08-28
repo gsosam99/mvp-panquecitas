@@ -307,11 +307,17 @@ const Inner = dynamic(
                 dot={{ r: 2, fill: "#4f7a5c" }}
                 isAnimationActive={false}
               >
-                {/* Etiqueta debajo del punto para no solaparse con la efectividad. */}
+                {/* Etiqueta ENCIMA de su propia línea verde. Antes iba debajo del
+                    punto y el número del Indirecto —que va arriba de su línea,
+                    con offset 24— le caía justo encima: para separarse hacía
+                    falta que las dos líneas quedaran a más de ~38 px, y no lo
+                    están. Con las dos etiquetas por encima de su respectiva
+                    línea, la separación necesaria baja a ~14 px y los dos
+                    números se leen. */}
                 <LabelList
                   dataKey="efectividadDirecto"
-                  position="bottom"
-                  offset={14}
+                  position="top"
+                  offset={10}
                   fill="#4f7a5c"
                   fontSize={9}
                   stroke="#ffffff"
