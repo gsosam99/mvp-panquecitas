@@ -79,16 +79,13 @@ const Inner = dynamic(
         const kgCabudare = cabudare ? kgDe(cabudare, nombre) : 0;
         punto.indiceCabudare =
           baseCumana > 0 && kgCabudare > 0 ? Math.round((kgCabudare / baseCumana) * 1000) / 10 : null;
+        // Altura CONSTANTE de los puntos: 100, la misma de la línea punteada de
+        // Cumaná. La posición no significa nada —el valor se lee en la etiqueta—
+        // así que la fila queda plana y no dibuja una forma que sugiera un
+        // recorrido entre categorías que no lo tienen.
+        punto.filaIndice = punto.indiceCabudare == null ? null : 100;
         return punto;
       });
-
-      // El eje del índice se estira un 20% sobre el mayor entre 100 y el índice
-      // más alto, para que la línea y su base de 100% queden ARRIBA, sobre las
-      // barras, y no cruzándolas por el medio.
-      const maxIndice = Math.max(
-        100,
-        ...chartData.map((p) => Number(p.indiceCabudare ?? 0)).filter((v) => v > 0)
-      );
 
       const formatLabel = (v: number) =>
         comoPct
@@ -175,18 +172,32 @@ const Inner = dynamic(
                 fila de ratios acumulados de Panquecitas de cada ciudad. */}
             <XAxis dataKey="categoria" tick={{ fontSize: 13, fill: "#64748b" }} height={70} />
             <YAxis yAxisId="vol" hide />
-            {/* Eje propio del índice (Cumaná = 100), en % y separado del volumen. */}
-            <YAxis yAxisId="idx" hide domain={[0, Math.ceil(maxIndice * 1.2)]} />
+            {/* Eje propio del índice (Cumaná = 100), separado del volumen. El
+                dominio es FIJO: la fila de puntos vive siempre en 100, así que
+                con un tope de 120 queda al 83% de la altura — arriba de las
+                barras, sin cruzarlas. Un dominio que dependiera de los valores
+                movería la fila de altura entre un corte y otro. */}
+            <YAxis yAxisId="idx" hide domain={[0, 120]} />
             <Tooltip
               contentStyle={{ fontSize: 12, borderRadius: 8, border: "1px solid #e2e8f0" }}
-              formatter={(value, name) =>
-                name === "indiceCabudare"
-                  ? [`${Number(value ?? 0).toLocaleString("es-VE", { maximumFractionDigits: 1 })}% de Cumaná`, "Cabudare vs Cumaná"]
-                  : [formatLabel(Number(value ?? 0)), String(name ?? "")]
-              }
+              formatter={(value, name, item) => {
+                // La serie de puntos vive en una altura constante, así que su
+                // `value` no sirve: el número real está en el payload.
+                if (name === "filaIndice") {
+                  const real = (item as unknown as { payload?: { indiceCabudare?: number | null } } | undefined)
+                    ?.payload?.indiceCabudare;
+                  return [
+                    real == null
+                      ? "s/d"
+                      : `${real.toLocaleString("es-VE", { maximumFractionDigits: 1 })}% de Cumaná`,
+                    "Cabudare vs Cumaná",
+                  ];
+                }
+                return [formatLabel(Number(value ?? 0)), String(name ?? "")];
+              }}
             />
             <Legend
-              formatter={(value: string) => (value === "indiceCabudare" ? "Cabudare vs Cumaná (Cumaná = 100%)" : value)}
+              formatter={(value: string) => (value === "filaIndice" ? "Cabudare vs Cumaná (Cumaná = 100%)" : value)}
               wrapperStyle={{ fontSize: 12 }}
             />
             {data.map((row, i) => (
@@ -231,21 +242,28 @@ const Inner = dynamic(
                 }}
               />
             )}
-            {/* Recta, no curva: `monotone` inventaba una curva entre tres
-                categorías que no tienen continuidad entre sí (Margarina →
-                Mayonesa → Harina PAN no es una serie temporal), y sugería un
-                recorrido que no existe. */}
+            {/* SIN línea: solo los puntos, todos a la misma altura (dataKey
+                `filaIndice`, constante en 100), sobre la punteada de Cumaná.
+                Uniendo los puntos —curva o recta— se dibujaba una forma entre
+                Margarina, Mayonesa y Harina PAN que no significa nada: son tres
+                categorías sueltas, no una serie en el tiempo. El valor de cada
+                punto se lee en su etiqueta, no en su altura.
+
+                `strokeWidth={0}` deja el trazo invisible pero conserva el color
+                para el ícono de la leyenda; `legendType="circle"` lo dibuja como
+                punto, que es lo que se ve en el gráfico. */}
             {showIndiceCumana && (
               <Line
                 yAxisId="idx"
                 type="linear"
-                dataKey="indiceCabudare"
+                dataKey="filaIndice"
                 stroke={COLOR_POR_SECTOR.barquisimeto_este}
-                strokeWidth={2}
-                dot={{ r: 4, fill: COLOR_POR_SECTOR.barquisimeto_este }}
-                connectNulls
+                strokeWidth={0}
+                legendType="circle"
+                dot={{ r: 5, fill: COLOR_POR_SECTOR.barquisimeto_este }}
                 isAnimationActive={false}
               >
+                {/* La etiqueta sale del valor REAL, no de la altura constante. */}
                 <LabelList
                   dataKey="indiceCabudare"
                   position="top"
