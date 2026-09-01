@@ -42,12 +42,17 @@ export const SECTOR_LABELS: Record<Sector, string> = {
   barquisimeto_este: BARQUISIMETO_ESTE_SECTOR,
 };
 
-// Franquiciadas del modelo INDIRECTO de Barquisimeto Este (Cabudare). El
+// Las 6 franquiciadas del modelo INDIRECTO de Barquisimeto Este (Cabudare). El
 // nombre de la constante quedó de cuando se creyó que eran solo distribuidoras
 // sueltas coladas por el reporte de Pedidos y Facturado; DIENN confirmó el
-// 01-09-2026 que son las 5 que abastecen a los PDV del grupo vendedor W05
-// —la tanda "Indirecto Cabudare" de src/lib/cohortes.ts—, el mismo rol que
-// las de Cumaná en la lista de abajo. NO BORRAR pensando que son basura vieja.
+// 01-09-2026 que son las que abastecen a los PDV del grupo vendedor W05 —la
+// tanda "Indirecto Cabudare" de src/lib/cohortes.ts—, el mismo rol que las de
+// Cumaná en la lista de abajo. NO BORRAR pensando que son basura vieja.
+//
+// Ellas mismas traen grupo vendedor W05, así que la regla de cohorte les
+// asignaría "Indirecto Cabudare"; da igual, porque estar en esta lista las
+// saca del universo antes de que eso importe. Misma situación que las de
+// Cumaná con U27/U28.
 //
 // Pasan el filtro de sector pero NO son puntos de venta finales, solo
 // abastecen a abastos/bodegas. Se excluyen aquí a nivel de código porque la
@@ -58,6 +63,7 @@ export const SECTOR_LABELS: Record<Sector, string> = {
 // Ver conversación con Alejandro (07-08-2026), Mariana Di Buongrazio
 // (08-08-2026) y DIENN (01-09-2026).
 export const DISTRIBUIDORAS_INTERMEDIARIAS_SAP_CODES = [
+  "22401103", // DISTRIBUIDORA ANCALU, S.A — grupo vendedor W05, abastece 73 PDV (DIENN, 01-09-2026)
   "22401504", // DISTRIBUIDORA LEOMAR, S.A
   "22401950", // DISTRIBUIDORA LA EXCELENCIA, C.A
   "22403639", // DISTRIBUIDORA D'AVALLGAR, C.A.
