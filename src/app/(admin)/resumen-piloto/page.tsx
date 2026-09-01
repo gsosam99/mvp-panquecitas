@@ -51,7 +51,7 @@ export default async function ResumenPilotoPage() {
 
         <Card>
           <CardHeader className="pb-2">
-            <CardTitle className="text-sm font-medium text-slate-500">Franquiciados</CardTitle>
+            <CardTitle className="text-sm font-medium text-slate-500">Franquiciados — Cumaná</CardTitle>
           </CardHeader>
           <CardContent>
             <p className="text-3xl font-bold text-slate-900">{resumen.franquiciados}</p>
@@ -63,11 +63,13 @@ export default async function ResumenPilotoPage() {
 
         <Card>
           <CardHeader className="pb-2">
-            <CardTitle className="text-sm font-medium text-slate-500">Distribuidoras intermediarias</CardTitle>
+            <CardTitle className="text-sm font-medium text-slate-500">Franquiciados — Cabudare</CardTitle>
           </CardHeader>
           <CardContent>
             <p className="text-3xl font-bold text-slate-900">{resumen.distribuidorasIntermediarias}</p>
-            <p className="text-xs text-slate-400 mt-1">Anteriores al piloto — mismo tratamiento que los franquiciados.</p>
+            <p className="text-xs text-slate-400 mt-1">
+              Modelo indirecto de Barquisimeto Este, grupo W05 (01-09). Mismo tratamiento: no cuentan como PDV.
+            </p>
           </CardContent>
         </Card>
       </div>

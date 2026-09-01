@@ -52,11 +52,23 @@ export const COHORTE_PILOTO_ORIGINAL: Cohorte = {
  *     solo cuentan para leer lo facturado y lo pedido.
  *   - "Ampliación" (24-08-2026): el resto del archivo de cartera
  *     consolidada. Empieza a reportar ventas el lunes 24.
+ *   - "Indirecto Cabudare" (01-09-2026): último grupo vendedor del modelo
+ *     indirecto en Barquisimeto Este, W05. Los PDV que atiende los abastecen
+ *     las 5 franquiciadas que en sectors.ts están en
+ *     DISTRIBUIDORAS_INTERMEDIARIAS_SAP_CODES — ya excluidas del universo,
+ *     así que no hay nada que agregar allá.
  *
- * Ver conversación con Alejandro (21-08-2026).
+ * OJO con el orden: la última entrada no tiene grupos y atrapa TODO lo que no
+ * calzó antes. Una tanda nueva va SIEMPRE antes de ella; si se agrega después,
+ * sus clientes se estampan con la fecha del fallback y cuentan retroactivamente
+ * en meses ya reportados. Y como cartera-upload nunca recalcula una fecha ya
+ * registrada, recargar el archivo no lo corrige.
+ *
+ * Ver conversación con Alejandro (21-08-2026) y DIENN (01-09-2026).
  */
 export const COHORTES_NUEVAS: readonly Cohorte[] = [
   { nombre: "Indirecto Cumaná", desde: "2026-08-14", gruposVendedores: ["U27", "U28"] },
+  { nombre: "Indirecto Cabudare", desde: "2026-09-01", gruposVendedores: ["W05"] },
   { nombre: "Ampliación", desde: "2026-08-24", gruposVendedores: [] },
 ];
 

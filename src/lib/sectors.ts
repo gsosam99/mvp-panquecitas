@@ -42,16 +42,21 @@ export const SECTOR_LABELS: Record<Sector, string> = {
   barquisimeto_este: BARQUISIMETO_ESTE_SECTOR,
 };
 
-// Distribuidoras intermediarias que aparecieron en el reporte de Pedidos y
-// Facturado (antes de que "Carga Radar"/"Pedidos y Facturado" dejaran de
-// crear clientes nuevos) y quedaron guardadas en `locations` con una
-// oficina_venta válida — pasan el filtro de sector pero NO son puntos de
-// venta finales, solo ayudan a distribuir el producto a abastos/bodegas.
-// Se excluyen aquí a nivel de código porque la limpieza en la base de datos
-// no es suficiente por sí sola (si vuelven a aparecer en un reporte y se
-// refrescan sus datos de cartera, la fila persiste). Nunca deben contar en
-// el universo real del piloto ni recibir visitas de mercaderista/promotora.
-// Ver conversación con Alejandro (07-08-2026) y Mariana Di Buongrazio (08-08-2026).
+// Franquiciadas del modelo INDIRECTO de Barquisimeto Este (Cabudare). El
+// nombre de la constante quedó de cuando se creyó que eran solo distribuidoras
+// sueltas coladas por el reporte de Pedidos y Facturado; DIENN confirmó el
+// 01-09-2026 que son las 5 que abastecen a los PDV del grupo vendedor W05
+// —la tanda "Indirecto Cabudare" de src/lib/cohortes.ts—, el mismo rol que
+// las de Cumaná en la lista de abajo. NO BORRAR pensando que son basura vieja.
+//
+// Pasan el filtro de sector pero NO son puntos de venta finales, solo
+// abastecen a abastos/bodegas. Se excluyen aquí a nivel de código porque la
+// limpieza en la base de datos no es suficiente por sí sola (si vuelven a
+// aparecer en un reporte y se refrescan sus datos de cartera, la fila
+// persiste). Nunca deben contar en el universo real del piloto ni recibir
+// visitas de mercaderista/promotora.
+// Ver conversación con Alejandro (07-08-2026), Mariana Di Buongrazio
+// (08-08-2026) y DIENN (01-09-2026).
 export const DISTRIBUIDORAS_INTERMEDIARIAS_SAP_CODES = [
   "22401504", // DISTRIBUIDORA LEOMAR, S.A
   "22401950", // DISTRIBUIDORA LA EXCELENCIA, C.A
