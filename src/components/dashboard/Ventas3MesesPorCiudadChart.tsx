@@ -5,9 +5,9 @@ import type { Ventas3MesesRow } from "@/lib/mavesa-queries";
 
 // Barras de Margarina, Mayonesa y Harina PAN de los últimos 3 meses
 // (referencia), por ciudad — mismo patrón visual que PortafolioPorCiudadChart
-// (eje X = categoría, color = ciudad). Sin toggle de Harina PAN (siempre
-// presente) ni de Cliente/Universo (la cartera es una sola población, ver
-// getVentas3MesesPorCiudad).
+// (eje X = categoría, color = ciudad). Sin toggle de Harina PAN en las
+// barras (siempre presente). El ratio Panquecitas vs. Harina PAN debajo de
+// cada barra sí admite PAN Cliente / PAN Universo desde el dashboard.
 
 const COLOR_POR_SECTOR: Record<string, string> = {
   cumana: "#1a65bd",
