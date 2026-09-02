@@ -159,19 +159,47 @@ function findRadarColumns(headerRow: string[]): RadarColumnMap | null {
   const norm = headerRow.map(normalizeHeader);
   const cliente = indicesOf(norm, "clientet");
   const tipoCliente = indicesOf(norm, "tipodeclienten");
-  const esquema = indicesOf(norm, "esquemadeatencionn");
+  // Alias: exports recientes usan "Esquema de Atención Área Ventas (N)"
+  // en vez del corto "Esquema de Atención (N)".
+  const esquema = [
+    ...indicesOf(norm, "esquemadeatencionn"),
+    ...norm
+      .map((n, i) => (n.startsWith("esquemadeatencion") ? i : -1))
+      .filter((i) => i >= 0),
+  ].filter((i, pos, arr) => arr.indexOf(i) === pos);
   const grupoVendedores = indicesOf(norm, "grupodevendedoresn");
   const material = indicesOf(norm, "material");
   const oficinaVenta = indicesOf(norm, "areadeventasoficvtan");
   const zonaVenta = indicesOf(norm, "zonadeventasn");
   const dia = indicesOf(norm, "dia");
 
+  // Material a veces trae solo el encabezado "Material" (código) y la
+  // columna del nombre viene en blanco — se toma la celda siguiente.
+  const materialCodigo = material[0];
+  const materialNombre =
+    material.length >= 2 ? material[1] : materialCodigo !== undefined ? materialCodigo + 1 : undefined;
+
+  // Cliente / Grupo de Vendedores: si el export solo deja un encabezado
+  // visible (colspan), la grilla ya duplica el texto; si no, usar col+1.
+  const clienteCodigo = cliente[0];
+  const clienteNombre = cliente.length >= 2 ? cliente[1] : clienteCodigo !== undefined ? clienteCodigo + 1 : undefined;
+  const grupoVendedorCodigo = grupoVendedores[0];
+  const grupoVendedorNombre =
+    grupoVendedores.length >= 2
+      ? grupoVendedores[1]
+      : grupoVendedorCodigo !== undefined
+        ? grupoVendedorCodigo + 1
+        : undefined;
+
   if (
-    cliente.length < 2 ||
+    clienteCodigo === undefined ||
+    clienteNombre === undefined ||
     tipoCliente.length < 1 ||
     esquema.length < 1 ||
-    grupoVendedores.length < 2 ||
-    material.length < 2 ||
+    grupoVendedorCodigo === undefined ||
+    grupoVendedorNombre === undefined ||
+    materialCodigo === undefined ||
+    materialNombre === undefined ||
     oficinaVenta.length < 1 ||
     zonaVenta.length < 1 ||
     dia.length < 1
@@ -180,14 +208,14 @@ function findRadarColumns(headerRow: string[]): RadarColumnMap | null {
   }
 
   return {
-    clienteCodigo: cliente[0],
-    clienteNombre: cliente[1],
+    clienteCodigo,
+    clienteNombre,
     tipoCliente: tipoCliente[0],
     esquemaAtencion: esquema[0],
-    grupoVendedorCodigo: grupoVendedores[0],
-    grupoVendedorNombre: grupoVendedores[1],
-    materialCodigo: material[0],
-    materialNombre: material[1],
+    grupoVendedorCodigo,
+    grupoVendedorNombre,
+    materialCodigo,
+    materialNombre,
     oficinaVenta: oficinaVenta[0],
     zonaVenta: zonaVenta[0],
     dia: dia[0],
@@ -626,6 +654,12 @@ function extractHtmlFromMhtml(buffer: ArrayBuffer): string {
   const delimiter = `--${boundaryMatch[1]}`;
   const segments = raw.split(delimiter).slice(1); // descarta el preámbulo antes del primer boundary
 
+  // Excel "Web Page, Single File" mete VARIAS partes text/html: un frameset
+  // chico (N7_….htm), tabstrip, y el sheet real (…_archivos/sheet001.htm)
+  // con la tabla. Antes se devolvía la PRIMERA (frameset) y el Radar fallaba
+  // con "no se encontraron las columnas esperadas" aunque el archivo sí
+  // traía Cliente/Material/Día en sheet001.
+  const htmlParts: { location: string; html: string }[] = [];
   for (const segment of segments) {
     if (segment.startsWith("--")) continue; // delimitador final ("--BOUNDARY--")
     const bodyStart = segment.indexOf("\r\n\r\n");
@@ -635,14 +669,25 @@ function extractHtmlFromMhtml(buffer: ArrayBuffer): string {
 
     const encodingMatch = /Content-Transfer-Encoding:\s*([^\r\n]+)/i.exec(partHeaders);
     const encoding = (encodingMatch?.[1] ?? "7bit").trim().toLowerCase();
+    const locationMatch = /Content-Location:\s*([^\r\n]+)/i.exec(partHeaders);
+    const location = (locationMatch?.[1] ?? "").trim();
     const body = segment.slice(bodyStart + 4).replace(/\r\n$/, "");
     const bytes =
       encoding === "quoted-printable"
         ? decodeQuotedPrintable(body)
         : Uint8Array.from(Array.from(body, (c) => c.charCodeAt(0) & 0xff));
-    return new TextDecoder("utf-8").decode(bytes);
+    htmlParts.push({ location, html: new TextDecoder("utf-8").decode(bytes) });
   }
-  throw new Error('no se encontró la parte "text/html" del archivo');
+
+  if (htmlParts.length === 0) {
+    throw new Error('no se encontró la parte "text/html" del archivo');
+  }
+
+  const sheetPart = htmlParts.find((p) => /sheet0*\d+\.htm/i.test(p.location));
+  if (sheetPart) return sheetPart.html;
+
+  // Fallback: la parte HTML más grande (la hoja con datos suele ser >> frameset).
+  return htmlParts.reduce((best, p) => (p.html.length > best.html.length ? p : best)).html;
 }
 
 // ── HTML → grilla rectangular (respeta colspan/rowspan) ─────────────────
@@ -653,16 +698,33 @@ interface RawCell {
   rowspan: number;
 }
 
+/** Entidades HTML con nombre que Excel mete en exports MHTML (p. ej. D&iacute;a). */
+const HTML_NAMED_ENTITIES: Record<string, string> = {
+  nbsp: " ",
+  amp: "&",
+  lt: "<",
+  gt: ">",
+  quot: '"',
+  apos: "'",
+  aacute: "á",
+  eacute: "é",
+  iacute: "í",
+  oacute: "ó",
+  uacute: "ú",
+  Aacute: "Á",
+  Eacute: "É",
+  Iacute: "Í",
+  Oacute: "Ó",
+  Uacute: "Ú",
+  ntilde: "ñ",
+  Ntilde: "Ñ",
+};
+
 function decodeHtmlEntities(text: string): string {
   return text
-    .replace(/&nbsp;/g, " ")
-    .replace(/&amp;/g, "&")
-    .replace(/&lt;/g, "<")
-    .replace(/&gt;/g, ">")
-    .replace(/&quot;/g, '"')
-    .replace(/&#39;/g, "'")
     .replace(/&#(\d+);/g, (_, n) => String.fromCodePoint(Number(n)))
-    .replace(/&#x([0-9a-fA-F]+);/g, (_, n) => String.fromCodePoint(parseInt(n, 16)));
+    .replace(/&#x([0-9a-fA-F]+);/g, (_, n) => String.fromCodePoint(parseInt(n, 16)))
+    .replace(/&([a-zA-Z]+);/g, (raw, name: string) => HTML_NAMED_ENTITIES[name] ?? raw);
 }
 
 function tokenizeRawRows(html: string): RawCell[][] {
