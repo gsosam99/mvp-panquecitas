@@ -313,6 +313,10 @@ export function DiennDashboardClient({
   const [ventas3MesesComoPct, setVentas3MesesComoPct] = useState(false);
   // Línea opcional sobre esas barras: Cumaná = 100% y Cabudare como % de Cumaná.
   const [ventas3MesesIndiceCumana, setVentas3MesesIndiceCumana] = useState(false);
+  // Población del ratio "Panquecitas vs categoría" bajo las barras (Harina PAN).
+  // Misma semántica que el gráfico diario vs. promedio 3M: PAN Cliente = solo
+  // PDV que compran Panquecitas; PAN Universo = toda la cartera.
+  const [ventas3MesesPanPoblacion, setVentas3MesesPanPoblacion] = useState<Pan3MPoblacion>("clientes");
   // Ranking por segmento: volumen en kg o como % del total.
   const [rankingComoPct, setRankingComoPct] = useState(false);
   const [panGranularity, setPanGranularity] = useState<PanComparisonGranularity>("month");
@@ -663,12 +667,12 @@ export function DiennDashboardClient({
     for (const s of pilotSectors) {
       salida[`Margarina|${s}`] = promedio(bundles[s].rendimientoVsMavesa.margarina.puntos);
       salida[`Mayonesa|${s}`] = promedio(bundles[s].rendimientoVsMavesa.mayonesa.puntos);
-      // Harina PAN: población por defecto (PAN Cliente), la misma que abre el
-      // gráfico de rendimiento vs. promedio 3M.
-      salida[`Harina PAN|${s}`] = promedio(bundles[s].rendimiento3M.clientes.puntos);
+      // Harina PAN: respeta el toggle PAN Cliente / PAN Universo de esta tarjeta
+      // (misma semántica que el gráfico diario vs. promedio 3M).
+      salida[`Harina PAN|${s}`] = promedio(bundles[s].rendimiento3M[ventas3MesesPanPoblacion].puntos);
     }
     return salida;
-  }, [bundles, pilotSectors]);
+  }, [bundles, pilotSectors, ventas3MesesPanPoblacion]);
 
   const comboPoints = bundle.ventaRecompraActivacion[comboGranularity];
   // Kg de PDV fuera de cartera incluidos en el volumen. Es acumulado, así que
@@ -2161,10 +2165,36 @@ export function DiennDashboardClient({
               <span className="font-medium">Cumaná = 100%</span> se superpone una línea que toma el volumen de Cumaná
               como base y muestra cuánto representa Cabudare frente a él, categoría por categoría (siempre en kg,
               aunque las barras estén en % del total). Los porcentajes debajo de las barras están explicados al pie
-              del gráfico.
+              del gráfico. El ratio vs. <span className="font-medium">Harina PAN</span> sigue el botón{" "}
+              <span className="font-medium">PAN Cliente / PAN Universo</span> (igual que el gráfico diario de 3 meses).
             </p>
           </div>
           <div className="flex flex-wrap items-center gap-2 print:hidden">
+            <div className="flex rounded-lg border border-slate-200 overflow-hidden text-xs font-medium">
+              {(
+                [
+                  ["clientes", "PAN Cliente"],
+                  ["universo", "PAN Universo"],
+                ] as const
+              ).map(([key, label]) => (
+                <button
+                  key={key}
+                  onClick={() => setVentas3MesesPanPoblacion(key)}
+                  title={
+                    key === "clientes"
+                      ? "Ratio Harina PAN con el promedio de PDV de la cartera que también compran Panquecitas"
+                      : "Ratio Harina PAN con el promedio de toda la cartera del piloto"
+                  }
+                  className={`px-3 py-1.5 transition-colors ${
+                    ventas3MesesPanPoblacion === key
+                      ? "bg-slate-900 text-white"
+                      : "bg-white text-slate-500 hover:bg-slate-50"
+                  }`}
+                >
+                  {label}
+                </button>
+              ))}
+            </div>
             <div className="flex rounded-lg border border-slate-200 overflow-hidden text-xs font-medium">
               {(
                 [
@@ -2214,7 +2244,10 @@ export function DiennDashboardClient({
               que vende la ciudad, cuántos kg de Panquecitas vende. No son parte de la barra —la barra son los kg de
               la categoría en mayo-julio— y cada número va en el color de su ciudad. Es el mismo número del cuadro{" "}
               <span className="font-medium">Ratio acumulado</span> de los gráficos de rendimiento diario (promedio de
-              los ratios diarios del período).
+              los ratios diarios del período). En <span className="font-medium">Harina PAN</span> el denominador sigue
+              el botón de arriba (
+              {ventas3MesesPanPoblacion === "clientes" ? "PAN Cliente" : "PAN Universo"}
+              ); Margarina y Mayonesa no distinguen esas poblaciones.
             </p>
             </>
           ) : (
