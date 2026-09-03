@@ -1094,6 +1094,9 @@ export function DiennDashboardClient({
               columns={[
                 { header: "Día", value: (r) => r.dia, width: 14 },
                 { header: "Panquecitas (kg)", value: (r) => r.panquecitasKg, width: 18 },
+                // Igual que en PAN: sin el promedio del día el ratio no se
+                // puede recalcular a mano, porque el denominador escalona.
+                { header: `Promedio ${categoriaMavesa} del día (kg/día)`, value: (r) => r.promedioDia, width: 28 },
                 { header: `Ratio vs promedio ${categoriaMavesa} (%)`, value: (r) => r.ratioPct, width: 26 },
               ]}
             />
@@ -1143,7 +1146,10 @@ export function DiennDashboardClient({
                 <span className="font-medium text-slate-600">
                   {rendimientoVsMavesaData.clientesConCompra} de {rendimientoVsMavesaData.clientesEnCartera} PDV
                 </span>{" "}
-                de la cartera del corte
+                de la cartera del corte · Ese promedio es el{" "}
+                <span className="font-medium text-slate-600">vigente hoy</span>: el denominador de cada día usa solo
+                los PDV que ya eran cartera en esa fecha, así que sube en cada ampliación (14-08, 24-08 y 01-09) y se
+                ve como escalón en el gráfico.
               </p>
             </>
           ) : (

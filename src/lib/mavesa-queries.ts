@@ -58,7 +58,16 @@ export interface RendimientoVsMavesaPunto {
   dia: string;
   label: string;
   panquecitasKg: number;
+  /** Panquecitas del día ÷ promedioDia × 100. */
   ratioPct: number;
+  /**
+   * Promedio de la categoría VIGENTE ese día (kg/día): solo los PDV ya
+   * incorporados a la cartera en esa fecha aportan al denominador.
+   */
+  promedioDia: number;
+  /** 4% de promedioDia, en kg. Se calcula por consistencia con PAN; el
+   *  gráfico de Mavesa no dibuja meta (Margarina/Mayonesa no tienen). */
+  meta4PctDia: number;
 }
 
 export interface RendimientoVsMavesaResult {
@@ -130,6 +139,15 @@ export async function getRendimientoVsMavesa(
 
   const clientesConCompra = new Set(referenciaFiltrada.map((r) => r.location_id)).size;
   const totalReferenciaKg = referenciaFiltrada.reduce((s, r) => s + Number(r.quantity_kg), 0);
+  // Aporte de cada PDV, para recomponer el promedio con solo los que ya eran
+  // cartera en una fecha dada (ver el promedio variable, más abajo).
+  const referenciaPorLocation = new Map<string, number>();
+  for (const r of referenciaFiltrada) {
+    referenciaPorLocation.set(
+      r.location_id,
+      (referenciaPorLocation.get(r.location_id) ?? 0) + Number(r.quantity_kg)
+    );
+  }
 
   // MISMO divisor que Harina PAN: venta acumulada de los 3 meses ÷ 63 días
   // hábiles (decisión del usuario, 26-08-2026). Antes cada categoría se
@@ -160,14 +178,52 @@ export async function getRendimientoVsMavesa(
     kgPorDia.set(dia, (kgPorDia.get(dia) ?? 0) + Number(r.quantity_kg));
   }
 
+  // ── Promedio VARIABLE por fecha de incorporación (DIENN, 03-09-2026) ──
+  //
+  // Mismo criterio que getRendimiento3M para Harina PAN: el denominador de
+  // cada día son los PDV que YA eran cartera esa fecha. Con un denominador
+  // único, las Panquecitas de los primeros días de agosto —cuando el piloto
+  // tenía 358 PDV— se comparaban contra la referencia de los 1.174 de hoy, y
+  // cada ampliación de cartera hundía retroactivamente meses ya reportados.
+  const aportePorIncorporacion = new Map<string, number>();
+  for (const l of universo) {
+    const desde = l.fecha_incorporacion?.slice(0, 10) ?? RENDIMIENTO_DIARIO_DESDE;
+    aportePorIncorporacion.set(
+      desde,
+      (aportePorIncorporacion.get(desde) ?? 0) + (referenciaPorLocation.get(l.id) ?? 0)
+    );
+  }
+  const escalones: { desde: string; totalKg: number }[] = [];
+  let acumulado = 0;
+  for (const desde of [...aportePorIncorporacion.keys()].sort()) {
+    acumulado += aportePorIncorporacion.get(desde) ?? 0;
+    escalones.push({ desde, totalKg: acumulado });
+  }
+  const totalReferenciaAl = (dia: string): number => {
+    let total = 0;
+    for (const e of escalones) {
+      if (e.desde > dia) break;
+      total = e.totalKg;
+    }
+    return total;
+  };
+
   const puntos: RendimientoVsMavesaPunto[] = [...kgPorDia.entries()]
     .sort(([a], [b]) => a.localeCompare(b))
-    .map(([dia, kg]) => ({
-      dia,
-      label: bucketLabelFor(dia, "day"),
-      panquecitasKg: Math.round(kg * 10) / 10,
-      ratioPct: Math.round((kg / promedioReferencia) * 100 * 10) / 10,
-    }));
+    .map(([dia, kg]) => {
+      // Un día anterior a la primera incorporación no tiene denominador: se
+      // cae al promedio completo en vez de dividir entre cero.
+      const totalDia = totalReferenciaAl(dia);
+      const promedioDia = totalDia > 0 ? totalDia / diasPeriodo : promedioReferencia;
+      return {
+        dia,
+        label: bucketLabelFor(dia, "day"),
+        panquecitasKg: Math.round(kg * 10) / 10,
+        ratioPct: Math.round((kg / promedioDia) * 100 * 10) / 10,
+        promedioDia: Math.round(promedioDia * 10) / 10,
+        meta4PctDia: Math.round(promedioDia * 0.04 * 10) / 10,
+      };
+    });
 
   return {
     categoria,
