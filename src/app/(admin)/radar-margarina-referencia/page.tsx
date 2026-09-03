@@ -10,8 +10,10 @@ export default function RadarMargarinaReferenciaPage() {
         <h1 className="text-2xl font-bold text-slate-900">Radar Margarina — Referencia</h1>
         <p className="text-slate-500 mt-1">
           Reporte histórico de Margarina (Mavesa), mayo–julio. Alimenta SOLO el promedio del gráfico &quot;Rendimiento
-          vs. Margarina/Mayonesa&quot; — el promedio usa el UNIVERSO completo del reporte, no solo los clientes de tu
-          cartera del piloto. No toca ni Mayonesa ni el reporte &quot;Actual&quot; de Margarina.
+          vs. Margarina/Mayonesa&quot;. El promedio es <strong>solo de los clientes de tu cartera</strong>: las filas
+          de PDV que no están en la cartera del piloto se descartan al cargar, y el resumen de la carga te dice
+          cuántos fueron. La suma de los 3 meses de esos clientes ÷ 63 días hábiles es el promedio. No toca ni
+          Mayonesa ni el reporte &quot;Actual&quot; de Margarina.
         </p>
       </div>
       <RadarCategoriaDropzone categoria="margarina" proposito="referencia" />
