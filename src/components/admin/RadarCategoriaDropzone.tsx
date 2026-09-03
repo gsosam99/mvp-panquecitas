@@ -114,6 +114,8 @@ export function RadarCategoriaDropzone({
       desde?: string;
       hasta?: string;
       total_kg?: number;
+      total_kg_por_mes?: Record<string, number>;
+      total_kg_archivo_por_mes?: Record<string, number>;
       error?: string;
       detail?: string;
     };
@@ -127,6 +129,11 @@ export function RadarCategoriaDropzone({
       desde: "",
       hasta: "",
       total_kg: 0,
+      // El reporte trae una columna de Venta Acumulada POR MES. Si el parser
+      // reconoce solo una, los otros meses entran en 0 y el total sale corto
+      // sin ningún error: el desglose por mes es lo que lo hace visible.
+      kgPorMes: new Map<string, number>(),
+      kgArchivoPorMes: new Map<string, number>(),
     };
 
     try {
@@ -156,6 +163,12 @@ export function RadarCategoriaDropzone({
         if (data.desde && (!acumulado.desde || data.desde < acumulado.desde)) acumulado.desde = data.desde;
         if (data.hasta && data.hasta > acumulado.hasta) acumulado.hasta = data.hasta;
         acumulado.total_kg += data.total_kg ?? 0;
+        for (const [mes, kg] of Object.entries(data.total_kg_por_mes ?? {})) {
+          acumulado.kgPorMes.set(mes, (acumulado.kgPorMes.get(mes) ?? 0) + kg);
+        }
+        for (const [mes, kg] of Object.entries(data.total_kg_archivo_por_mes ?? {})) {
+          acumulado.kgArchivoPorMes.set(mes, (acumulado.kgArchivoPorMes.get(mes) ?? 0) + kg);
+        }
       }
 
       setState("done");
@@ -168,6 +181,21 @@ export function RadarCategoriaDropzone({
         `rango ${acumulado.desde} → ${acumulado.hasta}`,
         `total ${acumulado.total_kg.toLocaleString("es-VE", { maximumFractionDigits: 0 })} kg`,
       ];
+      // Desglose por mes, en los dos alcances. El del ARCHIVO es el que se
+      // puede cuadrar contra Excel sumando las columnas de Venta Acumulada;
+      // el de cartera es lo que de verdad quedó guardado. Un mes en 0 o
+      // ausente significa que ese mes no se está leyendo.
+      const fmtMes = (m: Map<string, number>) =>
+        [...m.entries()]
+          .sort(([a], [b]) => a.localeCompare(b))
+          .map(([mes, kg]) => `${mes}: ${kg.toLocaleString("es-VE", { maximumFractionDigits: 0 })}`)
+          .join(" · ");
+      if (acumulado.kgArchivoPorMes.size > 0) {
+        partes.push(`kg del ARCHIVO por mes → ${fmtMes(acumulado.kgArchivoPorMes)}`);
+      }
+      if (acumulado.kgPorMes.size > 0) {
+        partes.push(`kg GUARDADOS por mes (cartera) → ${fmtMes(acumulado.kgPorMes)}`);
+      }
       if (acumulado.clientes_descartados_fuera_cartera) {
         partes.push(`${acumulado.clientes_descartados_fuera_cartera} clientes del archivo NO están en la cartera (descartados)`);
       }

@@ -36,6 +36,21 @@ export interface RadarCategoriaUploadResult {
   desde: string;
   hasta: string;
   total_kg: number;
+  /**
+   * kg GUARDADOS por mes (cartera-only). Es el diagnóstico que faltaba: el
+   * reporte trae una columna "Venta Acumulada" POR MES y, si el parser
+   * reconoce solo una de ellas, los otros meses entran en 0 y desaparecen sin
+   * error. Con el total suelto eso era invisible; acá se ve de una.
+   */
+  total_kg_por_mes: Record<string, number>;
+  /**
+   * kg del ARCHIVO por mes, antes de recortar por cartera. Sirve para cuadrar
+   * contra Excel: sumar las columnas de Venta Acumulada del reporte tiene que
+   * dar exactamente esto.
+   */
+  total_kg_archivo_por_mes: Record<string, number>;
+  /** Filas del archivo (antes de descartar fuera de cartera y no mapeadas). */
+  filas_en_archivo: number;
 }
 
 /**
@@ -188,6 +203,18 @@ export async function processRadarCategoriaUpload(
   // `toInsert` — evita que un cliente/material descartado (fuera de cartera,
   // material no mapeado) recorte el rango mostrado.
   const fechasArchivo = rows.map((r) => r.fecha).sort();
+
+  // kg por mes, en los dos alcances. Se acumula en crudo y se redondea al
+  // final: redondear en cada suma arrastra el error a lo largo de miles de
+  // filas y el desglose deja de cuadrar con el total.
+  const acumPorMes = (pares: { mes: string; kg: number }[]): Record<string, number> => {
+    const crudo = new Map<string, number>();
+    for (const p of pares) crudo.set(p.mes, (crudo.get(p.mes) ?? 0) + p.kg);
+    const salida: Record<string, number> = {};
+    for (const mes of [...crudo.keys()].sort()) salida[mes] = Math.round((crudo.get(mes) ?? 0) * 10) / 10;
+    return salida;
+  };
+
   return {
     inserted: toInsert.length,
     reemplazadas,
@@ -199,5 +226,12 @@ export async function processRadarCategoriaUpload(
     desde: fechasArchivo[0],
     hasta: fechasArchivo[fechasArchivo.length - 1],
     total_kg: Math.round(toInsert.reduce((s, r) => s + r.quantity_kg, 0) * 10) / 10,
+    total_kg_por_mes: acumPorMes(
+      toInsert.map((r) => ({ mes: r.date_of_sale.slice(0, 7), kg: r.quantity_kg }))
+    ),
+    total_kg_archivo_por_mes: acumPorMes(
+      rows.map((r) => ({ mes: r.fecha.slice(0, 7), kg: r.quantity_kg }))
+    ),
+    filas_en_archivo: rows.length,
   };
 }
