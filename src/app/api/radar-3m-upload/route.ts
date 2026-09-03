@@ -10,26 +10,10 @@ import type { ParsedSapRadarRow } from "@/types";
 // histórico de Harina PAN que sirve de referencia fija en el gráfico de
 // rendimiento diario, no venta viva del piloto.
 //
-// Las filas se SUMAN todas: cada una es la venta de UN DÍA, no una fotografía
-// acumulada de la que solo valga la más reciente. Mismo criterio que
-// radar-categoria-upload (Margarina/Mayonesa).
-//
-// Antes se colapsaba por cliente+material+MES quedándose con el último corte,
-// creyendo que "Venta Acumulada" era un acumulado corrido que se reinicia cada
-// mes. No lo es, y se comprobó sobre el archivo real (03-09-2026,
-// N7_V_SD88_WEB_001 (4).xls):
-//
-//   - Dentro de un mismo mes los valores SUBEN Y BAJAN — 2,00 → 5,00 → 4,00 →
-//     3,00 → 2,00 para un mismo cliente+material. Un acumulado no puede bajar.
-//   - Hay ~2,7 filas por cliente+material+mes, no una por día hábil: son los
-//     días en que ese cliente compró, no cortes diarios de un acumulado.
-//   - Quedarse con el último corte descartaba 567.204 de 1.400.358 kg: el
-//     40,5% del volumen del reporte.
-//
-// El encabezado del reporte tiene TRES columnas "Venta Acumulada", una por mes
-// (MAY/JUN/JUL 2026), y cada fila solo trae cifra en la columna de su mes. Cada
-// columna, sumada, es el acumulado de ese mes; los tres meses sumados y
-// divididos entre DIAS_HABILES_3M dan el promedio (DIENN, 03-09-2026).
+// El archivo trae "Venta Acumulada" por cliente+material, que se reinicia cada
+// mes, así que se colapsa por cliente+material+MES quedándose con el corte más
+// reciente de cada mes — mismo criterio que handleRadarUpload. Sumar los meses
+// da el total del período.
 //
 // Cada carga REEMPLAZA la anterior: el reporte se exporta completo.
 
@@ -90,8 +74,9 @@ export async function POST(req: Request) {
       }
     }
 
-    // Colapsar por cliente+MATERIAL+FECHA, sumando (ver la nota de arriba: las
-    // filas son ventas diarias, no cortes de un acumulado).
+    // Colapsar por cliente+MATERIAL+mes, quedándose con la fecha más reciente:
+    // "Venta Acumulada" se reinicia cada mes, así que el último corte de cada
+    // mes ES el total de ese mes, y sumar los meses da el total del período.
     //
     // Por MATERIAL y no por producto: Harina PAN tiene dos (H187 de 1 kg y H439
     // de 2 kg). Colapsando por producto, un cliente con las dos presentaciones
@@ -107,8 +92,8 @@ export async function POST(req: Request) {
         date_of_sale: string;
       }
     >();
-    // Se cuentan CLIENTES distintos, no filas: un cliente aparece una vez por
-    // cada día en que compró, y contar filas daba un número sin significado.
+    // Se cuentan CLIENTES distintos, no filas: un cliente aparece muchas veces
+    // (una por corte diario) y contar filas daba un número sin significado.
     const codigosFuera = new Set<string>();
     const materialesNoMapeados = new Set<string>();
 
@@ -124,15 +109,9 @@ export async function POST(req: Request) {
         materialesNoMapeados.add(`${r.material_code} (${r.material_name})`);
         continue;
       }
-      // Por cliente+material+FECHA EXACTA, SUMANDO: cada fila es la venta de
-      // ese día y todas cuentan. Se colapsa solo la fila repetida idéntica,
-      // porque la unique constraint de la tabla (sap_code, material_code,
-      // date_of_sale) exige un único registro por esa combinación.
-      const key = `${r.sap_code}|${r.material_code}|${r.fecha}`;
+      const key = `${r.sap_code}|${r.material_code}|${monthKey(r.fecha)}`;
       const prev = byKey.get(key);
-      if (prev) {
-        prev.quantity_kg += r.quantity_kg;
-      } else {
+      if (!prev || r.fecha > prev.date_of_sale) {
         byKey.set(key, {
           sap_code: r.sap_code,
           material_code: r.material_code,

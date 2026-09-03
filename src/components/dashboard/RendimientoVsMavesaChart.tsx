@@ -12,16 +12,14 @@ export interface RendimientoVsMavesaRatioCiudad {
 }
 
 // Copia adaptada de Rendimiento3MChart.tsx (PAN): misma mecánica —
-// referencia ESCALONADA por fecha de cartera, ratio del día como etiqueta
+// referencia horizontal fija, meta 4% punteada, ratio del día como etiqueta
 // sobre la línea de Panquecitas, y ratio acumulado por ciudad opcional en su
-// propio eje — pero para Margarina/Mayonesa. Dos diferencias reales: los
-// textos se parametrizan por `categoriaLabel` en vez de tener "PAN"
-// hardcodeado, y acá NO se dibuja la meta del 4% (estas categorías no la
-// tienen).
+// propio eje — pero para Margarina/Mayonesa. Diferencia real: los textos se
+// parametrizan por `categoriaLabel` en vez de tener "PAN" hardcodeado.
 
 const Inner = dynamic(
   async () => {
-    const { ResponsiveContainer, ComposedChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, Legend, LabelList } =
+    const { ResponsiveContainer, ComposedChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ReferenceLine, LabelList } =
       await import("recharts");
 
     function RendimientoVsMavesaInner({
@@ -56,43 +54,12 @@ const Inner = dynamic(
       // dias buenos del piloto quedaban por encima del dominio y, como el eje
       // va con allowDataOverflow, se cortaban sin dejar rastro: ni punto, ni
       // etiqueta de %, ni tramo de linea.
-      // Contra el ESCALÓN MÁS ALTO del promedio, no contra un valor único: el
-      // promedio sube en cada ampliación de cartera y el último escalón es el
-      // más grande; con el valor de un solo día se salía del dominio.
-      const promediosDia = data.puntos.map((p) => p.promedioDia).filter((v) => v > 0);
-      const maxPromedio =
-        promediosDia.length > 0 ? Math.max(...promediosDia) : data.promedioReferencia;
-      const maxLog = Math.max(1, Math.ceil(Math.max(maxPromedio, maxPanquecitas) * 1.3));
+      const maxLog = Math.max(1, Math.ceil(Math.max(data.promedioReferencia, maxPanquecitas) * 1.3));
 
       // El piso puede bajar de 1 kg: la escala log no admite 0, pero si
       // fracciones. Antes se forzaba a >= 1 y un dia de menos de 1 kg se
       // salia por abajo del dominio, con el mismo resultado.
       const minLog = Math.max(0.1, minPanquecitas * 0.6);
-
-      // Rótulo del promedio, anclado al último escalón (el vigente hoy) y
-      // dibujado a la derecha de la línea. Named function, no flecha en línea:
-      // una flecha que devuelve JSX en una prop la marca ESLint como
-      // componente sin displayName.
-      const ultimoIdx = data.puntos.length - 1;
-      function rotuloPromedio(props: unknown) {
-        const { x, y, index, value } = props as {
-          x: number;
-          y: number;
-          index: number;
-          value: number | null | undefined;
-        };
-        if (index !== ultimoIdx || value == null) return null;
-        return (
-          <text fill="#334155" fontSize={15} fontWeight={700}>
-            <tspan x={x + 8} y={y - 3}>
-              {categoriaLabel}
-            </tspan>
-            <tspan x={x + 8} y={y + 16}>
-              {`${Number(value).toLocaleString("es-VE", { maximumFractionDigits: 0 })} kg/día`}
-            </tspan>
-          </text>
-        );
-      }
 
       const ratioPorDia = new Map(ratiosCiudad.map((r) => [r.dia, r]));
       const chartData = data.puntos.map((p) => ({
@@ -101,12 +68,9 @@ const Inner = dynamic(
         ratioCabudareAcum: ratioPorDia.get(p.dia)?.ratioCabudareAcum ?? null,
       }));
 
-      // Franja derecha para el rótulo del promedio, que se ancla al último
-      // escalón y va fuera del área de dibujo. Da para "Margarina" /
-      // "3.268 kg/día" a 15px en dos líneas. Antes el rótulo iba dentro
-      // (insideTopLeft) y bastaban 24px, pero con el promedio escalonado el
-      // texto tiene que quedar a la altura del escalón vigente.
-      const MARGEN_DERECHO = 104;
+      // Margen derecho chico: la etiqueta que lo obligaba a ser ancho era la
+      // de la meta 4%, que ya no se dibuja. La del promedio va insideTopLeft.
+      const MARGEN_DERECHO = 24;
 
       return (
         <ResponsiveContainer width="100%" height={370}>
@@ -128,11 +92,6 @@ const Inner = dynamic(
                   return [`${Number(value ?? 0)}%`, "Ratio acumulado — Cumaná"];
                 if (name === "ratioCabudareAcum")
                   return [`${Number(value ?? 0)}%`, "Ratio acumulado — Cabudare"];
-                if (name === "promedioDia")
-                  return [
-                    `${Number(value ?? 0).toLocaleString("es-VE", { maximumFractionDigits: 0 })} kg/día`,
-                    `Promedio ${categoriaLabel} (cartera vigente ese día)`,
-                  ];
                 if (name === "panquecitasKg") {
                   const ratio =
                     (item as unknown as { payload?: { ratioPct?: number } } | undefined)?.payload?.ratioPct ?? 0;
@@ -148,8 +107,6 @@ const Inner = dynamic(
               formatter={(value: string) =>
                 value === "panquecitasKg"
                   ? "Panquecitas del día (kg)"
-                  : value === "promedioDia"
-                  ? `Promedio ${categoriaLabel} (escalonado por tanda)`
                   : value === "ratioCumanaAcum"
                   ? "Ratio acum. — Cumaná"
                   : value === "ratioCabudareAcum"
@@ -158,24 +115,20 @@ const Inner = dynamic(
               }
               wrapperStyle={{ fontSize: 13 }}
             />
-            {/* Promedio de la categoría, ESCALONADO por fecha de cartera —
-                igual que en el gráfico de PAN. Deja de ser una horizontal
-                porque el denominador de cada día son los PDV que ya eran
-                cartera esa fecha; una recta única mentía sobre los días
-                anteriores a cada ampliación. */}
             {showReferenciaDiario && (
-              <Line
+              <ReferenceLine
                 yAxisId="kg"
-                type="stepAfter"
-                dataKey="promedioDia"
+                y={data.promedioReferencia}
                 stroke="#64748b"
                 strokeWidth={2}
-                dot={false}
-                activeDot={false}
-                isAnimationActive={false}
-              >
-                <LabelList dataKey="promedioDia" content={rotuloPromedio} />
-              </Line>
+                label={{
+                  value: `Promedio ${categoriaLabel}: ${data.promedioReferencia.toLocaleString("es-VE", { maximumFractionDigits: 0 })} kg/día`,
+                  position: "insideTopLeft",
+                  fill: "#334155",
+                  fontSize: 15,
+                  fontWeight: 600,
+                }}
+              />
             )}
             <Line
               yAxisId="kg"

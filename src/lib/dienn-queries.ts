@@ -854,15 +854,8 @@ export interface Rendimiento3MPunto {
   dia: string; // "YYYY-MM-DD"
   label: string;
   panquecitasKg: number;
-  /** Panquecitas del día ÷ promedioDia × 100. */
+  /** Panquecitas del día ÷ promedio3M × 100. */
   ratioPct: number;
-  /**
-   * Promedio de PAN VIGENTE ese día (kg/día): solo los PDV ya incorporados a la
-   * cartera en esa fecha aportan al denominador. Ver getRendimiento3M.
-   */
-  promedioDia: number;
-  /** 4% de promedioDia — la meta de ese día, en kg. */
-  meta4PctDia: number;
 }
 
 export interface Rendimiento3MResult {
@@ -997,12 +990,6 @@ export async function getRendimiento3M(
   // y fechasPan[0] sería undefined.
   if (panFiltrado.length === 0) return RENDIMIENTO_3M_VACIO;
   const totalPanKg = panFiltrado.reduce((s, r) => s + Number(r.quantity_kg), 0);
-  // Aporte de PAN de cada PDV, para poder recomponer el promedio con solo los
-  // que ya eran cartera en una fecha dada (ver el promedio variable, abajo).
-  const panPorLocation = new Map<string, number>();
-  for (const r of panFiltrado) {
-    panPorLocation.set(r.locId, (panPorLocation.get(r.locId) ?? 0) + Number(r.quantity_kg));
-  }
 
   // Promedio = venta acumulada de los 3 meses ÷ DIAS_HABILES_3M (decisión del
   // usuario, 26-08-2026: "el promedio de todos debe ser su venta acumulada de
@@ -1034,59 +1021,14 @@ export async function getRendimiento3M(
     kgPorDia.set(dia, (kgPorDia.get(dia) ?? 0) + Number(r.quantity_kg));
   }
 
-  // ── Promedio VARIABLE por fecha de incorporación (DIENN, 03-09-2026) ──
-  //
-  // El denominador de cada día son los PDV que YA eran cartera ese día, no la
-  // cartera de hoy. Con un denominador único se comparaban las Panquecitas de
-  // los primeros días de agosto —cuando el piloto tenía 358 PDV— contra el PAN
-  // de los 1.174 de hoy, y el ratio salía hundido sin que nadie hubiera vendido
-  // menos: cada ampliación de cartera rebajaba retroactivamente los meses ya
-  // reportados. Con W05 (01-09) el efecto se hizo evidente.
-  //
-  // El aporte de PAN se agrupa por fecha de incorporación una sola vez y se
-  // acumula; así el promedio del día es una búsqueda sobre un puñado de fechas
-  // (una por tanda), no un recorrido de la cartera entera por cada día.
-  const aportePorIncorporacion = new Map<string, number>();
-  for (const l of universo) {
-    if (!idsPan.has(l.id)) continue;
-    const desde = l.fecha_incorporacion?.slice(0, 10) ?? RENDIMIENTO_DIARIO_DESDE;
-    aportePorIncorporacion.set(
-      desde,
-      (aportePorIncorporacion.get(desde) ?? 0) + (panPorLocation.get(l.id) ?? 0)
-    );
-  }
-  // [fecha, kg acumulados hasta esa fecha inclusive], en orden cronológico.
-  const escalones: { desde: string; totalKg: number }[] = [];
-  let acumulado = 0;
-  for (const desde of [...aportePorIncorporacion.keys()].sort()) {
-    acumulado += aportePorIncorporacion.get(desde) ?? 0;
-    escalones.push({ desde, totalKg: acumulado });
-  }
-  const totalPanAl = (dia: string): number => {
-    let total = 0;
-    for (const e of escalones) {
-      if (e.desde > dia) break;
-      total = e.totalKg;
-    }
-    return total;
-  };
-
   const puntos: Rendimiento3MPunto[] = [...kgPorDia.entries()]
     .sort(([a], [b]) => a.localeCompare(b))
-    .map(([dia, kg]) => {
-      // Si un día cae antes de la primera incorporación no hay denominador:
-      // se cae al promedio completo en vez de dividir entre cero.
-      const totalDia = totalPanAl(dia);
-      const promedioDia = totalDia > 0 ? totalDia / diasPeriodo : promedio3M;
-      return {
-        dia,
-        label: bucketLabelFor(dia, "day"),
-        panquecitasKg: Math.round(kg * 10) / 10,
-        ratioPct: Math.round((kg / promedioDia) * 100 * 10) / 10,
-        promedioDia: Math.round(promedioDia * 10) / 10,
-        meta4PctDia: Math.round(promedioDia * 0.04 * 10) / 10,
-      };
-    });
+    .map(([dia, kg]) => ({
+      dia,
+      label: bucketLabelFor(dia, "day"),
+      panquecitasKg: Math.round(kg * 10) / 10,
+      ratioPct: Math.round((kg / promedio3M) * 100 * 10) / 10,
+    }));
 
   return {
     promedio3M: Math.round(promedio3M * 10) / 10,

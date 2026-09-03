@@ -1,44 +1,39 @@
 "use client";
 
 import dynamic from "next/dynamic";
+import type { ReactElement } from "react";
 import type { Rendimiento3MResult } from "@/lib/dienn-queries";
 
 /**
- * Rótulo de una línea escalonada, anclado a su ÚLTIMO punto y dibujado en el
- * margen derecho (MARGEN_META), fuera del área de dibujo.
+ * Texto de la meta del 4%, en DOS líneas ("Meta 4%" / "718 kg").
  *
- * En dos líneas a propósito: en una sola, el texto de la meta a 17px pedía
- * ~150px de franja, el área de dibujo se quedaba corta y el eje X empezaba a
- * botar días (se perdió el 24 de agosto). Partido en dos, la franja baja a
- * ~104px sin achicar la letra.
+ * Vive fuera del área de dibujo, en el margen derecho (MARGEN_META). En una
+ * sola línea el texto a 17px pedía ~150px de franja y el área de dibujo se
+ * quedaba corta: con `minTickGap` el eje X empezaba a botar días (se perdió el
+ * 24 de agosto). Partido en dos líneas la franja baja a ~104px —menos que los
+ * 118px que ocupaba el texto chico original— y el eje recupera ancho sin que
+ * el texto vuelva a achicarse.
  *
- * Va sobre el último punto y no como ReferenceLine porque el promedio y la
- * meta ya no son horizontales: cambian con cada tanda que entra a la cartera.
- * El último escalón es el vigente hoy, y es el que queda pegado al borde.
+ * Recharts inyecta `viewBox` al clonar el elemento: es el rectángulo de la
+ * línea de referencia, así que `x + width` es el borde derecho del área de
+ * dibujo y `y` la altura exacta de la línea punteada.
  */
-function rotuloUltimoEscalon(
-  props: unknown,
-  ultimoIdx: number,
-  titulo: string,
-  color: string,
-  fontSize: number,
-  sufijo: string
-) {
-  const { x, y, index, value } = props as {
-    x: number;
-    y: number;
-    index: number;
-    value: number | null | undefined;
-  };
-  if (index !== ultimoIdx || value == null) return null;
-  const tx = x + 8;
+function EtiquetaMeta({
+  viewBox,
+  kg,
+}: {
+  viewBox?: { x: number; y: number; width: number; height: number };
+  kg: string;
+}) {
+  if (!viewBox) return null;
+  const x = viewBox.x + viewBox.width + 8;
   return (
-    <text fill={color} fontSize={fontSize} fontWeight={700}>
-      <tspan x={tx} y={y - 3}>
-        {titulo}
+    <text fill="#15803d" fontSize={17} fontWeight={700}>
+      <tspan x={x} y={viewBox.y - 3}>
+        Meta 4%
       </tspan>
-      <tspan x={tx} y={y + fontSize + 1}>
-        {`${Number(value).toLocaleString("es-VE", { maximumFractionDigits: 0 })}${sufijo}`}
+      <tspan x={x} y={viewBox.y + 15}>
+        {kg}
       </tspan>
     </text>
   );
@@ -54,16 +49,14 @@ export interface Rendimiento3MRatioCiudad {
 // Rendimiento diario de Panquecitas contra el promedio histórico de Harina PAN
 // de los últimos 3 meses (punto 1 del documento de cambios).
 //
-// Eje en kg. Dos referencias ESCALONADAS: el promedio diario de PAN (línea
-// continua, se puede apagar porque su escala aplasta la de Panquecitas) y el
-// 4% de ese promedio (punteada, la meta). Escalonadas y no horizontales porque
-// el denominador de cada día son los PDV que ya eran cartera esa fecha, así
-// que sube en cada ampliación. El ratio del día (Panquecitas ÷ promedio de ESE
-// día × 100) va en la etiqueta y en el tooltip.
+// Eje en kg. Dos referencias FIJAS y horizontales: el promedio diario de PAN
+// (línea continua, se puede apagar porque su escala aplasta la de Panquecitas)
+// y el 4% de ese promedio (línea punteada, la meta). El ratio del día
+// (Panquecitas ÷ promedio3M × 100) va en la etiqueta y en el tooltip.
 
 const Inner = dynamic(
   async () => {
-    const { ResponsiveContainer, ComposedChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, Legend, LabelList } =
+    const { ResponsiveContainer, ComposedChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ReferenceLine, LabelList } =
       await import("recharts");
 
     function Rendimiento3MInner({
@@ -92,34 +85,15 @@ const Inner = dynamic(
       const maxPanquecitas = valores.length > 0 ? Math.max(...valores) : 0;
       const minPanquecitas = valores.length > 0 ? Math.min(...valores) : 1;
 
-      // El promedio y la meta son ESCALONADOS: cambian cada vez que entra una
-      // tanda a la cartera. El dominio se calcula contra sus extremos, no
-      // contra un valor único, o los escalones se salen del área visible.
-      const metasDia = data.puntos.map((p) => p.meta4PctDia).filter((v) => v > 0);
-      const promediosDia = data.puntos.map((p) => p.promedioDia).filter((v) => v > 0);
-      const maxMeta = metasDia.length > 0 ? Math.max(...metasDia) : data.meta4Pct;
-      const minMeta = metasDia.length > 0 ? Math.min(...metasDia) : data.meta4Pct;
-      const maxPromedio = promediosDia.length > 0 ? Math.max(...promediosDia) : data.promedio3M;
-
       const escalaLog = showPanDiario && data.promedio3M > 0;
-      const maxLineal = Math.ceil(Math.max(maxPanquecitas, maxMeta) * 1.15);
+      const maxLineal = Math.ceil(Math.max(maxPanquecitas, data.meta4Pct) * 1.15);
       // En log el dominio no puede tocar el 0; se deja un piso por debajo del
       // valor más chico para que ningún punto quede fuera.
-      const minLog = Math.max(1, Math.floor(Math.min(minPanquecitas, minMeta) * 0.6));
-      const maxLog = Math.ceil(maxPromedio * 1.3);
+      const minLog = Math.max(1, Math.floor(Math.min(minPanquecitas, data.meta4Pct) * 0.6));
+      const maxLog = Math.ceil(data.promedio3M * 1.3);
 
-      // Índice del último punto: los rótulos del promedio y de la meta se
-      // anclan ahí (ver rotuloUltimoEscalon).
-      const ultimoIdx = data.puntos.length - 1;
-      // Envoltorios con nombre, no flechas en línea: una flecha que devuelve
-      // JSX dentro de una prop la marca ESLint como componente sin displayName.
-      function rotuloPromedio(p: unknown) {
-        return rotuloUltimoEscalon(p, ultimoIdx, "PAN 3M", "#334155", 15, " kg/día");
-      }
-      function rotuloMeta(p: unknown) {
-        return rotuloUltimoEscalon(p, ultimoIdx, "Meta 4%", "#15803d", 17, " kg");
-      }
-
+      // Los ratios por ciudad llegan aparte y se pegan por día: van en su propio
+      // eje porque son % y en la escala de kg quedarían pegados a cero.
       const ratioPorDia = new Map(ratiosCiudad.map((r) => [r.dia, r]));
       const chartData = data.puntos.map((p) => ({
         ...p,
@@ -127,19 +101,28 @@ const Inner = dynamic(
         ratioCabudareAcum: ratioPorDia.get(p.dia)?.ratioCabudareAcum ?? null,
       }));
 
-      // ── Dónde van los textos del promedio y de la meta ────────────────
+      // ── Dónde va el texto "Meta 4%" ───────────────────────────────────
       //
-      // Franja reservada a la DERECHA, fuera del área de dibujo, donde ambos
-      // rótulos se anclan al último escalón (ver rotuloUltimoEscalon). Da para
-      // "Meta 4%" / "1.234 kg" a 17px en dos líneas; en una sola pedía ~150px
-      // y el eje X se quedaba sin ancho para mostrar todos los días.
+      // Va pegado al borde izquierdo, así que los únicos que pueden taparlo
+      // son los primeros puntos de la serie. Sus ratios se dibujan ENCIMA del
+      // punto, de modo que un punto que cae un poco por debajo de la línea
+      // punteada empuja su número justo sobre el texto de la meta.
       //
-      // Estar fuera del área es lo que evita el solapamiento con los números de
-      // ratio, que se dibujan encima de cada punto. Se intentó antes ponerlos
-      // dentro y estimar en qué píxel cae cada ratio para esquivarlos: no
-      // alcanzó, porque Recharts no expone la geometría real del área al
-      // posicionar la etiqueta y la estimación erraba. Fuera del área no hay
-      // nada que estimar: donde van no hay ratios.
+      // Se calcula en píxeles aproximados —posición normalizada dentro del
+      // dominio por el alto útil del área de dibujo— y si el texto choca
+      // debajo de la línea se pasa arriba. En los dos casos queda pegado a la
+      // línea punteada, que es lo que hace que se entienda a qué se refiere.
+      // Franja reservada a la derecha para el texto de la meta, que vive fuera
+      // del área de dibujo. Da para "Meta 4%" / "1.234 kg" a 17px en DOS líneas
+      // (ver EtiquetaMeta): en una sola línea pedía ~150px y el eje X se
+      // quedaba sin ancho para mostrar todos los días.
+      //
+      // No hay heurística de colisión acá. Se intentó —estimar en qué píxel
+      // cae cada número y mover el texto al lado con más holgura— y no
+      // alcanzó: Recharts no expone la geometría real del área de dibujo al
+      // posicionar la etiqueta, así que la estimación erraba y el solapamiento
+      // volvía. Sacar el texto del área no estima nada: donde va no hay
+      // ratios, y el solapamiento deja de ser posible.
       const MARGEN_META = 104;
 
       return (
@@ -169,16 +152,6 @@ const Inner = dynamic(
                   return [`${Number(value ?? 0)}%`, "Ratio acumulado — Cumaná"];
                 if (name === "ratioCabudareAcum")
                   return [`${Number(value ?? 0)}%`, "Ratio acumulado — Cabudare"];
-                if (name === "promedioDia")
-                  return [
-                    `${Number(value ?? 0).toLocaleString("es-VE", { maximumFractionDigits: 0 })} kg/día`,
-                    "Promedio PAN 3M (cartera vigente ese día)",
-                  ];
-                if (name === "meta4PctDia")
-                  return [
-                    `${Number(value ?? 0).toLocaleString("es-VE", { maximumFractionDigits: 0 })} kg`,
-                    "Meta 4% de ese día",
-                  ];
                 if (name === "panquecitasKg") {
                   // Cast defensivo: el tipo del item del tooltip varía entre
                   // versiones de Recharts y solo se necesita el ratio del punto.
@@ -196,10 +169,6 @@ const Inner = dynamic(
               formatter={(value: string) =>
                 value === "panquecitasKg"
                   ? "Panquecitas del día (kg)"
-                  : value === "promedioDia"
-                  ? "Promedio PAN 3M (escalonado por tanda)"
-                  : value === "meta4PctDia"
-                  ? "Meta 4%"
                   : value === "ratioCumanaAcum"
                   ? "Ratio acum. — Cumaná"
                   : value === "ratioCabudareAcum"
@@ -208,58 +177,43 @@ const Inner = dynamic(
               }
               wrapperStyle={{ fontSize: 13 }}
             />
-            {/* Indicador A: promedio diario de PAN VIGENTE cada día.
-
-                Ya no es una ReferenceLine horizontal sino una línea ESCALONADA
-                (`stepAfter`): el promedio cambia el día que entra cada tanda a
-                la cartera, y una recta única mentía sobre el denominador que se
-                usó en los días anteriores a la ampliación. El escalón deja ver
-                exactamente cuándo y cuánto subió. */}
+            {/* Indicador Fijo A: promedio diario de Harina PAN de los 3 meses. */}
             {showPanDiario && (
-              <Line
+              <ReferenceLine
                 yAxisId="kg"
-                type="stepAfter"
-                dataKey="promedioDia"
+                y={data.promedio3M}
                 stroke="#64748b"
                 strokeWidth={2}
-                dot={false}
-                activeDot={false}
-                isAnimationActive={false}
-              >
-                <LabelList
-                  dataKey="promedioDia"
-                  content={rotuloPromedio}
-                />
-              </Line>
+                label={{
+                  value: `Promedio PAN 3M: ${data.promedio3M.toLocaleString("es-VE", { maximumFractionDigits: 0 })} kg/día`,
+                  position: "insideTopLeft",
+                  fill: "#334155",
+                  fontSize: 15,
+                  fontWeight: 600,
+                }}
+              />
             )}
-            {/* Indicador B: 4% de ese promedio — la meta, también escalonada.
+            {/* Indicador Fijo B: 4% de ese promedio — la meta.
 
                 El texto va FUERA del área de dibujo, en el margen derecho que
-                reserva MARGEN_META. Antes iba dentro (abajo a la izquierda) y
-                se solapaba con los números de ratio, que se dibujan encima de
-                cada punto: bastaba un punto algo por debajo de la línea para
-                que su número cayera sobre el texto. Fuera del área no hay
-                ratios, así que el solapamiento deja de ser posible en vez de
-                depender de una estimación.
-
-                La etiqueta se ancla al ÚLTIMO escalón (el vigente hoy), que es
-                el que queda a la altura del borde derecho. */}
-            <Line
+                reserva MARGEN_META, a la altura exacta de la línea. Antes iba
+                dentro (abajo a la izquierda) y se solapaba con los números de
+                ratio, que se dibujan encima de cada punto: bastaba un punto
+                algo por debajo de la línea para que su número cayera sobre el
+                texto. Fuera del área no hay ratios, así que el solapamiento
+                deja de ser posible en vez de depender de una estimación. */}
+            <ReferenceLine
               yAxisId="kg"
-              type="stepAfter"
-              dataKey="meta4PctDia"
+              y={data.meta4Pct}
               stroke="#16a34a"
               strokeWidth={2}
               strokeDasharray="6 4"
-              dot={false}
-              activeDot={false}
-              isAnimationActive={false}
-            >
-              <LabelList
-                dataKey="meta4PctDia"
-                content={rotuloMeta}
-              />
-            </Line>
+              label={
+                (
+                  <EtiquetaMeta kg={`${data.meta4Pct.toLocaleString("es-VE", { maximumFractionDigits: 0 })} kg`} />
+                ) as unknown as ReactElement<SVGElement>
+              }
+            />
             {/* Suavizada y con el mismo grosor/puntos que Panquecitas vs Harina PAN. */}
             <Line
               yAxisId="kg"
