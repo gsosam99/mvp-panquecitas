@@ -63,7 +63,7 @@ export interface RendimientoVsMavesaPunto {
 
 export interface RendimientoVsMavesaResult {
   categoria: MavesaCategoria;
-  /** kg/día del período REAL cubierto por el archivo de referencia (no fijo a 3 meses). */
+  /** kg/día: venta acumulada de los 3 meses ÷ DIAS_HABILES_3M (63), igual que PAN. */
   promedioReferencia: number;
   /** 4% de promedioReferencia — misma meta que el gráfico de PAN. */
   meta4Pct: number;
