@@ -896,6 +896,11 @@ export function DiennDashboardClient({
               columns={[
                 { header: "Día", value: (r) => r.dia, width: 14 },
                 { header: "Panquecitas (kg)", value: (r) => r.panquecitasKg, width: 18 },
+                // El promedio del día va en el Excel: sin él, el ratio no se
+                // puede recalcular a mano porque el denominador cambia con
+                // cada tanda de cartera.
+                { header: "Promedio PAN del día (kg/día)", value: (r) => r.promedioDia, width: 26 },
+                { header: "Meta 4% del día (kg)", value: (r) => r.meta4PctDia, width: 20 },
                 { header: "Ratio vs promedio PAN (%)", value: (r) => r.ratioPct, width: 26 },
               ]}
             />
@@ -962,6 +967,13 @@ export function DiennDashboardClient({
                   })}{" "}
                   kg/día
                 </span>
+                {/* El promedio no es único: escalona con cada tanda de cartera.
+                    Los dos números de arriba son los VIGENTES HOY (cartera
+                    completa); en el gráfico se ve el escalón de cada fecha. */}
+                {" "}· Ese promedio y su meta son los{" "}
+                <span className="font-medium text-slate-600">vigentes hoy</span>: el denominador de cada día usa
+                solo los PDV que ya eran cartera en esa fecha, así que sube en cada ampliación (14-08, 24-08 y
+                01-09) y se ve como escalón en el gráfico. Los días anteriores a una tanda no se recalculan.
                 {/* La serie diaria de Panquecitas suma todo el Radar, igual que
                     la tarjeta. El promedio de PAN de arriba es población y sigue
                     acotado a la cartera. */}
