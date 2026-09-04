@@ -701,6 +701,26 @@ export interface InactivosSegmentoRow {
   descartados: number;
 }
 
+/**
+ * Mismo corte pero por TIPO DE CLIENTE (el giro del negocio: BODEGAS,
+ * LICOR/FRIAXCAJA/DEPO, TIENDA MASC/PETSHOP…), que es bastante más fino que el
+ * segmento: 53 valores contra 14.
+ *
+ * Existe porque el criterio de "a quién no le podemos vender" todavía se está
+ * definiendo con ventas, y a nivel de segmento no se puede expresar: en
+ * Barquisimeto los 7 segmentos sin alimentos llegan a 147 PDV y ventas reporta
+ * al menos 224. El dashboard deja elegir los tipos, así que este desglose es
+ * lo que hace posible recalcular sin volver al servidor.
+ */
+export interface InactivosTipoRow {
+  tipo: string;
+  enCartera: number;
+  inactivos: number;
+  inactivosConPan: number;
+  /** Los descartables de este tipo: inactivos que además NO venden Harina PAN. */
+  inactivosSinPan: number;
+}
+
 export interface ActivacionAjustadaResult {
   /** Cartera vigente hoy en el corte. */
   universo: number;
@@ -720,6 +740,8 @@ export interface ActivacionAjustadaResult {
   inactivosConPanPct: number;
   /** Una fila por segmento, ordenadas por inactivos desc. */
   porSegmento: InactivosSegmentoRow[];
+  /** Una fila por tipo de cliente, ordenadas por descartables desc. */
+  porTipo: InactivosTipoRow[];
 }
 
 const ACTIVACION_AJUSTADA_VACIA: ActivacionAjustadaResult = {
@@ -733,6 +755,7 @@ const ACTIVACION_AJUSTADA_VACIA: ActivacionAjustadaResult = {
   inactivosConPan: 0,
   inactivosConPanPct: 0,
   porSegmento: [],
+  porTipo: [],
 };
 
 export async function getActivacionAjustada(sector?: Sector): Promise<ActivacionAjustadaResult> {
@@ -751,6 +774,7 @@ export async function getActivacionAjustada(sector?: Sector): Promise<Activacion
   ]);
 
   const porSegmento = new Map<string, InactivosSegmentoRow>();
+  const porTipo = new Map<string, InactivosTipoRow>();
   let activos = 0;
   let inactivos = 0;
   let inactivosConPan = 0;
@@ -774,6 +798,17 @@ export async function getActivacionAjustada(sector?: Sector): Promise<Activacion
     }
     fila.enCartera += 1;
 
+    // Mismo conteo en paralelo por tipo de cliente. El tipo es el giro del
+    // negocio y es MÁS FINO que el segmento (53 valores contra 14): es el
+    // nivel al que el dashboard deja elegir qué se descarta.
+    const tipo = l.tipo_cliente?.trim() || SEGMENTO_SIN_DATO;
+    let filaTipo = porTipo.get(tipo);
+    if (!filaTipo) {
+      filaTipo = { tipo, enCartera: 0, inactivos: 0, inactivosConPan: 0, inactivosSinPan: 0 };
+      porTipo.set(tipo, filaTipo);
+    }
+    filaTipo.enCartera += 1;
+
     if ((panqTotals.get(l.id) ?? 0) > 0) {
       activos += 1;
       continue;
@@ -781,13 +816,16 @@ export async function getActivacionAjustada(sector?: Sector): Promise<Activacion
 
     inactivos += 1;
     fila.inactivos += 1;
+    filaTipo.inactivos += 1;
 
     const vendePan = (panTotals.get(l.id) ?? 0) > 0;
     if (vendePan) {
       inactivosConPan += 1;
       fila.inactivosConPan += 1;
+      filaTipo.inactivosConPan += 1;
     } else {
       fila.inactivosSinPan += 1;
+      filaTipo.inactivosSinPan += 1;
       // Las tres condiciones: inactivo (ya), sin PAN (acá) y sin alimentos.
       if (fila.sinAlimentos) {
         descartados += 1;
@@ -812,6 +850,11 @@ export async function getActivacionAjustada(sector?: Sector): Promise<Activacion
     porSegmento: [...porSegmento.values()]
       .map((f) => ({ ...f, inactivosConPanPct: pct(f.inactivosConPan, f.inactivos) }))
       .sort((a, b) => b.inactivos - a.inactivos || a.segmento.localeCompare(b.segmento)),
+    // Ordenado por DESCARTABLES, no por inactivos: es la columna con la que se
+    // arma la selección, así que los tipos que más mueven el número van arriba.
+    porTipo: [...porTipo.values()].sort(
+      (a, b) => b.inactivosSinPan - a.inactivosSinPan || a.tipo.localeCompare(b.tipo)
+    ),
   };
 }
 

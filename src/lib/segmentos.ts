@@ -67,3 +67,53 @@ export function esSegmentoSinAlimentos(segmento: string | null | undefined): boo
 
 /** Etiqueta para los clientes sin segmento en la cartera. */
 export const SEGMENTO_SIN_DATO = "Sin segmento";
+
+/**
+ * Tipos de cliente (el giro del negocio, 53 valores en la cartera) que se
+ * marcan POR DEFECTO como "no le podemos vender" en la tarjeta de Activación
+ * Ajustada.
+ *
+ * Es solo el punto de partida: la tarjeta deja marcar y desmarcar tipos, y el
+ * número se recalcula en el momento. La razón es que el criterio todavía se
+ * está cerrando con ventas — a nivel de SEGMENTO no se puede expresar (en
+ * Barquisimeto los 7 segmentos sin alimentos llegan a 147 PDV y ventas reporta
+ * al menos 224), y la lista de ventas no está disponible todavía. Antes que
+ * adivinar una regla que cuadre por casualidad, se deja elegir.
+ *
+ * Este default cubre lo que no admite discusión: retail que no vende comida y
+ * locales de ocio/bebidas. Los canales de CONSUMO EN SITIO (restaurantes,
+ * luncherías, comida rápida…) quedan FUERA del default a propósito: ahí sí se
+ * puede vender mezcla para panquecas, y es la zona gris que ventas tiene que
+ * definir.
+ */
+export const TIPOS_SIN_ALIMENTOS_DEFAULT = [
+  "LICOR/FRIAXCAJA/DEPO",
+  "FARMACIAS",
+  "TIENDA MASC/PETSHOP",
+  "CLINICAS VETERINARIA",
+  "MAYOR ABA-PETFOOD",
+  "DET ABA-AGROPECUARIA",
+  "PERFUMERIAS",
+  "FERRETERIAS",
+  "ZAPAT/TDAS ROPA/MERC",
+  "LIBR PAPEL/CTRO FOTO",
+  "CYBRCAFE/CTRO INTRNT",
+  "TALL MECAN/AUTO",
+  "GIMNASIOS / SAUNAS",
+  "CLUB SOCIAL/DEPORT.",
+  "CERVECERIAS",
+  "BARES",
+  "NIGHTCLUB/PUB/DISCO",
+  "CANCHAS DE BOLAS",
+  "BILLARES / BOWLING",
+  "GALLERAS",
+  "P.HIPIC/VND-PAGA/5Y6",
+  "CINES Y TEATROS",
+] as const;
+
+const TIPOS_DEFAULT_FOLDED = new Set(TIPOS_SIN_ALIMENTOS_DEFAULT.map(foldSegmento));
+
+/** ¿Este tipo de cliente viene marcado por defecto? Comparación normalizada. */
+export function esTipoSinAlimentosPorDefecto(tipo: string | null | undefined): boolean {
+  return TIPOS_DEFAULT_FOLDED.has(foldSegmento(tipo));
+}
