@@ -256,6 +256,7 @@ async function getScopeVolumen(
     // ventas anteriores a ella, igual que hacen las series.
     cartera: new Map(
       vigentes.filter((l) => !esFueraDeCartera(l.cohorte)).map((l) => [l.id, l.fecha_incorporacion ?? null])
+    ),
     fuera: new Set(vigentes.filter((l) => esFueraDeCartera(l.cohorte)).map((l) => l.id)),
   };
 }
@@ -1576,11 +1577,13 @@ export async function getDemandaInsatisfecha(sector?: Sector): Promise<Record<Ti
         .from("sap_pedidos_facturados")
         .select("location_id, cantidad_pedido_kg, cantidad_facturada_kg, fecha")
         .eq("product_id", PRODUCT_IDS.PANQUECITAS)
+    ),
     fetchAllRows<unknown>(() =>
       supabase
         .from("sap_sell_in_records")
         .select("location_id, quantity_kg, date_of_sale")
         .eq("product_id", PRODUCT_IDS.PANQUECITAS)
+    ),
   ]);
 
   const pedidoFacturadoRows = ((pedidoFacturadoData ?? []) as {
@@ -2130,6 +2133,7 @@ export async function getCarteraPorSegmento(): Promise<CarteraSegmentoResult> {
     totalPorSector: SECTOR_KEYS.reduce(
       (acc, s) => ({ ...acc, [s]: emptyGran() }),
       {} as Record<Sector, Record<TimeGranularity, CarteraTotalDiaPunto[]>>
+    ),
   };
   const universo = await getUniverseLocations();
   if (universo.length === 0) return empty;
