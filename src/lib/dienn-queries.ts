@@ -25,6 +25,7 @@ import {
   type TimeGranularity,
 } from "@/lib/date-buckets";
 import { estabaIncorporado, vigentesAl } from "@/lib/cohortes";
+import { esSegmentoSinAlimentos, SEGMENTO_SIN_DATO } from "@/lib/segmentos";
 import type { Location, LocationType } from "@/types";
 
 export type { PanComparisonGranularity, TimeGranularity };
@@ -657,6 +658,160 @@ export async function getPenetracionRadarVsHpm(sector?: Sector): Promise<Penetra
     clientesPanquecitas,
     clientesHpm,
     universo: denom,
+  };
+}
+
+// ── 4b-bis. Inactivos por segmento y activación AJUSTADA ───────────
+// (pedido de DIENN, 03-09-2026)
+//
+// Responde tres preguntas sobre los clientes INACTIVOS —los de la cartera sin
+// Radar de Panquecitas—:
+//
+//   1. ¿A qué segmentos pertenecen y cuántos son de cada uno?
+//   2. ¿Cuántos de ellos venden Harina PAN? (en número y en %)
+//   3. ¿Cuánto sube la activación si se sacan del denominador los que no es
+//      realista alcanzar?
+//
+// La tercera es la que importa para reportar: la activación se castiga con
+// PDV donde el producto nunca va a entrar (licorerías, petshops, farmacias…).
+// El descarte exige TRES condiciones a la vez — inactivo, sin Harina PAN, y
+// de un segmento de SEGMENTOS_SIN_ALIMENTOS — para no botar clientes por
+// prejuicio de categoría: una licorería que vende PAN mueve alimentos y se
+// queda en el denominador.
+//
+// Se devuelven TODOS los segmentos, no solo los excluibles, y con el detalle
+// de por qué cada uno descarta o no: el criterio tiene que poder auditarse
+// sin abrir el código.
+
+export interface InactivosSegmentoRow {
+  segmento: string;
+  /** PDV del segmento en la cartera del corte (activos + inactivos). */
+  enCartera: number;
+  /** PDV del segmento SIN Radar de Panquecitas. */
+  inactivos: number;
+  /** De los inactivos, cuántos SÍ tienen Radar de Harina PAN. */
+  inactivosConPan: number;
+  /** inactivosConPan ÷ inactivos × 100. */
+  inactivosConPanPct: number;
+  /** De los inactivos, cuántos NO tienen Radar de Harina PAN. */
+  inactivosSinPan: number;
+  /** ¿El segmento está en SEGMENTOS_SIN_ALIMENTOS? */
+  sinAlimentos: boolean;
+  /** Descartados de este segmento = inactivos, sin PAN y sinAlimentos. */
+  descartados: number;
+}
+
+export interface ActivacionAjustadaResult {
+  /** Cartera vigente hoy en el corte. */
+  universo: number;
+  /** PDV con Radar de Panquecitas > 0. */
+  activos: number;
+  inactivos: number;
+  /** activos ÷ universo × 100 — la activación que ya reporta la tarjeta. */
+  activacionPct: number;
+  /** Inactivos descartados por no ser alcanzables (las 3 condiciones). */
+  descartados: number;
+  /** universo − descartados. */
+  universoAjustado: number;
+  /** activos ÷ universoAjustado × 100. */
+  activacionAjustadaPct: number;
+  /** De TODOS los inactivos, cuántos venden Harina PAN (número y %). */
+  inactivosConPan: number;
+  inactivosConPanPct: number;
+  /** Una fila por segmento, ordenadas por inactivos desc. */
+  porSegmento: InactivosSegmentoRow[];
+}
+
+const ACTIVACION_AJUSTADA_VACIA: ActivacionAjustadaResult = {
+  universo: 0,
+  activos: 0,
+  inactivos: 0,
+  activacionPct: 0,
+  descartados: 0,
+  universoAjustado: 0,
+  activacionAjustadaPct: 0,
+  inactivosConPan: 0,
+  inactivosConPanPct: 0,
+  porSegmento: [],
+};
+
+export async function getActivacionAjustada(sector?: Sector): Promise<ActivacionAjustadaResult> {
+  const universoTotal = await getUniverseLocations();
+  const delSector = sector ? universoTotal.filter((l) => sectorGroup(l.oficina_venta) === sector) : universoTotal;
+  // Mismo denominador que getPenetracionRadarVsHpm: la cartera vigente HOY.
+  // Una tanda con fecha futura no entra hasta que llega su fecha.
+  const universo = vigentesAl(delSector, todayISO());
+  if (universo.length === 0) return ACTIVACION_AJUSTADA_VACIA;
+
+  // "Activo" con el mismo criterio que la tarjeta de activación y que el
+  // filtro "PAN Cliente": Radar de Panquecitas acumulado > 0.
+  const [panqTotals, panTotals] = await Promise.all([
+    getSellInTotalsByLocation(PRODUCT_IDS.PANQUECITAS),
+    getSellInTotalsByLocation(PRODUCT_IDS.HARINA_PAN),
+  ]);
+
+  const porSegmento = new Map<string, InactivosSegmentoRow>();
+  let activos = 0;
+  let inactivos = 0;
+  let inactivosConPan = 0;
+  let descartados = 0;
+
+  for (const l of universo) {
+    const segmento = l.segmento_cliente?.trim() || SEGMENTO_SIN_DATO;
+    let fila = porSegmento.get(segmento);
+    if (!fila) {
+      fila = {
+        segmento,
+        enCartera: 0,
+        inactivos: 0,
+        inactivosConPan: 0,
+        inactivosConPanPct: 0,
+        inactivosSinPan: 0,
+        sinAlimentos: esSegmentoSinAlimentos(segmento),
+        descartados: 0,
+      };
+      porSegmento.set(segmento, fila);
+    }
+    fila.enCartera += 1;
+
+    if ((panqTotals.get(l.id) ?? 0) > 0) {
+      activos += 1;
+      continue;
+    }
+
+    inactivos += 1;
+    fila.inactivos += 1;
+
+    const vendePan = (panTotals.get(l.id) ?? 0) > 0;
+    if (vendePan) {
+      inactivosConPan += 1;
+      fila.inactivosConPan += 1;
+    } else {
+      fila.inactivosSinPan += 1;
+      // Las tres condiciones: inactivo (ya), sin PAN (acá) y sin alimentos.
+      if (fila.sinAlimentos) {
+        descartados += 1;
+        fila.descartados += 1;
+      }
+    }
+  }
+
+  const pct = (parte: number, total: number) => (total > 0 ? Math.round((parte / total) * 1000) / 10 : 0);
+  const universoAjustado = universo.length - descartados;
+
+  return {
+    universo: universo.length,
+    activos,
+    inactivos,
+    activacionPct: pct(activos, universo.length),
+    descartados,
+    universoAjustado,
+    activacionAjustadaPct: pct(activos, universoAjustado),
+    inactivosConPan,
+    inactivosConPanPct: pct(inactivosConPan, inactivos),
+    porSegmento: [...porSegmento.values()]
+      .map((f) => ({ ...f, inactivosConPanPct: pct(f.inactivosConPan, f.inactivos) }))
+      .sort((a, b) => b.inactivos - a.inactivos || a.segmento.localeCompare(b.segmento)),
   };
 }
 

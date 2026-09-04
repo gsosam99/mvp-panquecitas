@@ -8,6 +8,7 @@ import {
   getMixProducto,
   getPanVsHarinaPan,
   getPenetracionRadarVsHpm,
+  getActivacionAjustada,
   getPosicionPdv,
   getPosicionPorCliente,
   getRendimiento3M,
@@ -54,6 +55,7 @@ async function getBundle(sector?: Sector): Promise<SectorBundle> {
     rendimiento3MUniverso,
     rendimientoVsMargarina,
     rendimientoVsMayonesa,
+    activacionAjustada,
   ] = await Promise.all([
     getTotalToneladas(sector),
     getTotalToneladasPedidas(sector),
@@ -76,6 +78,7 @@ async function getBundle(sector?: Sector): Promise<SectorBundle> {
     getRendimiento3M("universo", sector),
     getRendimientoVsMavesa("margarina", sector),
     getRendimientoVsMavesa("mayonesa", sector),
+    getActivacionAjustada(sector),
   ]);
 
   return {
@@ -97,6 +100,7 @@ async function getBundle(sector?: Sector): Promise<SectorBundle> {
     rankingSegmentos,
     rendimiento3M: { clientes: rendimiento3MClientes, universo: rendimiento3MUniverso },
     rendimientoVsMavesa: { margarina: rendimientoVsMargarina, mayonesa: rendimientoVsMayonesa },
+    activacionAjustada,
   };
 }
 

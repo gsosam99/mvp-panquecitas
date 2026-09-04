@@ -30,6 +30,7 @@ import {
 } from "@/components/dashboard/RendimientoVsMavesaChart";
 import { PortafolioPorCiudadChart } from "@/components/dashboard/PortafolioPorCiudadChart";
 import { Ventas3MesesPorCiudadChart } from "@/components/dashboard/Ventas3MesesPorCiudadChart";
+import { ClientesInactivosSegmentos } from "@/components/dashboard/ClientesInactivosSegmentos";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Separator } from "@/components/ui/separator";
 import {
@@ -71,6 +72,7 @@ import type {
   TimeGranularity,
   VentaRecompraActivacionPoint,
   VolumenRadarAcumulado,
+  ActivacionAjustadaResult,
 } from "@/lib/dienn-queries";
 import type { MotivoNoVentaRow } from "@/lib/efectividad-queries";
 import type { Sector } from "@/lib/sectors";
@@ -116,6 +118,8 @@ export interface SectorBundle {
   rendimientoVsMavesa: Record<MavesaCategoria, RendimientoVsMavesaResult>;
   /** Conversión de degustaciones (tickets recibidos ÷ entregados) de la ciudad/sector. */
   conversionDegustaciones: { samples: number; conversions: number; rate: number };
+  /** Inactivos por segmento, cuántos venden PAN, y la activación sin los PDV no alcanzables. */
+  activacionAjustada: ActivacionAjustadaResult;
 }
 
 const PAN_POBLACION_OPTIONS: { key: PanComparisonPoblacion; label: string }[] = [
@@ -705,6 +709,17 @@ export function DiennDashboardClient({
   }, [bundle]);
 
   const filtroTexto = filter === "TOTAL" ? "Total sectores piloto" : sectorLabels[filter];
+
+  // Activación ajustada: siempre el Total y las dos ciudades, sin depender de
+  // las pestañas — el punto de esa tarjeta es comparar los tres cortes de un
+  // vistazo. La tabla de detalle sí sigue el corte activo.
+  const activacionPorCiudad = useMemo(
+    () => [
+      { label: "Total", data: bundles.TOTAL.activacionAjustada },
+      ...pilotSectors.map((s) => ({ label: sectorLabels[s], data: bundles[s].activacionAjustada })),
+    ],
+    [bundles, pilotSectors, sectorLabels]
+  );
 
   return (
     <div className="print-root">
@@ -2426,6 +2441,13 @@ export function DiennDashboardClient({
       </Card>
 
       </Card>
+
+      {/* ── Cierre: inactivos por segmento y activación ajustada ───────── */}
+      <ClientesInactivosSegmentos
+        data={bundle.activacionAjustada}
+        porCiudad={activacionPorCiudad}
+        filtroTexto={filtroTexto}
+      />
 
     </div>
   );
