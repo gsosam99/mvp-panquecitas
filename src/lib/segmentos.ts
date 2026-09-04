@@ -25,13 +25,16 @@
 // Los nombres salen de "Segmento de Clientes 2" de la Cartera Consolidada
 // (locations.segmento_cliente, migration 016) — el mismo campo del Ranking de
 // Volumen por Segmento. Los TRES segmentos CS entran, incluido CS Tradicional.
+//
+// "CP Cad Farmacia" (las CADENAS de farmacia) NO está y no es un olvido: esas
+// sí venden empacados, a diferencia de la farmacia de barrio de
+// "CP Farmacias/Perf" (DIENN, 03-09-2026). Son 6 PDV de la cartera.
 export const SEGMENTOS_SIN_ALIMENTOS = [
   "CP Licorerias",
   "CS Tradicional",
   "CS Alta Visibilidad",
   "CS Media Visibilidad",
   "CP Farmacias/Perf",
-  "CP Cad Farmacia",
   "CP Animales /Semilla",
   "CP Esp Mascota",
 ] as const;
