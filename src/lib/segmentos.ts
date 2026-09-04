@@ -8,28 +8,32 @@
 // se castiga con PDV a los que el producto nunca les va a entrar. Esta lista
 // permite calcular una activación AJUSTADA que los saca del denominador.
 //
-// OJO — pertenecer a uno de estos segmentos NO basta para descartar a un
-// cliente. El descarte exige las tres condiciones a la vez:
+// EL CRITERIO (DIENN, 03-09-2026) son DOS condiciones:
 //
-//   1. está INACTIVO (sin Radar de Panquecitas),
-//   2. NO vende Harina PAN (si vende PAN, vende alimentos: es alcanzable),
-//   3. su segmento está en esta lista.
+//   1. el cliente está INACTIVO — cero Radar de Panquecitas,
+//   2. su segmento está en esta lista.
 //
-// La segunda condición es la que evita botar clientes por prejuicio de
-// categoría: una licorería que vende Harina PAN sí mueve comida y se queda en
-// el denominador aunque su segmento esté acá.
+// Nada más. Que el PDV compre Harina PAN o no NO influye en el descarte: esa
+// información se sigue mostrando en la tarjeta de inactivos por segmento, pero
+// es solo informativa. (Una versión anterior la usaba como tercera condición
+// —"si vende PAN mueve alimentos, se queda"— y DIENN la descartó.)
+//
+// Un cliente ACTIVO nunca se descarta, esté donde esté: ya se le vendió, así
+// que es alcanzable por definición. Por eso el ajuste solo puede sacar gente
+// del denominador y el numerador queda intacto.
 //
 // Los nombres salen de "Segmento de Clientes 2" de la Cartera Consolidada
 // (locations.segmento_cliente, migration 016) — el mismo campo del Ranking de
-// Volumen por Segmento.
+// Volumen por Segmento. Los TRES segmentos CS entran, incluido CS Tradicional.
 export const SEGMENTOS_SIN_ALIMENTOS = [
   "CP Licorerias",
-  "CP Esp Mascota",
-  "CP Animales /Semilla",
-  "CP Farmacias/Perf",
-  "CP Cad Farmacia",
+  "CS Tradicional",
   "CS Alta Visibilidad",
   "CS Media Visibilidad",
+  "CP Farmacias/Perf",
+  "CP Cad Farmacia",
+  "CP Animales /Semilla",
+  "CP Esp Mascota",
 ] as const;
 
 // Rango Unicode de marcas diacríticas combinantes — mismo enfoque que
@@ -67,53 +71,3 @@ export function esSegmentoSinAlimentos(segmento: string | null | undefined): boo
 
 /** Etiqueta para los clientes sin segmento en la cartera. */
 export const SEGMENTO_SIN_DATO = "Sin segmento";
-
-/**
- * Tipos de cliente (el giro del negocio, 53 valores en la cartera) que se
- * marcan POR DEFECTO como "no le podemos vender" en la tarjeta de Activación
- * Ajustada.
- *
- * Es solo el punto de partida: la tarjeta deja marcar y desmarcar tipos, y el
- * número se recalcula en el momento. La razón es que el criterio todavía se
- * está cerrando con ventas — a nivel de SEGMENTO no se puede expresar (en
- * Barquisimeto los 7 segmentos sin alimentos llegan a 147 PDV y ventas reporta
- * al menos 224), y la lista de ventas no está disponible todavía. Antes que
- * adivinar una regla que cuadre por casualidad, se deja elegir.
- *
- * Este default cubre lo que no admite discusión: retail que no vende comida y
- * locales de ocio/bebidas. Los canales de CONSUMO EN SITIO (restaurantes,
- * luncherías, comida rápida…) quedan FUERA del default a propósito: ahí sí se
- * puede vender mezcla para panquecas, y es la zona gris que ventas tiene que
- * definir.
- */
-export const TIPOS_SIN_ALIMENTOS_DEFAULT = [
-  "LICOR/FRIAXCAJA/DEPO",
-  "FARMACIAS",
-  "TIENDA MASC/PETSHOP",
-  "CLINICAS VETERINARIA",
-  "MAYOR ABA-PETFOOD",
-  "DET ABA-AGROPECUARIA",
-  "PERFUMERIAS",
-  "FERRETERIAS",
-  "ZAPAT/TDAS ROPA/MERC",
-  "LIBR PAPEL/CTRO FOTO",
-  "CYBRCAFE/CTRO INTRNT",
-  "TALL MECAN/AUTO",
-  "GIMNASIOS / SAUNAS",
-  "CLUB SOCIAL/DEPORT.",
-  "CERVECERIAS",
-  "BARES",
-  "NIGHTCLUB/PUB/DISCO",
-  "CANCHAS DE BOLAS",
-  "BILLARES / BOWLING",
-  "GALLERAS",
-  "P.HIPIC/VND-PAGA/5Y6",
-  "CINES Y TEATROS",
-] as const;
-
-const TIPOS_DEFAULT_FOLDED = new Set(TIPOS_SIN_ALIMENTOS_DEFAULT.map(foldSegmento));
-
-/** ¿Este tipo de cliente viene marcado por defecto? Comparación normalizada. */
-export function esTipoSinAlimentosPorDefecto(tipo: string | null | undefined): boolean {
-  return TIPOS_DEFAULT_FOLDED.has(foldSegmento(tipo));
-}

@@ -256,7 +256,6 @@ async function getScopeVolumen(
     // ventas anteriores a ella, igual que hacen las series.
     cartera: new Map(
       vigentes.filter((l) => !esFueraDeCartera(l.cohorte)).map((l) => [l.id, l.fecha_incorporacion ?? null])
-    ),
     fuera: new Set(vigentes.filter((l) => esFueraDeCartera(l.cohorte)).map((l) => l.id)),
   };
 }
@@ -674,10 +673,10 @@ export async function getPenetracionRadarVsHpm(sector?: Sector): Promise<Penetra
 //
 // La tercera es la que importa para reportar: la activación se castiga con
 // PDV donde el producto nunca va a entrar (licorerías, petshops, farmacias…).
-// El descarte exige TRES condiciones a la vez — inactivo, sin Harina PAN, y
-// de un segmento de SEGMENTOS_SIN_ALIMENTOS — para no botar clientes por
-// prejuicio de categoría: una licorería que vende PAN mueve alimentos y se
-// queda en el denominador.
+// El descarte son DOS condiciones — inactivo y de un segmento de
+// SEGMENTOS_SIN_ALIMENTOS. Que compre Harina PAN o no NO influye: eso se
+// muestra (pregunta 2) pero es informativo. Un cliente ACTIVO no se descarta
+// nunca, así que el ajuste solo achica el denominador.
 //
 // Se devuelven TODOS los segmentos, no solo los excluibles, y con el detalle
 // de por qué cada uno descarta o no: el criterio tiene que poder auditarse
@@ -701,26 +700,6 @@ export interface InactivosSegmentoRow {
   descartados: number;
 }
 
-/**
- * Mismo corte pero por TIPO DE CLIENTE (el giro del negocio: BODEGAS,
- * LICOR/FRIAXCAJA/DEPO, TIENDA MASC/PETSHOP…), que es bastante más fino que el
- * segmento: 53 valores contra 14.
- *
- * Existe porque el criterio de "a quién no le podemos vender" todavía se está
- * definiendo con ventas, y a nivel de segmento no se puede expresar: en
- * Barquisimeto los 7 segmentos sin alimentos llegan a 147 PDV y ventas reporta
- * al menos 224. El dashboard deja elegir los tipos, así que este desglose es
- * lo que hace posible recalcular sin volver al servidor.
- */
-export interface InactivosTipoRow {
-  tipo: string;
-  enCartera: number;
-  inactivos: number;
-  inactivosConPan: number;
-  /** Los descartables de este tipo: inactivos que además NO venden Harina PAN. */
-  inactivosSinPan: number;
-}
-
 export interface ActivacionAjustadaResult {
   /** Cartera vigente hoy en el corte. */
   universo: number;
@@ -729,7 +708,7 @@ export interface ActivacionAjustadaResult {
   inactivos: number;
   /** activos ÷ universo × 100 — la activación que ya reporta la tarjeta. */
   activacionPct: number;
-  /** Inactivos descartados por no ser alcanzables (las 3 condiciones). */
+  /** Inactivos descartados: los de segmentos no vendibles (2 condiciones). */
   descartados: number;
   /** universo − descartados. */
   universoAjustado: number;
@@ -740,8 +719,6 @@ export interface ActivacionAjustadaResult {
   inactivosConPanPct: number;
   /** Una fila por segmento, ordenadas por inactivos desc. */
   porSegmento: InactivosSegmentoRow[];
-  /** Una fila por tipo de cliente, ordenadas por descartables desc. */
-  porTipo: InactivosTipoRow[];
 }
 
 const ACTIVACION_AJUSTADA_VACIA: ActivacionAjustadaResult = {
@@ -755,7 +732,6 @@ const ACTIVACION_AJUSTADA_VACIA: ActivacionAjustadaResult = {
   inactivosConPan: 0,
   inactivosConPanPct: 0,
   porSegmento: [],
-  porTipo: [],
 };
 
 export async function getActivacionAjustada(sector?: Sector): Promise<ActivacionAjustadaResult> {
@@ -774,7 +750,6 @@ export async function getActivacionAjustada(sector?: Sector): Promise<Activacion
   ]);
 
   const porSegmento = new Map<string, InactivosSegmentoRow>();
-  const porTipo = new Map<string, InactivosTipoRow>();
   let activos = 0;
   let inactivos = 0;
   let inactivosConPan = 0;
@@ -798,16 +773,6 @@ export async function getActivacionAjustada(sector?: Sector): Promise<Activacion
     }
     fila.enCartera += 1;
 
-    // Mismo conteo en paralelo por tipo de cliente. El tipo es el giro del
-    // negocio y es MÁS FINO que el segmento (53 valores contra 14): es el
-    // nivel al que el dashboard deja elegir qué se descarta.
-    const tipo = l.tipo_cliente?.trim() || SEGMENTO_SIN_DATO;
-    let filaTipo = porTipo.get(tipo);
-    if (!filaTipo) {
-      filaTipo = { tipo, enCartera: 0, inactivos: 0, inactivosConPan: 0, inactivosSinPan: 0 };
-      porTipo.set(tipo, filaTipo);
-    }
-    filaTipo.enCartera += 1;
 
     if ((panqTotals.get(l.id) ?? 0) > 0) {
       activos += 1;
@@ -816,21 +781,22 @@ export async function getActivacionAjustada(sector?: Sector): Promise<Activacion
 
     inactivos += 1;
     fila.inactivos += 1;
-    filaTipo.inactivos += 1;
+
+    // El descarte NO mira Harina PAN (DIENN, 03-09-2026): basta con estar
+    // inactivo y pertenecer a un segmento de la lista. El conteo de PAN se
+    // sigue llevando porque la tarjeta de inactivos lo muestra, pero es
+    // informativo y no entra en el criterio.
+    if (fila.sinAlimentos) {
+      descartados += 1;
+      fila.descartados += 1;
+    }
 
     const vendePan = (panTotals.get(l.id) ?? 0) > 0;
     if (vendePan) {
       inactivosConPan += 1;
       fila.inactivosConPan += 1;
-      filaTipo.inactivosConPan += 1;
     } else {
       fila.inactivosSinPan += 1;
-      filaTipo.inactivosSinPan += 1;
-      // Las tres condiciones: inactivo (ya), sin PAN (acá) y sin alimentos.
-      if (fila.sinAlimentos) {
-        descartados += 1;
-        fila.descartados += 1;
-      }
     }
   }
 
@@ -850,11 +816,6 @@ export async function getActivacionAjustada(sector?: Sector): Promise<Activacion
     porSegmento: [...porSegmento.values()]
       .map((f) => ({ ...f, inactivosConPanPct: pct(f.inactivosConPan, f.inactivos) }))
       .sort((a, b) => b.inactivos - a.inactivos || a.segmento.localeCompare(b.segmento)),
-    // Ordenado por DESCARTABLES, no por inactivos: es la columna con la que se
-    // arma la selección, así que los tipos que más mueven el número van arriba.
-    porTipo: [...porTipo.values()].sort(
-      (a, b) => b.inactivosSinPan - a.inactivosSinPan || a.tipo.localeCompare(b.tipo)
-    ),
   };
 }
 
@@ -1615,13 +1576,11 @@ export async function getDemandaInsatisfecha(sector?: Sector): Promise<Record<Ti
         .from("sap_pedidos_facturados")
         .select("location_id, cantidad_pedido_kg, cantidad_facturada_kg, fecha")
         .eq("product_id", PRODUCT_IDS.PANQUECITAS)
-    ),
     fetchAllRows<unknown>(() =>
       supabase
         .from("sap_sell_in_records")
         .select("location_id, quantity_kg, date_of_sale")
         .eq("product_id", PRODUCT_IDS.PANQUECITAS)
-    ),
   ]);
 
   const pedidoFacturadoRows = ((pedidoFacturadoData ?? []) as {
@@ -2171,7 +2130,6 @@ export async function getCarteraPorSegmento(): Promise<CarteraSegmentoResult> {
     totalPorSector: SECTOR_KEYS.reduce(
       (acc, s) => ({ ...acc, [s]: emptyGran() }),
       {} as Record<Sector, Record<TimeGranularity, CarteraTotalDiaPunto[]>>
-    ),
   };
   const universo = await getUniverseLocations();
   if (universo.length === 0) return empty;

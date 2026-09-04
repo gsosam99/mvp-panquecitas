@@ -283,6 +283,10 @@ export function DiennDashboardClient({
   const [ciudadDia, setCiudadDia] = useState(false);
   // Cuál ciudad se superpone: ambas, solo Cumaná o solo Cabudare.
   const [ciudadSel, setCiudadSel] = useState<"ambas" | "cumana" | "barquisimeto_este">("ambas");
+  // Activación "a escala": la acumulada de la ciudad contra la cartera SIN los
+  // inactivos de segmentos no vendibles (ver SEGMENTOS_SIN_ALIMENTOS).
+  const [escalaCumanaOn, setEscalaCumanaOn] = useState(false);
+  const [escalaCabudareOn, setEscalaCabudareOn] = useState(false);
 
   const [sellOutClienteOpen, setSellOutClienteOpen] = useState(false);
   // Posición del producto en PDV: una sola tarjeta, se ve por conteo de clientes
@@ -423,6 +427,22 @@ export function DiennDashboardClient({
     carteraMetrica === "activos" ? "#dc2626" : carteraMetrica === "facturados" ? "#1e3a8a" : "#ea580c";
   // Gráfico global: además de la línea total, se superponen (opcional) las
   // efectividades por ciudad — acumulada y/o diaria — mergeadas por bucket.
+  // Factor de reescalado de la activación por ciudad: cartera ÷ cartera
+  // alcanzable, donde "alcanzable" saca a los inactivos de los segmentos no
+  // vendibles (ver SEGMENTOS_SIN_ALIMENTOS). Como el numerador —los clientes
+  // ya activados— no cambia y solo se achica el denominador, la línea
+  // ajustada es la misma multiplicada por este factor.
+  //
+  // Vale 1 si no hay descartados, así que la línea "a escala" cae encima de la
+  // normal en vez de desaparecer.
+  const escalaDe = (b: SectorBundle) => {
+    const { universo, descartados } = b.activacionAjustada;
+    const alcanzables = universo - descartados;
+    return alcanzables > 0 ? universo / alcanzables : 1;
+  };
+  const escalaCumana = escalaDe(bundles.cumana);
+  const escalaCabudare = escalaDe(bundles.barquisimeto_este);
+
   const carteraTotalDiaData = useMemo(() => {
     const base = carteraPorSegmento.totalPorDia[totalGranularity];
     const cIdx = new Map(carteraPorSegmento.totalPorSector.cumana[totalGranularity].map((p) => [p.dia, p]));
@@ -448,10 +468,17 @@ export function DiennDashboardClient({
         efectCabudareAcum: bAcum,
         efectCumanaDia: c ? metricDia(c) : null,
         efectCabudareDia: b ? metricDia(b) : null,
+        // "A escala": la misma activación acumulada pero contra el
+        // denominador SIN los inactivos de segmentos no vendibles. Es un
+        // reescalado puro —el numerador no cambia, solo se achica el
+        // denominador— así que basta multiplicar por cartera ÷ cartera
+        // alcanzable. Ver escalaPorCiudad.
+        efectCumanaEscala: cAcum == null ? null : Math.round(cAcum * escalaCumana * 10) / 10,
+        efectCabudareEscala: bAcum == null ? null : Math.round(bAcum * escalaCabudare * 10) / 10,
       };
     });
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [carteraPorSegmento, totalGranularity, carteraMetrica, efectividadAcum, modeloAcum]);
+  }, [carteraPorSegmento, totalGranularity, carteraMetrica, efectividadAcum, modeloAcum, escalaCumana, escalaCabudare]);
   const carteraTotalPorSectorData = useMemo(
     () =>
       pilotSectors.map((s) => ({
@@ -1363,6 +1390,31 @@ export function DiennDashboardClient({
                 >
                   Ciudad Día
                 </button>
+                {/* Activación "a escala": misma acumulada de la ciudad pero
+                    contra la cartera alcanzable — sin los inactivos de
+                    licorerías, CS, farmacias, mascotas y animales. */}
+                <button
+                  onClick={() => setEscalaCumanaOn((v) => !v)}
+                  title={`Activación acumulada de Cumaná sin los ${bundles.cumana.activacionAjustada.descartados} PDV inactivos de segmentos no vendibles`}
+                  className={`px-3 py-1.5 rounded-lg border text-xs font-medium transition-colors ${
+                    escalaCumanaOn
+                      ? "border-teal-600 bg-teal-600 text-white"
+                      : "border-slate-200 bg-white text-slate-500 hover:bg-slate-50"
+                  }`}
+                >
+                  Cumaná a escala
+                </button>
+                <button
+                  onClick={() => setEscalaCabudareOn((v) => !v)}
+                  title={`Activación acumulada de Cabudare sin los ${bundles.barquisimeto_este.activacionAjustada.descartados} PDV inactivos de segmentos no vendibles`}
+                  className={`px-3 py-1.5 rounded-lg border text-xs font-medium transition-colors ${
+                    escalaCabudareOn
+                      ? "border-teal-700 bg-teal-700 text-white"
+                      : "border-slate-200 bg-white text-slate-500 hover:bg-slate-50"
+                  }`}
+                >
+                  Cabudare a escala
+                </button>
                 {/* Cuál ciudad se superpone (aplica a ambas capas de ciudad). */}
                 <select
                   value={ciudadSel}
@@ -1397,6 +1449,8 @@ export function DiennDashboardClient({
               showCiudadDia={ciudadDia}
               showCumana={ciudadSel !== "barquisimeto_este"}
               showCabudare={ciudadSel !== "cumana"}
+              showEscalaCumana={escalaCumanaOn}
+              showEscalaCabudare={escalaCabudareOn}
             />
           </CardContent>
         </Card>

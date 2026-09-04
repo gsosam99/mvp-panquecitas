@@ -19,6 +19,13 @@ export interface CarteraTotalDiaChartPoint {
   efectCumanaDia?: number | null;
   efectCabudareAcum?: number | null;
   efectCabudareDia?: number | null;
+  /**
+   * Activación acumulada "a escala": el mismo numerador contra la cartera SIN
+   * los inactivos de segmentos no vendibles (licorerías, CS, farmacias,
+   * mascotas, animales). Ver SEGMENTOS_SIN_ALIMENTOS.
+   */
+  efectCumanaEscala?: number | null;
+  efectCabudareEscala?: number | null;
 }
 
 function formatKg(value: number): string {
@@ -43,6 +50,8 @@ const Inner = dynamic(
       showCiudadAcum,
       showCiudadDia,
       showCumana,
+      showEscalaCumana,
+      showEscalaCabudare,
       showCabudare,
     }: {
       data: CarteraTotalDiaChartPoint[];
@@ -57,6 +66,8 @@ const Inner = dynamic(
       showCiudadAcum: boolean;
       showCiudadDia: boolean;
       showCumana: boolean;
+      showEscalaCumana: boolean;
+      showEscalaCabudare: boolean;
       showCabudare: boolean;
     }) {
       // Con cualquier desglose de barras prendido (modelo o ciudad) se oculta la
@@ -147,6 +158,10 @@ const Inner = dynamic(
                 if (name === "efectCumanaDia") return [`${Number(value ?? 0)}%`, "Cumaná (día)"];
                 if (name === "efectCabudareAcum") return [`${Number(value ?? 0)}%`, "Cabudare (acum)"];
                 if (name === "efectCabudareDia") return [`${Number(value ?? 0)}%`, "Cabudare (día)"];
+                if (name === "efectCumanaEscala")
+                  return [`${Number(value ?? 0)}%`, "Cumaná a escala (sin no vendibles)"];
+                if (name === "efectCabudareEscala")
+                  return [`${Number(value ?? 0)}%`, "Cabudare a escala (sin no vendibles)"];
                 return [String(value ?? ""), String(name ?? "")];
               }}
             />
@@ -176,6 +191,10 @@ const Inner = dynamic(
                   ? "Cabudare (acum)"
                   : value === "efectCabudareDia"
                   ? "Cabudare (día)"
+                  : value === "efectCumanaEscala"
+                  ? "Cumaná a escala"
+                  : value === "efectCabudareEscala"
+                  ? "Cabudare a escala"
                   : value
               }
               wrapperStyle={{ fontSize: 12 }}
@@ -448,6 +467,59 @@ const Inner = dynamic(
                 />
               </Line>
             )}
+            {/* Activación ACUMULADA "a escala": mismo numerador, denominador sin
+                los inactivos de segmentos no vendibles. Línea gruesa y sólida
+                para que se distinga de la acumulada normal, que va sobre el
+                mismo eje y es siempre más baja. */}
+            {showEscalaCumana && (
+              <Line
+                yAxisId="pct"
+                dataKey="efectCumanaEscala"
+                stroke="#0d9488"
+                strokeWidth={3}
+                dot={{ r: 3, fill: "#0d9488" }}
+                connectNulls
+                isAnimationActive={false}
+              >
+                <LabelList
+                  dataKey="efectCumanaEscala"
+                  position="top"
+                  offset={58}
+                  fill="#0d9488"
+                  fontSize={10}
+                  fontWeight={700}
+                  stroke="#ffffff"
+                  strokeWidth={3}
+                  paintOrder="stroke"
+                  formatter={(v) => (v == null ? "" : `${Number(v)}%`)}
+                />
+              </Line>
+            )}
+            {showEscalaCabudare && (
+              <Line
+                yAxisId="pct"
+                dataKey="efectCabudareEscala"
+                stroke="#0f766e"
+                strokeWidth={3}
+                strokeDasharray="8 3"
+                dot={{ r: 3, fill: "#0f766e" }}
+                connectNulls
+                isAnimationActive={false}
+              >
+                <LabelList
+                  dataKey="efectCabudareEscala"
+                  position="bottom"
+                  offset={52}
+                  fill="#0f766e"
+                  fontSize={10}
+                  fontWeight={700}
+                  stroke="#ffffff"
+                  strokeWidth={3}
+                  paintOrder="stroke"
+                  formatter={(v) => (v == null ? "" : `${Number(v)}%`)}
+                />
+              </Line>
+            )}
           </ComposedChart>
         </ResponsiveContainer>
       );
@@ -474,6 +546,8 @@ export function CarteraTotalDiaChart({
   showCiudadAcum = false,
   showCiudadDia = false,
   showCumana = true,
+  showEscalaCumana = false,
+  showEscalaCabudare = false,
   showCabudare = true,
 }: {
   data: CarteraTotalDiaChartPoint[];
@@ -488,6 +562,8 @@ export function CarteraTotalDiaChart({
   showCiudadAcum?: boolean;
   showCiudadDia?: boolean;
   showCumana?: boolean;
+  showEscalaCumana?: boolean;
+  showEscalaCabudare?: boolean;
   showCabudare?: boolean;
 }) {
   return (
@@ -504,6 +580,8 @@ export function CarteraTotalDiaChart({
       showCiudadAcum={showCiudadAcum}
       showCiudadDia={showCiudadDia}
       showCumana={showCumana}
+      showEscalaCumana={showEscalaCumana}
+      showEscalaCabudare={showEscalaCabudare}
       showCabudare={showCabudare}
     />
   );
