@@ -111,6 +111,11 @@ const Inner = dynamic(
         if (showCiudadAcum && showCabudare && punto.efectCabudareAcum != null) ratios.push(punto.efectCabudareAcum);
         if (showCiudadDia && showCumana && punto.efectCumanaDia != null) ratios.push(punto.efectCumanaDia);
         if (showCiudadDia && showCabudare && punto.efectCabudareDia != null) ratios.push(punto.efectCabudareDia);
+        // Las "a escala" también ocupan lugar: sin contarlas acá, la etiqueta
+        // de kg elegía un extremo que en realidad estaba ocupado y los números
+        // salían encimados.
+        if (showEscalaCumana && punto.efectCumanaEscala != null) ratios.push(punto.efectCumanaEscala);
+        if (showEscalaCabudare && punto.efectCabudareEscala != null) ratios.push(punto.efectCabudareEscala);
 
         const yArriba = y + 12;
         const yAbajo = base - 6;

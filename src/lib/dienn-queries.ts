@@ -2111,6 +2111,21 @@ export interface CarteraTotalDiaPunto {
   efectividadPedidosAcum: number;
   efectividadDirectoAcum: number;
   efectividadIndirectoAcum: number;
+  /**
+   * Activación acumulada contra la cartera VENDIBLE de ese bucket: la cartera
+   * vigente a esa fecha menos los PDV de segmentos no vendibles que a esa
+   * fecha todavía no habían comprado. Mismo numerador que
+   * `efectividadActivosAcum`; solo cambia el denominador.
+   *
+   * Se calcula por bucket y NO con un factor global sobre el valor de hoy:
+   * la cartera crece por tandas, así que un factor de hoy aplicado a agosto
+   * inflaba la línea por encima del 100%.
+   */
+  efectividadActivosAcumVendible: number;
+  /** Denominador de la anterior, para poder auditarla. */
+  carteraVendible: number;
+  /** PDV descartados vigentes a esa fecha (cartera − carteraVendible). */
+  descartadosVigentes: number;
 }
 
 export interface CarteraSegmentoResult {
@@ -2142,7 +2157,16 @@ export async function getCarteraPorSegmento(): Promise<CarteraSegmentoResult> {
   // "¿este cliente ya era cartera en este bucket?" tanto para el denominador
   // (a visitar / cartera total) como para el numerador (activos, facturados,
   // pedidos). Ver src/lib/cohortes.ts.
-  type Cli = { locId: string; segKey: string; plan: Set<number>; fecha_incorporacion: string | null };
+  // `noVendible` viaja con el cliente para poder descontarlo del denominador
+  // BUCKET A BUCKET. Un factor global no sirve: la cartera de cada fecha es
+  // distinta y los segmentos no vendibles no entraron todos en la misma tanda.
+  type Cli = {
+    locId: string;
+    segKey: string;
+    plan: Set<number>;
+    fecha_incorporacion: string | null;
+    noVendible: boolean;
+  };
   const clientes: Cli[] = [];
   const segMeta = new Map<string, { ciudad: string; modelo: string }>();
   const carteraCount = new Map<string, number>();
@@ -2159,6 +2183,7 @@ export async function getCarteraPorSegmento(): Promise<CarteraSegmentoResult> {
       segKey,
       plan: planSet(l.dias_visita),
       fecha_incorporacion: l.fecha_incorporacion ?? null,
+      noVendible: esSegmentoSinAlimentos(l.segmento_cliente),
     };
     clientes.push(cli);
     segMeta.set(segKey, { ciudad: CIUDAD_POR_SECTOR[sector], modelo });
@@ -2409,6 +2434,17 @@ export async function getCarteraPorSegmento(): Promise<CarteraSegmentoResult> {
       // se recortan a los clientes ya incorporados al cierre del bucket.
       const scopeVigente = vigentesAl(clientesScope, cierre);
       const carteraTotal = scopeVigente.length;
+      // Cartera VENDIBLE de esta fecha: la de esta fecha menos los PDV de
+      // segmentos no vendibles que a esta fecha todavía no habían comprado.
+      // Se evalúa por bucket, no con un factor global, porque la cartera crece
+      // por tandas y los segmentos no vendibles no entraron todos a la vez.
+      //
+      // Los descartados son siempre inactivos A ESA FECHA, así que el
+      // denominador nunca baja del numerador y el % no puede pasar de 100.
+      const descartadosVigentes = scopeVigente.filter(
+        (c) => c.noVendible && !radarCum.has(c.locId)
+      ).length;
+      const carteraVendible = carteraTotal - descartadosVigentes;
       const carteraDir = vigentesAl(clientesScopeDir, cierre).length;
       const carteraInd = vigentesAl(clientesScopeInd, cierre).length;
       const activosAcum = scopeVigente.filter((c) => radarCum.has(c.locId)).length;
@@ -2437,6 +2473,11 @@ export async function getCarteraPorSegmento(): Promise<CarteraSegmentoResult> {
         efectividadPedidosAcum: pct(pedidosAcum, carteraTotal),
         efectividadDirectoAcum: pct(activosDirAcum, carteraDir),
         efectividadIndirectoAcum: pct(activosIndAcum, carteraInd),
+        // Misma activación acumulada, pero contra la cartera VENDIBLE de esta
+        // fecha. Mismo numerador: solo se achica el denominador.
+        efectividadActivosAcumVendible: pct(activosAcum, carteraVendible),
+        carteraVendible,
+        descartadosVigentes,
       };
     });
   }

@@ -427,22 +427,6 @@ export function DiennDashboardClient({
     carteraMetrica === "activos" ? "#dc2626" : carteraMetrica === "facturados" ? "#1e3a8a" : "#ea580c";
   // Gráfico global: además de la línea total, se superponen (opcional) las
   // efectividades por ciudad — acumulada y/o diaria — mergeadas por bucket.
-  // Factor de reescalado de la activación por ciudad: cartera ÷ cartera
-  // alcanzable, donde "alcanzable" saca a los inactivos de los segmentos no
-  // vendibles (ver SEGMENTOS_SIN_ALIMENTOS). Como el numerador —los clientes
-  // ya activados— no cambia y solo se achica el denominador, la línea
-  // ajustada es la misma multiplicada por este factor.
-  //
-  // Vale 1 si no hay descartados, así que la línea "a escala" cae encima de la
-  // normal en vez de desaparecer.
-  const escalaDe = (b: SectorBundle) => {
-    const { universo, descartados } = b.activacionAjustada;
-    const alcanzables = universo - descartados;
-    return alcanzables > 0 ? universo / alcanzables : 1;
-  };
-  const escalaCumana = escalaDe(bundles.cumana);
-  const escalaCabudare = escalaDe(bundles.barquisimeto_este);
-
   const carteraTotalDiaData = useMemo(() => {
     const base = carteraPorSegmento.totalPorDia[totalGranularity];
     const cIdx = new Map(carteraPorSegmento.totalPorSector.cumana[totalGranularity].map((p) => [p.dia, p]));
@@ -454,11 +438,15 @@ export function DiennDashboardClient({
     // ciudad no tenga movimiento ese bucket. La DIARIA sí deja hueco (null).
     let cAcum: number | null = null;
     let bAcum: number | null = null;
+    let cEscala: number | null = null;
+    let bEscala: number | null = null;
     return base.map((p) => {
       const c = cIdx.get(p.dia);
       const b = bIdx.get(p.dia);
       if (c) cAcum = metricAcum(c);
       if (b) bAcum = metricAcum(b);
+      if (c) cEscala = c.efectividadActivosAcumVendible;
+      if (b) bEscala = b.efectividadActivosAcumVendible;
       return {
         ...mapTotalPoint(p),
         // Volumen Radar del bucket partido por ciudad (para las barras por ciudad).
@@ -468,17 +456,16 @@ export function DiennDashboardClient({
         efectCabudareAcum: bAcum,
         efectCumanaDia: c ? metricDia(c) : null,
         efectCabudareDia: b ? metricDia(b) : null,
-        // "A escala": la misma activación acumulada pero contra el
-        // denominador SIN los inactivos de segmentos no vendibles. Es un
-        // reescalado puro —el numerador no cambia, solo se achica el
-        // denominador— así que basta multiplicar por cartera ÷ cartera
-        // alcanzable. Ver escalaPorCiudad.
-        efectCumanaEscala: cAcum == null ? null : Math.round(cAcum * escalaCumana * 10) / 10,
-        efectCabudareEscala: bAcum == null ? null : Math.round(bAcum * escalaCabudare * 10) / 10,
+        // "A escala": activación acumulada contra la cartera VENDIBLE de esa
+        // misma fecha, calculada en el servidor bucket a bucket. Se arrastra
+        // el último valor conocido igual que la acumulada normal, porque un
+        // acumulado no baja a hueco.
+        efectCumanaEscala: cEscala,
+        efectCabudareEscala: bEscala,
       };
     });
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [carteraPorSegmento, totalGranularity, carteraMetrica, efectividadAcum, modeloAcum, escalaCumana, escalaCabudare]);
+  }, [carteraPorSegmento, totalGranularity, carteraMetrica, efectividadAcum, modeloAcum]);
   const carteraTotalPorSectorData = useMemo(
     () =>
       pilotSectors.map((s) => ({
