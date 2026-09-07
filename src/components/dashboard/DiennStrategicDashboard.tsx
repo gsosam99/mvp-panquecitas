@@ -27,7 +27,12 @@ import { getMotivosNoVenta } from "@/lib/efectividad-queries";
 import { computeSellOut, getSellOutPorClienteDiff } from "@/lib/sellout-queries";
 import { getAvailableZonasYAsesores } from "@/lib/sellout-utils";
 import { getUniverseLocations, SECTOR_LABELS, type Sector } from "@/lib/universe";
-import { getRendimientoVsMavesa, getComparativaPortafolioPorCiudad, getVentas3MesesPorCiudad } from "@/lib/mavesa-queries";
+import {
+  getRendimientoVsMavesa,
+  getComparativaPortafolioPorCiudad,
+  getVentas3MesesPorCiudad,
+  getVentaDiariaPorSegmento,
+} from "@/lib/mavesa-queries";
 import { DiennDashboardClient, type SectorBundle } from "@/components/dashboard/DiennDashboardClient";
 
 const PILOT_SECTOR_KEYS: Sector[] = ["cumana", "barquisimeto_este"];
@@ -112,7 +117,7 @@ async function getBundle(sector?: Sector): Promise<SectorBundle> {
 // Sell-Out completo (sin filtrar), y se le pasan al cliente, que decide
 // qué mostrar sin volver a pedir datos.
 export async function DiennStrategicDashboard() {
-  const [total, cumana, barquisimetoEste, coberturaComunicacion, tiendaIdeal, sellOutRecords, sellOutClientes, universo, motivosNoVenta, posicionPorCliente, carteraPorSegmento, precioCorrecto, portafolioPorCiudad, ventas3MesesPorCiudad] =
+  const [total, cumana, barquisimetoEste, coberturaComunicacion, tiendaIdeal, sellOutRecords, sellOutClientes, universo, motivosNoVenta, posicionPorCliente, carteraPorSegmento, precioCorrecto, portafolioPorCiudad, ventas3MesesPorCiudad, ventaDiariaPorSegmento] =
     await Promise.all([
       getBundle(undefined),
       getBundle("cumana"),
@@ -128,6 +133,7 @@ export async function DiennStrategicDashboard() {
       getPrecioCorrecto(),
       getComparativaPortafolioPorCiudad(),
       getVentas3MesesPorCiudad(),
+      getVentaDiariaPorSegmento(),
     ]);
 
   const { zonas, asesores } = getAvailableZonasYAsesores(universo);
@@ -149,6 +155,7 @@ export async function DiennStrategicDashboard() {
       precioCorrecto={precioCorrecto}
       portafolioPorCiudad={portafolioPorCiudad}
       ventas3MesesPorCiudad={ventas3MesesPorCiudad}
+      ventaDiariaPorSegmento={ventaDiariaPorSegmento}
     />
   );
 }

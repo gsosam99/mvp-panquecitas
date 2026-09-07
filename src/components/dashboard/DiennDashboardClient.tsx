@@ -31,6 +31,10 @@ import {
 import { PortafolioPorCiudadChart } from "@/components/dashboard/PortafolioPorCiudadChart";
 import { Ventas3MesesPorCiudadChart } from "@/components/dashboard/Ventas3MesesPorCiudadChart";
 import { ClientesInactivosSegmentos } from "@/components/dashboard/ClientesInactivosSegmentos";
+import {
+  VentaDiariaPorSegmentoChart,
+  type VentaSegmentoPunto,
+} from "@/components/dashboard/VentaDiariaPorSegmentoChart";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Separator } from "@/components/ui/separator";
 import {
@@ -81,6 +85,7 @@ import type {
   RendimientoVsMavesaResult,
   PortafolioPorCiudadRow,
   Ventas3MesesRow,
+  VentaPorSegmentoResult,
 } from "@/lib/mavesa-queries";
 
 export interface SectorBundle {
@@ -232,6 +237,8 @@ interface Props {
   portafolioPorCiudad: PortafolioPorCiudadRow[];
   /** Margarina/Mayonesa/Harina PAN de los últimos 3 meses (referencia) por ciudad, con Cliente/Universo ya resueltos. Global. */
   ventas3MesesPorCiudad: Ventas3MesesRow[];
+  /** Totales por segmento × ciudad de las 4 categorías, para el promedio diario por segmento. Global. */
+  ventaDiariaPorSegmento: VentaPorSegmentoResult;
 }
 
 export function DiennDashboardClient({
@@ -249,6 +256,7 @@ export function DiennDashboardClient({
   precioCorrecto,
   portafolioPorCiudad,
   ventas3MesesPorCiudad,
+  ventaDiariaPorSegmento,
 }: Props) {
   const [filter, setFilter] = useState<FilterKey>("TOTAL");
   const [zonaFilter, setZonaFilter] = useState("");
@@ -321,6 +329,11 @@ export function DiennDashboardClient({
   const [ventas3MesesComoPct, setVentas3MesesComoPct] = useState(false);
   // Línea opcional sobre esas barras: Cumaná = 100% y Cabudare como % de Cumaná.
   const [ventas3MesesIndiceCumana, setVentas3MesesIndiceCumana] = useState(false);
+  // Promedio de venta diaria por segmento: ciudad, métrica y qué se muestra.
+  const [segCiudad, setSegCiudad] = useState<"TOTAL" | Sector>("TOTAL");
+  const [segPorPdv, setSegPorPdv] = useState(false);
+  const [segTodos, setSegTodos] = useState(false);
+  const [segPanquecitas, setSegPanquecitas] = useState(false);
   // Población del ratio "Panquecitas vs categoría" bajo las barras (Harina PAN).
   // Misma semántica que el gráfico diario vs. promedio 3M: PAN Cliente = solo
   // PDV que compran Panquecitas; PAN Universo = toda la cartera.
@@ -691,6 +704,83 @@ export function DiennDashboardClient({
     }
     return salida;
   }, [bundles, pilotSectors, ventas3MesesPanPoblacion]);
+
+  // ── Promedio de venta diaria por segmento ────────────────────────
+  // El servidor manda totales crudos por segmento × ciudad; acá se hace todo
+  // lo demás para que los botones no vuelvan a pedir datos.
+  //
+  // Cada categoría se divide entre SUS días hábiles: Margarina, Mayonesa y
+  // Harina PAN entre los 63 de mayo-julio, Panquecitas entre los transcurridos
+  // desde el arranque del piloto. Por eso se comparan ritmos y no totales.
+  const ventaSegmentoData = useMemo<VentaSegmentoPunto[]>(() => {
+    const { filas, diasReferencia, diasPanquecitas } = ventaDiariaPorSegmento;
+    const delCorte = segCiudad === "TOTAL" ? filas : filas.filter((f) => f.sector === segCiudad);
+    if (delCorte.length === 0) return [];
+
+    // Con "TOTAL" hay una fila por ciudad y segmento: se suman.
+    const porSegmento = new Map<string, { clientes: number; marg: number; mayo: number; pan: number; panq: number }>();
+    for (const f of delCorte) {
+      const acc = porSegmento.get(f.segmento) ?? { clientes: 0, marg: 0, mayo: 0, pan: 0, panq: 0 };
+      acc.clientes += f.clientes;
+      acc.marg += f.margarinaKg;
+      acc.mayo += f.mayonesaKg;
+      acc.pan += f.harinaPanKg;
+      acc.panq += f.panquecitasKg;
+      porSegmento.set(f.segmento, acc);
+    }
+
+    const r1 = (v: number) => Math.round(v * 10) / 10;
+    const r2 = (v: number) => Math.round(v * 100) / 100;
+    const ratio = (panqDia: number, catDia: number) => (catDia > 0 ? Math.round((panqDia / catDia) * 1000) / 10 : null);
+
+    const puntos = [...porSegmento.entries()].map(([segmento, a]) => {
+      // "Por PDV" divide además entre los clientes del segmento: es lo que
+      // hace comparables segmentos de tamaños muy distintos.
+      const div = segPorPdv && a.clientes > 0 ? a.clientes : 1;
+      const dia = (kg: number, dias: number) => kg / dias / div;
+      const marg = dia(a.marg, diasReferencia);
+      const mayo = dia(a.mayo, diasReferencia);
+      const pan = dia(a.pan, diasReferencia);
+      const panq = dia(a.panq, diasPanquecitas);
+      const red = segPorPdv ? r2 : r1;
+      return {
+        segmento,
+        clientes: a.clientes,
+        margarina: red(marg),
+        mayonesa: red(mayo),
+        harinaPan: red(pan),
+        panquecitas: red(panq),
+        // El ratio no depende de "por PDV": el divisor se cancela arriba y
+        // abajo, así que es el mismo número en las dos vistas.
+        ratioMargarina: ratio(panq, marg),
+        ratioMayonesa: ratio(panq, mayo),
+        ratioHarinaPan: ratio(panq, pan),
+        // Solo para ordenar: el peso del segmento en las tres de referencia.
+        _peso: a.marg + a.mayo + a.pan,
+      };
+    });
+
+    puntos.sort((a, b) => b._peso - a._peso);
+    if (segTodos || puntos.length <= 7) return puntos.map(({ _peso: _, ...p }) => p);
+
+    // Los 6 grandes + "Otros": esos 6 son ~90% de la cartera, y sin agrupar el
+    // resto quedan barras de un píxel que no se pueden leer ni comparar.
+    const top = puntos.slice(0, 6);
+    const resto = puntos.slice(6);
+    const suma = (f: (p: (typeof puntos)[number]) => number) => resto.reduce((s, p) => s + f(p), 0);
+    const otros: VentaSegmentoPunto = {
+      segmento: `Otros (${resto.length})`,
+      clientes: suma((p) => p.clientes),
+      margarina: suma((p) => p.margarina),
+      mayonesa: suma((p) => p.mayonesa),
+      harinaPan: suma((p) => p.harinaPan),
+      panquecitas: suma((p) => p.panquecitas),
+      ratioMargarina: ratio(suma((p) => p.panquecitas), suma((p) => p.margarina)),
+      ratioMayonesa: ratio(suma((p) => p.panquecitas), suma((p) => p.mayonesa)),
+      ratioHarinaPan: ratio(suma((p) => p.panquecitas), suma((p) => p.harinaPan)),
+    };
+    return [...top.map(({ _peso: _, ...p }) => p), otros];
+  }, [ventaDiariaPorSegmento, segCiudad, segPorPdv, segTodos]);
 
   const comboPoints = bundle.ventaRecompraActivacion[comboGranularity];
   // Kg de PDV fuera de cartera incluidos en el volumen. Es acumulado, así que
@@ -2308,6 +2398,122 @@ export function DiennDashboardClient({
             </>
           ) : (
             <div className="h-[400px] flex items-center justify-center text-slate-400">
+              <div className="text-center">
+                <p className="text-4xl mb-2">📊</p>
+                <p>Sin datos todavía.</p>
+              </div>
+            </div>
+          )}
+        </CardContent>
+      </Card>
+
+      {/* ── Promedio de venta diaria por SEGMENTO y categoría ──────────── */}
+      <Card className="mb-6 print-avoid-break">
+        <CardHeader className="flex flex-col gap-3 lg:flex-row lg:items-start lg:justify-between space-y-0">
+          <div>
+            <CardTitle>Venta Diaria por Segmento de Cliente</CardTitle>
+            <p className="text-xs text-slate-400 mt-1">
+              Promedio de <span className="font-medium">kg por día hábil</span> de cada categoría en cada segmento,
+              sobre el <span className="font-medium">universo</span> de la cartera (todos los PDV, hayan comprado o
+              no). Debajo de cada barra, el ratio de Panquecitas contra esa categoría en ese segmento.
+            </p>
+          </div>
+          <div className="flex flex-wrap items-center gap-2 print:hidden">
+            {/* La ciudad sale del gráfico y pasa a ser un corte: es lo que evita
+                duplicar todas las barras. */}
+            <div className="flex rounded-lg border border-slate-200 overflow-hidden text-xs font-medium">
+              {(
+                [
+                  ["TOTAL", "Total"],
+                  ["cumana", "Cumaná"],
+                  ["barquisimeto_este", "Cabudare"],
+                ] as const
+              ).map(([key, label]) => (
+                <button
+                  key={key}
+                  onClick={() => setSegCiudad(key)}
+                  className={`px-3 py-1.5 transition-colors ${
+                    segCiudad === key ? "bg-sky-700 text-white" : "bg-white text-slate-500 hover:bg-slate-50"
+                  }`}
+                >
+                  {label}
+                </button>
+              ))}
+            </div>
+            <div className="flex rounded-lg border border-slate-200 overflow-hidden text-xs font-medium">
+              {(
+                [
+                  [false, "kg/día"],
+                  [true, "kg/día por PDV"],
+                ] as const
+              ).map(([key, label]) => (
+                <button
+                  key={label}
+                  onClick={() => setSegPorPdv(key)}
+                  className={`px-3 py-1.5 transition-colors ${
+                    segPorPdv === key ? "bg-slate-900 text-white" : "bg-white text-slate-500 hover:bg-slate-50"
+                  }`}
+                >
+                  {label}
+                </button>
+              ))}
+            </div>
+            <button
+              onClick={() => setSegPanquecitas((v) => !v)}
+              title="Agrega Panquecitas como cuarta barra. Su ritmo es mucho menor y achica la escala de las otras tres."
+              className={`px-3 py-1.5 rounded-lg border text-xs font-medium transition-colors ${
+                segPanquecitas
+                  ? "border-violet-600 bg-violet-600 text-white"
+                  : "border-slate-200 bg-white text-slate-500 hover:bg-slate-50"
+              }`}
+            >
+              + Panquecitas
+            </button>
+            <button
+              onClick={() => setSegTodos((v) => !v)}
+              className={`px-3 py-1.5 rounded-lg border text-xs font-medium transition-colors ${
+                segTodos
+                  ? "border-slate-900 bg-slate-900 text-white"
+                  : "border-slate-200 bg-white text-slate-500 hover:bg-slate-50"
+              }`}
+            >
+              {segTodos ? "Ver principales" : "Ver todos los segmentos"}
+            </button>
+          </div>
+        </CardHeader>
+        <CardContent>
+          {ventaSegmentoData.length > 0 ? (
+            <>
+              <VentaDiariaPorSegmentoChart
+                data={ventaSegmentoData}
+                porPdv={segPorPdv}
+                showPanquecitas={segPanquecitas}
+              />
+              <p className="text-xs text-slate-400 mt-2">
+                {segPorPdv ? (
+                  <>
+                    <span className="font-medium text-slate-600">kg/día por PDV</span>: el promedio diario del segmento
+                    dividido entre sus PDV de cartera. Es la vista que hace comparables segmentos de tamaños muy
+                    distintos — sin ella, la barra más alta es simplemente la del segmento con más clientes.
+                  </>
+                ) : (
+                  <>
+                    <span className="font-medium text-slate-600">kg/día</span>: el volumen del segmento entre sus días
+                    hábiles. Ojo al comparar segmentos entre sí: las diferencias vienen sobre todo del número de PDV
+                    de cada uno — para eso está <span className="font-medium">kg/día por PDV</span>.
+                  </>
+                )}{" "}
+                Margarina, Mayonesa y Harina PAN salen del reporte de referencia (mayo–julio) y se dividen entre{" "}
+                {ventaDiariaPorSegmento.diasReferencia} días hábiles. Panquecitas todavía no existía en esa ventana:
+                su promedio va sobre los {ventaDiariaPorSegmento.diasPanquecitas} días hábiles transcurridos desde el{" "}
+                {ventaDiariaPorSegmento.desdePanquecitas}. Por eso se comparan{" "}
+                <span className="font-medium">ritmos diarios</span> y no totales — un acumulado de tres meses contra
+                uno de un mes no diría nada.
+                {!segTodos && " Los segmentos chicos van agrupados en «Otros»; con el botón de arriba se abren todos."}
+              </p>
+            </>
+          ) : (
+            <div className="h-[430px] flex items-center justify-center text-slate-400">
               <div className="text-center">
                 <p className="text-4xl mb-2">📊</p>
                 <p>Sin datos todavía.</p>

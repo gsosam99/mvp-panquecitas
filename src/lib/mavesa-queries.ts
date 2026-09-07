@@ -7,7 +7,7 @@ import {
   SECTOR_LABELS,
   type Sector,
 } from "@/lib/universe";
-import { DIAS_HABILES_3M } from "@/lib/business-days";
+import { DIAS_HABILES_3M, contarDiasHabiles } from "@/lib/business-days";
 import { bucketLabelFor, todayISO } from "@/lib/date-buckets";
 import { PRODUCT_IDS } from "@/data/catalog";
 import { getVolumenRadarAcumulado, getRendimiento3M } from "@/lib/dienn-queries";
@@ -347,4 +347,159 @@ export async function getVentas3MesesPorCiudad(): Promise<Ventas3MesesRow[]> {
       ],
     };
   });
+}
+
+// ── Venta diaria por SEGMENTO de cliente y categoría ───────────────
+// (pedido de DIENN, 03-09-2026)
+//
+// Responde: ¿cuánto vende al día cada segmento de cada categoría, y cómo se
+// para Panquecitas contra eso?
+//
+// POBLACIÓN: universo = toda la cartera del piloto, haya comprado o no. Es lo
+// que permite dividir por PDV y comparar segmentos de tamaños muy distintos
+// (Bodegas tiene 282 PDV y Cad Farmacia 6): sin eso, el gráfico solo mide el
+// tamaño del segmento.
+//
+// DOS PERÍODOS, a propósito. Margarina, Mayonesa y Harina PAN salen de los
+// reportes de REFERENCIA (mayo–julio), que es la única ventana donde las tres
+// son comparables entre sí. Panquecitas no existía entonces: su promedio
+// diario se calcula sobre los días hábiles transcurridos desde el arranque del
+// piloto. Por eso se comparan RITMOS (kg/día) y no totales — un total de 3
+// meses contra uno de 1 mes no diría nada. El pie del gráfico lo declara.
+//
+// Se devuelven los TOTALES crudos por segmento × ciudad. Las divisiones
+// —entre días, entre PDV— y el recorte a los segmentos grandes los hace el
+// cliente, así que sus botones no vuelven a pedir datos.
+
+export interface VentaPorSegmentoRow {
+  segmento: string;
+  sector: Sector;
+  /** PDV de la cartera en ese segmento y ciudad (universo, compren o no). */
+  clientes: number;
+  margarinaKg: number;
+  mayonesaKg: number;
+  harinaPanKg: number;
+  panquecitasKg: number;
+}
+
+export interface VentaPorSegmentoResult {
+  filas: VentaPorSegmentoRow[];
+  /** Divisor de Margarina / Mayonesa / Harina PAN: los 63 días hábiles de mayo–julio. */
+  diasReferencia: number;
+  /** Divisor de Panquecitas: días hábiles desde el arranque del piloto hasta hoy. */
+  diasPanquecitas: number;
+  desdePanquecitas: string;
+}
+
+export async function getVentaDiariaPorSegmento(): Promise<VentaPorSegmentoResult> {
+  const hoy = todayISO();
+  const vacio: VentaPorSegmentoResult = {
+    filas: [],
+    diasReferencia: DIAS_HABILES_3M,
+    diasPanquecitas: contarDiasHabiles(RENDIMIENTO_DIARIO_DESDE, hoy),
+    desdePanquecitas: RENDIMIENTO_DIARIO_DESDE,
+  };
+
+  const universoTotal = await getUniverseLocations();
+  const universo = vigentesAl(universoTotal, hoy);
+  if (universo.length === 0) return vacio;
+
+  // locId → segmento + ciudad. Solo los de sector piloto: el resto no tiene
+  // dónde ir en el gráfico.
+  const meta = new Map<string, { segmento: string; sector: Sector }>();
+  for (const l of universo) {
+    const sector = sectorGroup(l.oficina_venta);
+    if (!sector) continue;
+    meta.set(l.id, { segmento: l.segmento_cliente?.trim() || "Sin segmento", sector });
+  }
+
+  const supabase = createSupabaseServiceClient();
+  const [margarina, mayonesa, harinaPan, panquecitas] = await Promise.all([
+    fetchAllRows<{ location_id: string; quantity_kg: number }>(() =>
+      supabase
+        .from(REFERENCIA_TABLA.margarina)
+        .select("location_id, quantity_kg")
+        .eq("product_id", PRODUCT_IDS.MARGARINA)
+    ),
+    fetchAllRows<{ location_id: string; quantity_kg: number }>(() =>
+      supabase
+        .from(REFERENCIA_TABLA.mayonesa)
+        .select("location_id, quantity_kg")
+        .eq("product_id", PRODUCT_IDS.MAYONESA)
+    ),
+    // Harina PAN sale de radar_3m_records, que guarda por sap_code y no por
+    // location_id: se resuelve contra la cartera igual que en getRendimiento3M.
+    fetchAllRows<{ sap_code: string; quantity_kg: number }>(() =>
+      supabase.from("radar_3m_records").select("sap_code, quantity_kg").eq("product_id", PRODUCT_IDS.HARINA_PAN)
+    ),
+    fetchAllRows<{ location_id: string; quantity_kg: number; date_of_sale: string }>(() =>
+      supabase
+        .from("sap_sell_in_records")
+        .select("location_id, quantity_kg, date_of_sale")
+        .eq("product_id", PRODUCT_IDS.PANQUECITAS)
+    ),
+  ]);
+
+  const locIdBySapCode = new Map(universo.map((l) => [l.sap_code.trim(), l.id]));
+
+  // Acumulador por `${segmento}|${sector}`.
+  const acc = new Map<string, VentaPorSegmentoRow>();
+  const filaDe = (locId: string): VentaPorSegmentoRow | null => {
+    const m = meta.get(locId);
+    if (!m) return null;
+    const key = `${m.segmento}|${m.sector}`;
+    let fila = acc.get(key);
+    if (!fila) {
+      fila = {
+        segmento: m.segmento,
+        sector: m.sector,
+        clientes: 0,
+        margarinaKg: 0,
+        mayonesaKg: 0,
+        harinaPanKg: 0,
+        panquecitasKg: 0,
+      };
+      acc.set(key, fila);
+    }
+    return fila;
+  };
+
+  // Primero la población: todo PDV de la cartera cuenta, compre o no.
+  for (const locId of meta.keys()) {
+    const fila = filaDe(locId);
+    if (fila) fila.clientes += 1;
+  }
+
+  for (const r of margarina) {
+    const fila = filaDe(r.location_id);
+    if (fila) fila.margarinaKg += Number(r.quantity_kg);
+  }
+  for (const r of mayonesa) {
+    const fila = filaDe(r.location_id);
+    if (fila) fila.mayonesaKg += Number(r.quantity_kg);
+  }
+  for (const r of harinaPan) {
+    const locId = locIdBySapCode.get(r.sap_code.trim());
+    const fila = locId ? filaDe(locId) : null;
+    if (fila) fila.harinaPanKg += Number(r.quantity_kg);
+  }
+  for (const r of panquecitas) {
+    if (r.date_of_sale.slice(0, 10) < RENDIMIENTO_DIARIO_DESDE) continue;
+    const fila = filaDe(r.location_id);
+    if (fila) fila.panquecitasKg += Number(r.quantity_kg);
+  }
+
+  const redondear = (v: number) => Math.round(v * 10) / 10;
+  return {
+    filas: [...acc.values()].map((f) => ({
+      ...f,
+      margarinaKg: redondear(f.margarinaKg),
+      mayonesaKg: redondear(f.mayonesaKg),
+      harinaPanKg: redondear(f.harinaPanKg),
+      panquecitasKg: redondear(f.panquecitasKg),
+    })),
+    diasReferencia: DIAS_HABILES_3M,
+    diasPanquecitas: contarDiasHabiles(RENDIMIENTO_DIARIO_DESDE, hoy),
+    desdePanquecitas: RENDIMIENTO_DIARIO_DESDE,
+  };
 }
