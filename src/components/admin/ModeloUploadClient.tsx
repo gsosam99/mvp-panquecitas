@@ -37,7 +37,7 @@ export function ModeloUploadClient() {
       const { isSapMhtml, parseSapClientesModeloMhtml } = await import("@/lib/sap-mhtml-parser");
       // MHTML (.xls export de SAP, ej. N7_V_SD56) vs .xlsx real (maestro Inney).
       if (isSapMhtml(buffer)) {
-        const result = parseSapClientesModeloMhtml(buffer);
+        const result = await parseSapClientesModeloMhtml(buffer);
         setParsed(result);
       } else {
         const { parseModeloIndirectoExcel } = await import("@/lib/excel-parser");

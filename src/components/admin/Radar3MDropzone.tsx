@@ -34,13 +34,13 @@ export function Radar3MDropzone() {
     setFileName(file.name);
     try {
       const buffer = await file.arrayBuffer();
-      const { isSapMhtml, parseSapRadarMhtml } = await import("@/lib/sap-mhtml-parser");
-      if (!isSapMhtml(buffer)) {
-        toast.error('Este archivo no parece un export de SAP ("Web Page, Single File").');
+      const { isSapWorkbook, parseSapRadarMhtml } = await import("@/lib/sap-mhtml-parser");
+      if (!isSapWorkbook(buffer)) {
+        toast.error('Este archivo no parece el reporte de SAP: se espera el .xls exportado ("Web Page, Single File") o ese mismo archivo guardado como .xlsx.');
         setState("idle");
         return;
       }
-      const result = parseSapRadarMhtml(buffer);
+      const result = await parseSapRadarMhtml(buffer);
       // `filas` (todas, sin colapsar) y NO `valid`: valid se queda con el último
       // corte por cliente+material, que en un reporte de 3 meses deja solo el
       // último mes y perdería los otros dos.

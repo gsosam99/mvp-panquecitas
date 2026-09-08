@@ -21,6 +21,10 @@ import { normalizeHeader } from "@/lib/excel-parser";
 // No es un binario de Excel real, así que exceljs no puede abrirlo — hay
 // que extraer y parsear el HTML manualmente.
 //
+// Si el usuario abre ese .xls y lo guarda como .xlsx, el archivo pasa a ser
+// un ZIP de Office normal: ahí SÍ lo lee exceljs, y `gridDelArchivoSap`
+// devuelve la misma grilla por ese camino (ver `gridFromXlsx`).
+//
 // Encima de la fila de encabezados reales (fila con "Fecha de Pedido") hay
 // otra fila con los nombres de los 9 ratios del reporte ("Cantidad
 // Pedido", "Cantidad Facturada", etc.) — la fila de encabezados solo
@@ -36,12 +40,162 @@ export function isSapMhtml(buffer: ArrayBuffer): boolean {
   return /^\s*MIME-Version\s*:/i.test(head) || /Content-Type:\s*multipart\/related/i.test(head);
 }
 
-export function parseSapFacturacionMhtml(buffer: ArrayBuffer): SapFacturacionParseResult {
+/** true si el buffer es un .xlsx real (contenedor ZIP de Office: "PK\x03\x04"). */
+export function isXlsxZip(buffer: ArrayBuffer): boolean {
+  const b = new Uint8Array(buffer.slice(0, 4));
+  return b[0] === 0x50 && b[1] === 0x4b && (b[2] === 0x03 || b[2] === 0x05 || b[2] === 0x07);
+}
+
+/**
+ * true si el archivo se puede leer como reporte SAP: el export MHTML crudo
+ * o ESE MISMO reporte reguardado como .xlsx desde Excel.
+ *
+ * Abrir el .xls de SAP y guardarlo ("Guardar como → Libro de Excel") es lo
+ * que hace la gente en la práctica, y convertía el MHTML en un ZIP de
+ * Office que el detector rechazaba. Ahora ambos formatos entran por el
+ * mismo camino: lo único que cambia es de dónde sale la grilla.
+ */
+export function isSapWorkbook(buffer: ArrayBuffer): boolean {
+  return isSapMhtml(buffer) || isXlsxZip(buffer);
+}
+
+// ── Grilla común: MHTML de SAP o .xlsx reguardado ────────────────────────
+
+/**
+ * La tabla del reporte como `string[][]`, venga del MHTML o de un .xlsx.
+ * Toda la detección de columnas y el parseo de valores trabajan sobre esta
+ * grilla, así que un solo formato intermedio cubre los dos archivos.
+ */
+async function gridDelArchivoSap(buffer: ArrayBuffer): Promise<string[][]> {
+  if (isXlsxZip(buffer)) return gridFromXlsx(buffer);
+  return parseHtmlTableGrid(extractHtmlFromMhtml(buffer));
+}
+
+async function gridFromXlsx(buffer: ArrayBuffer): Promise<string[][]> {
+  const ExcelJS = (await import("exceljs")).default;
+  const workbook = new ExcelJS.Workbook();
+  await workbook.xlsx.load(buffer);
+
+  const ws = workbook.worksheets[0];
+  if (!ws) throw new Error("El archivo no contiene hojas.");
+
+  const totalFilas = ws.rowCount;
+  const totalColumnas = ws.columnCount;
+  const grid: string[][] = [];
+  for (let r = 1; r <= totalFilas; r++) {
+    const row = ws.getRow(r);
+    const fila: string[] = [];
+    for (let c = 1; c <= totalColumnas; c++) {
+      const cell = row.getCell(c);
+      // `numFmt` se lee de forma defensiva: solo se usa para detectar el formato %.
+      const numFmt = String((cell as unknown as { numFmt?: string }).numFmt ?? "");
+      fila.push(cellValueToSapText(cell.value, numFmt));
+    }
+    grid.push(fila);
+  }
+
+  expandirCombinadas(ws, grid);
+  return grid;
+}
+
+/**
+ * Repite el texto de cada celda combinada en todo su rango, igual que hace
+ * el `colspan` del HTML. Sin esto, encabezados como "Cliente (T)" (que
+ * abarcan código + nombre) solo aparecerían una vez y la detección de
+ * columnas — que espera dos ocurrencias — fallaría.
+ */
+function expandirCombinadas(ws: unknown, grid: string[][]): void {
+  let rangos: string[] = [];
+  try {
+    const merges = (ws as { model?: { merges?: unknown } }).model?.merges;
+    if (Array.isArray(merges)) rangos = merges.filter((m): m is string => typeof m === "string");
+  } catch {
+    return; // sin merges legibles: la detección por columna+1 sigue funcionando
+  }
+
+  for (const rango of rangos) {
+    const m = /^([A-Z]+)(\d+):([A-Z]+)(\d+)$/i.exec(rango);
+    if (!m) continue;
+    const colIni = letrasAColumna(m[1]);
+    const filaIni = Number(m[2]);
+    const colFin = letrasAColumna(m[3]);
+    const filaFin = Number(m[4]);
+    const texto = grid[filaIni - 1]?.[colIni - 1] ?? "";
+    if (!texto) continue;
+    for (let r = filaIni; r <= filaFin; r++) {
+      const fila = grid[r - 1];
+      if (!fila) continue;
+      for (let c = colIni; c <= colFin; c++) {
+        if (!fila[c - 1]) fila[c - 1] = texto;
+      }
+    }
+  }
+}
+
+/** "A" → 1, "B" → 2, … "AA" → 27. */
+function letrasAColumna(letras: string): number {
+  let n = 0;
+  for (const ch of letras.toUpperCase()) n = n * 26 + (ch.charCodeAt(0) - 64);
+  return n;
+}
+
+/**
+ * Texto de una celda de xlsx tal como lo habría traído el HTML de SAP.
+ *
+ * Al reguardar el export, Excel INTERPRETA los textos del reporte: "08.09.2026"
+ * se vuelve una fecha y "2.054,40" un número. Hay que devolverlos al formato
+ * latino que esperan `parseSapDate` y `parseLatinNumber` — si no, una fecha
+ * llegaría como serial (46238) y 12,8 kg se leerían como 128.
+ */
+function cellValueToSapText(value: unknown, numFmt: string): string {
+  if (value === null || value === undefined) return "";
+  if (value instanceof Date) return formatSapDate(value);
+  if (typeof value === "number") {
+    // Los % los guarda Excel como fracción (0,2977) pero SAP los escribía ya
+    // multiplicados (29,77), que es lo que muestra la celda.
+    return formatLatinNumber(numFmt.includes("%") ? value * 100 : value);
+  }
+  if (typeof value === "boolean") return value ? "X" : "";
+  if (typeof value === "string") return value.replace(/\s+/g, " ").trim();
+
+  const obj = value as {
+    richText?: { text?: string }[];
+    text?: string;
+    error?: string;
+    result?: unknown;
+  };
+  if (Array.isArray(obj.richText)) {
+    return obj.richText.map((r) => r.text ?? "").join("").replace(/\s+/g, " ").trim();
+  }
+  if (obj.error !== undefined) return "";
+  if ("result" in obj) return cellValueToSapText(obj.result, numFmt); // fórmula
+  if (typeof obj.text === "string") return obj.text.replace(/\s+/g, " ").trim(); // hipervínculo
+  return "";
+}
+
+/**
+ * Fecha → "dd.mm.aaaa". ExcelJS ubica los seriales al mediodía UTC, así que
+ * los getters UTC dan siempre el día calendario correcto sin importar la
+ * zona horaria del navegador.
+ */
+function formatSapDate(d: Date): string {
+  const dd = String(d.getUTCDate()).padStart(2, "0");
+  const mm = String(d.getUTCMonth() + 1).padStart(2, "0");
+  return `${dd}.${mm}.${d.getUTCFullYear()}`;
+}
+
+/** Número → formato latino sin separador de miles ("12,8"), que es lo que revierte `parseLatinNumber`. */
+function formatLatinNumber(n: number): string {
+  if (!Number.isFinite(n)) return "";
+  return String(n).replace(".", ",");
+}
+
+export async function parseSapFacturacionMhtml(buffer: ArrayBuffer): Promise<SapFacturacionParseResult> {
   const errors: ParseError[] = [];
 
-  let html: string;
+  let grid: string[][];
   try {
-    html = extractHtmlFromMhtml(buffer);
+    grid = await gridDelArchivoSap(buffer);
   } catch (e) {
     return {
       valid: [],
@@ -49,7 +203,6 @@ export function parseSapFacturacionMhtml(buffer: ArrayBuffer): SapFacturacionPar
     };
   }
 
-  const grid = parseHtmlTableGrid(html);
   if (grid.length === 0) {
     return { valid: [], errors: [{ row: 0, field: "file", message: "No se encontró ninguna tabla en el archivo." }] };
   }
@@ -263,12 +416,12 @@ function valorVentaAcumulada(row: string[], ratioCols: number[]): number {
   return 0;
 }
 
-export function parseSapRadarMhtml(buffer: ArrayBuffer): SapRadarParseResult {
+export async function parseSapRadarMhtml(buffer: ArrayBuffer): Promise<SapRadarParseResult> {
   const errors: ParseError[] = [];
 
-  let html: string;
+  let grid: string[][];
   try {
-    html = extractHtmlFromMhtml(buffer);
+    grid = await gridDelArchivoSap(buffer);
   } catch (e) {
     return {
       valid: [],
@@ -276,7 +429,6 @@ export function parseSapRadarMhtml(buffer: ArrayBuffer): SapRadarParseResult {
     };
   }
 
-  const grid = parseHtmlTableGrid(html);
   if (grid.length === 0) {
     return { valid: [], errors: [{ row: 0, field: "file", message: "No se encontró ninguna tabla en el archivo." }] };
   }
@@ -418,12 +570,12 @@ function findEfectividadRatios(ratioRow: string[]): { efVisita: number; efPedido
   return { efVisita, efPedidos, efVentas };
 }
 
-export function parseSapEfectividadMhtml(buffer: ArrayBuffer): SapEfectividadParseResult {
+export async function parseSapEfectividadMhtml(buffer: ArrayBuffer): Promise<SapEfectividadParseResult> {
   const errors: ParseError[] = [];
 
-  let html: string;
+  let grid: string[][];
   try {
-    html = extractHtmlFromMhtml(buffer);
+    grid = await gridDelArchivoSap(buffer);
   } catch (e) {
     return {
       valid: [],
@@ -431,7 +583,6 @@ export function parseSapEfectividadMhtml(buffer: ArrayBuffer): SapEfectividadPar
     };
   }
 
-  const grid = parseHtmlTableGrid(html);
   if (grid.length === 0) {
     return { valid: [], errors: [{ row: 0, field: "file", message: "No se encontró ninguna tabla en el archivo." }] };
   }
@@ -532,12 +683,12 @@ function findModeloColumns(headerRow: string[]): ModeloColumnMap | null {
   return { esquema, clienteCodigo: cliente[0], diaCols };
 }
 
-export function parseSapClientesModeloMhtml(buffer: ArrayBuffer): ModeloParseResult {
+export async function parseSapClientesModeloMhtml(buffer: ArrayBuffer): Promise<ModeloParseResult> {
   const errors: ParseError[] = [];
 
-  let html: string;
+  let grid: string[][];
   try {
-    html = extractHtmlFromMhtml(buffer);
+    grid = await gridDelArchivoSap(buffer);
   } catch (e) {
     return {
       valid: [],
@@ -545,7 +696,6 @@ export function parseSapClientesModeloMhtml(buffer: ArrayBuffer): ModeloParseRes
     };
   }
 
-  const grid = parseHtmlTableGrid(html);
   if (grid.length === 0) {
     return { valid: [], errors: [{ row: 0, field: "file", message: "No se encontró ninguna tabla en el archivo." }] };
   }

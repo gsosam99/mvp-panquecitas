@@ -46,8 +46,8 @@ const MODE_LABEL: Record<SapDropzoneMode, string> = {
 };
 
 const MODE_HINT: Record<SapDropzoneMode, string> = {
-  radar: "\"Radar HPM.xls\" o \"Radar panquecitas.xls\" — export SAP (MHTML)",
-  facturacion: "Reporte de Pedido/Facturado — export SAP (MHTML)",
+  radar: "\"Radar HPM.xls\" o \"Radar panquecitas.xls\" — export SAP (.xls MHTML o .xlsx)",
+  facturacion: "Reporte de Pedido/Facturado — export SAP (.xls MHTML o .xlsx)",
 };
 
 export function SapDropzone({ mode, onCommitSuccess }: SapDropzoneProps) {
@@ -66,16 +66,16 @@ export function SapDropzone({ mode, onCommitSuccess }: SapDropzoneProps) {
     setFileName(file.name);
     try {
       const buffer = await file.arrayBuffer();
-      const { isSapMhtml, parseSapFacturacionMhtml, parseSapRadarMhtml } = await import("@/lib/sap-mhtml-parser");
+      const { isSapWorkbook, parseSapFacturacionMhtml, parseSapRadarMhtml } = await import("@/lib/sap-mhtml-parser");
 
-      if (!isSapMhtml(buffer)) {
-        toast.error('Este archivo no parece un export de SAP ("Web Page, Single File").');
+      if (!isSapWorkbook(buffer)) {
+        toast.error('Este archivo no parece el reporte de SAP: se espera el .xls exportado ("Web Page, Single File") o ese mismo archivo guardado como .xlsx.');
         setState("idle");
         return;
       }
 
       if (mode === "radar") {
-        const result = parseSapRadarMhtml(buffer);
+        const result = await parseSapRadarMhtml(buffer);
         setParsed({
           format: "radar",
           valid: result.valid,
@@ -86,7 +86,7 @@ export function SapDropzone({ mode, onCommitSuccess }: SapDropzoneProps) {
           fechas: result.fechas ?? [],
         });
       } else {
-        const result = parseSapFacturacionMhtml(buffer);
+        const result = await parseSapFacturacionMhtml(buffer);
         setParsed({ format: "facturacion", valid: result.valid, errors: result.errors });
       }
       setState("previewing");

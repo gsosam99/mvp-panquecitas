@@ -35,13 +35,13 @@ export function EfectividadDropzone() {
     setFileName(file.name);
     try {
       const buffer = await file.arrayBuffer();
-      const { isSapMhtml, parseSapEfectividadMhtml } = await import("@/lib/sap-mhtml-parser");
-      if (!isSapMhtml(buffer)) {
-        toast.error('Este archivo no parece un export de SAP ("Web Page, Single File").');
+      const { isSapWorkbook, parseSapEfectividadMhtml } = await import("@/lib/sap-mhtml-parser");
+      if (!isSapWorkbook(buffer)) {
+        toast.error('Este archivo no parece el reporte de SAP: se espera el .xls exportado ("Web Page, Single File") o ese mismo archivo guardado como .xlsx.');
         setState("idle");
         return;
       }
-      const result = parseSapEfectividadMhtml(buffer);
+      const result = await parseSapEfectividadMhtml(buffer);
       setParsed({ valid: result.valid, errors: result.errors });
       setState("previewing");
     } catch {
@@ -128,7 +128,7 @@ export function EfectividadDropzone() {
             <div className="text-4xl mb-3">📂</div>
             <p className="font-medium text-slate-700">Arrastra el reporte de Efectividad de Visita aquí</p>
             <p className="text-sm text-slate-400 mt-1">o haz clic para seleccionar (.xlsx, .xls)</p>
-            <p className="text-xs text-slate-400 mt-2">Reporte SAP N7_V_SD85 (Efectividad de Visita / Motivos de No Venta) — export "Web Page, Single File"</p>
+            <p className="text-xs text-slate-400 mt-2">Reporte SAP N7_V_SD85 (Efectividad de Visita / Motivos de No Venta) — export "Web Page, Single File" (.xls) o ese archivo guardado como .xlsx</p>
           </>
         )}
       </div>

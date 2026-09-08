@@ -71,13 +71,13 @@ export function SapUploadClient({ mode }: SapUploadClientProps) {
                 <div>
                   <p className="font-mono text-xs bg-slate-100 px-2 py-1 rounded">Radar HPM.xls</p>
                   <p className="text-xs text-slate-400 mt-1">
-                    Export SAP (MHTML) · Harina PAN, acumulado ENTREGADO por cliente+material en lo que va del mes.
+                    Export SAP (.xls MHTML o .xlsx) · Harina PAN, acumulado ENTREGADO por cliente+material en lo que va del mes.
                   </p>
                 </div>
                 <div>
                   <p className="font-mono text-xs bg-slate-100 px-2 py-1 rounded">Radar panquecitas.xls</p>
                   <p className="text-xs text-slate-400 mt-1">
-                    Export SAP (MHTML) · Panquecitas, mismo acumulado por cliente+material (400g/800g).
+                    Export SAP (.xls MHTML o .xlsx) · Panquecitas, mismo acumulado por cliente+material (400g/800g).
                   </p>
                 </div>
                 <p className="text-xs text-slate-400">
@@ -89,8 +89,8 @@ export function SapUploadClient({ mode }: SapUploadClientProps) {
               <div>
                 <p className="font-mono text-xs bg-slate-100 px-2 py-1 rounded">factura y pedido panquecitas.xls</p>
                 <p className="text-xs text-slate-400 mt-1">
-                  Export SAP (MHTML) · Panquecitas · Cantidad Pedido/Facturada por día. Se sube tal cual se
-                  descarga, sin convertir a Excel. Alimenta ventas y pedidos pendientes en la misma carga.
+                  Export SAP (.xls MHTML o .xlsx) · Panquecitas · Cantidad Pedido/Facturada por día. Se sube tal cual se
+                  descarga, o guardado como .xlsx desde Excel. Alimenta ventas y pedidos pendientes en la misma carga.
                 </p>
               </div>
             )}
