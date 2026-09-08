@@ -25,18 +25,51 @@ export interface CombinacionPiloto {
   /** Orden y etiqueta: "Combinación 1". */
   numero: number;
   sector: Sector;
-  /** Precio de la presentación en esa combinación. */
-  precio: number;
+  /**
+   * Precio de CADA presentación. Son dos, no una: el piloto vende la de 800 g
+   * y la de 400 g, y el precio de la combinación es el par completo. Con solo
+   * el de 800 g la tabla decía media verdad (DIENN, 08-09-2026).
+   */
+  precio800: number;
+  precio400: number;
   comunicacion: EjeComunicacion;
   /** Grupos vendedores de SAP que corrieron esta combinación. */
   gruposVendedores: readonly string[];
 }
 
 export const COMBINACIONES: readonly CombinacionPiloto[] = [
-  { numero: 1, sector: "cumana", precio: 2.2, comunicacion: "Practicidad", gruposVendedores: ["U27", "U28", "U30"] },
-  { numero: 2, sector: "cumana", precio: 2.2, comunicacion: "Nutrición", gruposVendedores: ["U29"] },
-  { numero: 3, sector: "barquisimeto_este", precio: 2.85, comunicacion: "Practicidad", gruposVendedores: ["W03", "W05"] },
-  { numero: 4, sector: "barquisimeto_este", precio: 2.85, comunicacion: "Nutrición", gruposVendedores: ["W01", "W02"] },
+  {
+    numero: 1,
+    sector: "cumana",
+    precio800: 2.2,
+    precio400: 1.2,
+    comunicacion: "Practicidad",
+    gruposVendedores: ["U27", "U28", "U30"],
+  },
+  {
+    numero: 2,
+    sector: "cumana",
+    precio800: 2.2,
+    precio400: 1.2,
+    comunicacion: "Nutrición",
+    gruposVendedores: ["U29"],
+  },
+  {
+    numero: 3,
+    sector: "barquisimeto_este",
+    precio800: 2.85,
+    precio400: 1.6,
+    comunicacion: "Practicidad",
+    gruposVendedores: ["W03", "W05"],
+  },
+  {
+    numero: 4,
+    sector: "barquisimeto_este",
+    precio800: 2.85,
+    precio400: 1.6,
+    comunicacion: "Nutrición",
+    gruposVendedores: ["W01", "W02"],
+  },
 ];
 
 /** Etiqueta para los PDV cuyo grupo vendedor no cae en ninguna combinación. */

@@ -358,19 +358,34 @@ export async function getVentas3MesesPorCiudad(): Promise<Ventas3MesesRow[]> {
 // Comparar Cumaná contra Cabudare mezcla las dos variables a la vez; la
 // unidad de análisis real es la combinación.
 //
-// Mismas fuentes y mismos períodos que getVentaDiariaPorSegmento: las tres
-// categorías de referencia salen de mayo–julio y Panquecitas del piloto, así
-// que los ratios comparan RITMOS diarios (kg/día ÷ kg/día) y no totales.
+// EL RATIO ES EL UNIVERSAL DEL DASHBOARD (DIENN, 08-09-2026: "los ratios deben
+// llevar la misma lógica universal pero segmentado por esas combinaciones"),
+// el mismo de getRendimiento3M y getRendimientoVsMavesa:
+//
+//   promedio de referencia = Σ kg de la categoría ÷ 63 días hábiles
+//   ratio del día          = Panquecitas de ese día ÷ ese promedio
+//   ratio acumulado        = PROMEDIO DE LOS RATIOS DIARIOS
+//
+// El último paso es el que importa y es una decisión explícita del 18-08-2026:
+// promedio de los ratios diarios, NO Σ kg ÷ Σ referencia. La diferencia está
+// en el divisor de Panquecitas — días CON VENTA, no días hábiles
+// transcurridos — así que un día sin despacho no diluye el ratio.
+//
+// Lo único que cambia respecto al resto del dashboard es el recorte: acá el
+// scope son los PDV de los grupos vendedores de cada combinación.
 //
 // "Ventas kg" es el acumulado de Panquecitas de la combinación — el volumen
-// crudo, sin dividir, que es lo que pidió DIENN para acompañar los ratios.
+// crudo, sin dividir. OJO: suma solo PDV de la CARTERA, así que no cuadra con
+// la tarjeta de Volumen Radar, que además incluye los PDV fuera de cartera.
 
 export interface CombinacionRow {
   numero: number;
   nombre: string;
   sector: Sector;
   ciudad: string;
-  precio: number;
+  /** Precio de cada presentación: son dos, no una. */
+  precio800: number;
+  precio400: number;
   comunicacion: string;
   gruposVendedores: string[];
   /** PDV de la cartera en esa combinación (universo, compren o no). */
@@ -387,6 +402,8 @@ export interface CombinacionRow {
   harinaPanKgDia: number;
   margarinaKgDia: number;
   mayonesaKgDia: number;
+  /** Días CON VENTA de Panquecitas — el divisor del promedio diario. */
+  diasConVenta: number;
 }
 
 export interface CombinacionesResult {
@@ -483,39 +500,62 @@ export async function getCombinacionesPiloto(): Promise<CombinacionesResult> {
     const n = locId ? combiPorLoc.get(locId) : undefined;
     if (n != null) acc(n).pan += Number(r.quantity_kg);
   }
+  // Panquecitas POR DÍA y por combinación: el ratio universal es el promedio
+  // de los ratios diarios, así que hace falta el detalle día a día y no solo
+  // el acumulado.
+  const panqPorDia = new Map<number, Map<string, number>>();
   for (const r of panquecitas) {
-    if (r.date_of_sale.slice(0, 10) < RENDIMIENTO_DIARIO_DESDE) continue;
+    const dia = r.date_of_sale.slice(0, 10);
+    if (dia < RENDIMIENTO_DIARIO_DESDE) continue;
     const n = combiPorLoc.get(r.location_id);
-    if (n != null) acc(n).panq += Number(r.quantity_kg);
+    if (n == null) continue;
+    acc(n).panq += Number(r.quantity_kg);
+    let porDia = panqPorDia.get(n);
+    if (!porDia) {
+      porDia = new Map<string, number>();
+      panqPorDia.set(n, porDia);
+    }
+    porDia.set(dia, (porDia.get(dia) ?? 0) + Number(r.quantity_kg));
   }
 
   const r1 = (v: number) => Math.round(v * 10) / 10;
-  const ratio = (panqDia: number, catDia: number) =>
-    catDia > 0 ? Math.round((panqDia / catDia) * 1000) / 10 : null;
 
   const filas = COMBINACIONES.map((c) => {
     const a = kg.get(c.numero) ?? { marg: 0, mayo: 0, pan: 0, panq: 0 };
-    const panqDia = a.panq / diasPanquecitas;
+    // Promedio de referencia de cada categoría: Σ kg ÷ 63 días hábiles. Fijo,
+    // igual que en getRendimiento3M.
     const panDia = a.pan / DIAS_HABILES_3M;
     const margDia = a.marg / DIAS_HABILES_3M;
     const mayoDia = a.mayo / DIAS_HABILES_3M;
+
+    // Ratio universal: promedio de los ratios diarios. Como el denominador es
+    // constante, equivale a (Σ Panquecitas ÷ días CON VENTA) ÷ promedio — y es
+    // ahí donde se diferencia de dividir entre los días hábiles transcurridos.
+    const dias = [...(panqPorDia.get(c.numero)?.values() ?? [])];
+    const diasConVenta = dias.length;
+    const panqDia = diasConVenta > 0 ? a.panq / diasConVenta : 0;
+    const ratio = (catDia: number) =>
+      diasConVenta > 0 && catDia > 0 ? Math.round((panqDia / catDia) * 1000) / 10 : null;
+
     return {
       numero: c.numero,
       nombre: nombreCombinacion(c.numero),
       sector: c.sector,
       ciudad: SECTOR_LABELS[c.sector],
-      precio: c.precio,
+      precio800: c.precio800,
+      precio400: c.precio400,
       comunicacion: c.comunicacion,
       gruposVendedores: [...c.gruposVendedores],
       clientes: clientesPorCombi.get(c.numero) ?? 0,
       panquecitasKg: r1(a.panq),
-      ratioHarinaPan: ratio(panqDia, panDia),
-      ratioMargarina: ratio(panqDia, margDia),
-      ratioMayonesa: ratio(panqDia, mayoDia),
+      ratioHarinaPan: ratio(panDia),
+      ratioMargarina: ratio(margDia),
+      ratioMayonesa: ratio(mayoDia),
       panquecitasKgDia: r1(panqDia),
       harinaPanKgDia: r1(panDia),
       margarinaKgDia: r1(margDia),
       mayonesaKgDia: r1(mayoDia),
+      diasConVenta,
     };
   });
 
