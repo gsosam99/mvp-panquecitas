@@ -86,6 +86,66 @@ export function ClientesInactivosSegmentos({
             />
           </div>
 
+          {/* Penetración de Harina PAN en los tres cortes. Cada % va sobre SU
+              propio denominador —no sobre la cartera— que es lo que permite
+              compararlos: si los activos venden PAN mucho más que los
+              inactivos, PAN predice dónde entra Panquecitas. */}
+          <div className="rounded-lg border border-slate-200 mb-5 overflow-x-auto">
+            <div className="px-4 py-2 border-b border-slate-100">
+              <p className="text-xs font-semibold uppercase tracking-wide text-slate-500">
+                ¿Cuántos de estos PDV venden Harina PAN?
+              </p>
+              <p className="text-xs text-slate-400 mt-0.5">
+                Cada porcentaje es sobre su propia fila, no sobre la cartera.
+              </p>
+            </div>
+            <Table>
+              <TableHeader>
+                <TableRow>
+                  <TableHead>Grupo</TableHead>
+                  <TableHead className="text-right">PDV</TableHead>
+                  <TableHead className="text-right">Venden PAN</TableHead>
+                  <TableHead className="text-right">%</TableHead>
+                  <TableHead className="text-right">No venden PAN</TableHead>
+                  <TableHead className="text-right">%</TableHead>
+                </TableRow>
+              </TableHeader>
+              <TableBody>
+                {[
+                  {
+                    grupo: "Cartera completa",
+                    total: data.universo,
+                    con: data.conPan,
+                    conPct: data.conPanPct,
+                  },
+                  {
+                    grupo: "Activos (ya compran Panquecitas)",
+                    total: data.activos,
+                    con: data.activosConPan,
+                    conPct: data.activosConPanPct,
+                  },
+                  {
+                    grupo: "Inactivos",
+                    total: data.inactivos,
+                    con: data.inactivosConPan,
+                    conPct: data.inactivosConPanPct,
+                  },
+                ].map((f) => (
+                  <TableRow key={f.grupo} className={f.grupo === "Cartera completa" ? "bg-slate-50" : undefined}>
+                    <TableCell className="font-medium">{f.grupo}</TableCell>
+                    <TableCell className="text-right text-slate-500">{num(f.total)}</TableCell>
+                    <TableCell className="text-right font-semibold text-emerald-700">{num(f.con)}</TableCell>
+                    <TableCell className="text-right font-semibold text-emerald-700">{pct(f.conPct)}</TableCell>
+                    <TableCell className="text-right text-slate-500">{num(f.total - f.con)}</TableCell>
+                    <TableCell className="text-right text-slate-500">
+                      {pct(Math.round((100 - f.conPct) * 10) / 10)}
+                    </TableCell>
+                  </TableRow>
+                ))}
+              </TableBody>
+            </Table>
+          </div>
+
           <div className="overflow-x-auto">
             <Table>
               <TableHeader>

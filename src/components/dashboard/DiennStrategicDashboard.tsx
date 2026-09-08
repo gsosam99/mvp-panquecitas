@@ -32,6 +32,7 @@ import {
   getComparativaPortafolioPorCiudad,
   getVentas3MesesPorCiudad,
   getVentaDiariaPorSegmento,
+  getCombinacionesPiloto,
 } from "@/lib/mavesa-queries";
 import { DiennDashboardClient, type SectorBundle } from "@/components/dashboard/DiennDashboardClient";
 
@@ -117,7 +118,7 @@ async function getBundle(sector?: Sector): Promise<SectorBundle> {
 // Sell-Out completo (sin filtrar), y se le pasan al cliente, que decide
 // qué mostrar sin volver a pedir datos.
 export async function DiennStrategicDashboard() {
-  const [total, cumana, barquisimetoEste, coberturaComunicacion, tiendaIdeal, sellOutRecords, sellOutClientes, universo, motivosNoVenta, posicionPorCliente, carteraPorSegmento, precioCorrecto, portafolioPorCiudad, ventas3MesesPorCiudad, ventaDiariaPorSegmento] =
+  const [total, cumana, barquisimetoEste, coberturaComunicacion, tiendaIdeal, sellOutRecords, sellOutClientes, universo, motivosNoVenta, posicionPorCliente, carteraPorSegmento, precioCorrecto, portafolioPorCiudad, ventas3MesesPorCiudad, ventaDiariaPorSegmento, combinacionesPiloto] =
     await Promise.all([
       getBundle(undefined),
       getBundle("cumana"),
@@ -134,6 +135,7 @@ export async function DiennStrategicDashboard() {
       getComparativaPortafolioPorCiudad(),
       getVentas3MesesPorCiudad(),
       getVentaDiariaPorSegmento(),
+      getCombinacionesPiloto(),
     ]);
 
   const { zonas, asesores } = getAvailableZonasYAsesores(universo);
@@ -156,6 +158,7 @@ export async function DiennStrategicDashboard() {
       portafolioPorCiudad={portafolioPorCiudad}
       ventas3MesesPorCiudad={ventas3MesesPorCiudad}
       ventaDiariaPorSegmento={ventaDiariaPorSegmento}
+      combinacionesPiloto={combinacionesPiloto}
     />
   );
 }

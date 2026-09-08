@@ -35,6 +35,7 @@ import {
   VentaDiariaPorSegmentoChart,
   type VentaSegmentoPunto,
 } from "@/components/dashboard/VentaDiariaPorSegmentoChart";
+import { CombinacionesPilotoTabla } from "@/components/dashboard/CombinacionesPilotoTabla";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Separator } from "@/components/ui/separator";
 import {
@@ -86,6 +87,7 @@ import type {
   PortafolioPorCiudadRow,
   Ventas3MesesRow,
   VentaPorSegmentoResult,
+  CombinacionesResult,
 } from "@/lib/mavesa-queries";
 
 export interface SectorBundle {
@@ -239,6 +241,8 @@ interface Props {
   ventas3MesesPorCiudad: Ventas3MesesRow[];
   /** Totales por segmento × ciudad de las 4 categorías, para el promedio diario por segmento. Global. */
   ventaDiariaPorSegmento: VentaPorSegmentoResult;
+  /** Ratios y volumen por combinación de precio × comunicación del piloto. Global. */
+  combinacionesPiloto: CombinacionesResult;
 }
 
 export function DiennDashboardClient({
@@ -257,6 +261,7 @@ export function DiennDashboardClient({
   portafolioPorCiudad,
   ventas3MesesPorCiudad,
   ventaDiariaPorSegmento,
+  combinacionesPiloto,
 }: Props) {
   const [filter, setFilter] = useState<FilterKey>("TOTAL");
   const [zonaFilter, setZonaFilter] = useState("");
@@ -2406,6 +2411,9 @@ export function DiennDashboardClient({
           )}
         </CardContent>
       </Card>
+
+      {/* ── Combinaciones del piloto (precio × comunicación) ───────────── */}
+      <CombinacionesPilotoTabla data={combinacionesPiloto} />
 
       {/* ── Promedio de venta diaria por SEGMENTO y categoría ──────────── */}
       <Card className="mb-6 print-avoid-break">

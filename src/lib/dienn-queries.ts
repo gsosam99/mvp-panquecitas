@@ -718,6 +718,16 @@ export interface ActivacionAjustadaResult {
   /** De TODOS los inactivos, cuántos venden Harina PAN (número y %). */
   inactivosConPan: number;
   inactivosConPanPct: number;
+  // ── Penetración de Harina PAN en los tres cortes ────────────────
+  // Cuántos PDV compran Harina PAN sobre la cartera completa, sobre los
+  // activos y sobre los inactivos. Los porcentajes son cada uno sobre SU
+  // propio denominador (no sobre la cartera), que es lo que permite
+  // compararlos entre sí: si los activos venden PAN mucho más que los
+  // inactivos, PAN es un buen predictor de dónde entra Panquecitas.
+  conPan: number;
+  conPanPct: number;
+  activosConPan: number;
+  activosConPanPct: number;
   /** Una fila por segmento, ordenadas por inactivos desc. */
   porSegmento: InactivosSegmentoRow[];
 }
@@ -732,6 +742,10 @@ const ACTIVACION_AJUSTADA_VACIA: ActivacionAjustadaResult = {
   activacionAjustadaPct: 0,
   inactivosConPan: 0,
   inactivosConPanPct: 0,
+  conPan: 0,
+  conPanPct: 0,
+  activosConPan: 0,
+  activosConPanPct: 0,
   porSegmento: [],
 };
 
@@ -755,6 +769,8 @@ export async function getActivacionAjustada(sector?: Sector): Promise<Activacion
   let inactivos = 0;
   let inactivosConPan = 0;
   let descartados = 0;
+  let conPan = 0;
+  let activosConPan = 0;
 
   for (const l of universo) {
     const segmento = l.segmento_cliente?.trim() || SEGMENTO_SIN_DATO;
@@ -774,9 +790,14 @@ export async function getActivacionAjustada(sector?: Sector): Promise<Activacion
     }
     fila.enCartera += 1;
 
+    // Harina PAN se evalúa para TODOS, activos incluidos: la penetración de
+    // PAN se reporta en los tres cortes (cartera, activos, inactivos).
+    const vendePan = (panTotals.get(l.id) ?? 0) > 0;
+    if (vendePan) conPan += 1;
 
     if ((panqTotals.get(l.id) ?? 0) > 0) {
       activos += 1;
+      if (vendePan) activosConPan += 1;
       continue;
     }
 
@@ -792,7 +813,6 @@ export async function getActivacionAjustada(sector?: Sector): Promise<Activacion
       fila.descartados += 1;
     }
 
-    const vendePan = (panTotals.get(l.id) ?? 0) > 0;
     if (vendePan) {
       inactivosConPan += 1;
       fila.inactivosConPan += 1;
@@ -814,6 +834,10 @@ export async function getActivacionAjustada(sector?: Sector): Promise<Activacion
     activacionAjustadaPct: pct(activos, universoAjustado),
     inactivosConPan,
     inactivosConPanPct: pct(inactivosConPan, inactivos),
+    conPan,
+    conPanPct: pct(conPan, universo.length),
+    activosConPan,
+    activosConPanPct: pct(activosConPan, activos),
     porSegmento: [...porSegmento.values()]
       .map((f) => ({ ...f, inactivosConPanPct: pct(f.inactivosConPan, f.inactivos) }))
       .sort((a, b) => b.inactivos - a.inactivos || a.segmento.localeCompare(b.segmento)),

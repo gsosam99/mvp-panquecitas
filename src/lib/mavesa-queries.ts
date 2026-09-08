@@ -8,6 +8,7 @@ import {
   type Sector,
 } from "@/lib/universe";
 import { DIAS_HABILES_3M, contarDiasHabiles } from "@/lib/business-days";
+import { COMBINACIONES, combinacionDeGrupo, nombreCombinacion } from "@/lib/combinaciones";
 import { bucketLabelFor, todayISO } from "@/lib/date-buckets";
 import { PRODUCT_IDS } from "@/data/catalog";
 import { getVolumenRadarAcumulado, getRendimiento3M } from "@/lib/dienn-queries";
@@ -347,6 +348,185 @@ export async function getVentas3MesesPorCiudad(): Promise<Ventas3MesesRow[]> {
       ],
     };
   });
+}
+
+// ── Ratios y volumen por COMBINACIÓN del piloto ────────────────────
+// (pedido de DIENN, 08-09-2026)
+//
+// El piloto no corrió una sola dinámica: cada grupo vendedor trabajó con un
+// precio y un eje de comunicación distintos (ver src/lib/combinaciones.ts).
+// Comparar Cumaná contra Cabudare mezcla las dos variables a la vez; la
+// unidad de análisis real es la combinación.
+//
+// Mismas fuentes y mismos períodos que getVentaDiariaPorSegmento: las tres
+// categorías de referencia salen de mayo–julio y Panquecitas del piloto, así
+// que los ratios comparan RITMOS diarios (kg/día ÷ kg/día) y no totales.
+//
+// "Ventas kg" es el acumulado de Panquecitas de la combinación — el volumen
+// crudo, sin dividir, que es lo que pidió DIENN para acompañar los ratios.
+
+export interface CombinacionRow {
+  numero: number;
+  nombre: string;
+  sector: Sector;
+  ciudad: string;
+  precio: number;
+  comunicacion: string;
+  gruposVendedores: string[];
+  /** PDV de la cartera en esa combinación (universo, compren o no). */
+  clientes: number;
+  /** Acumulado de Panquecitas del piloto (kg) — la columna "Ventas kg". */
+  panquecitasKg: number;
+  /** Ratios de ritmo diario: Panquecitas ÷ categoría × 100. `null` si la
+   *  categoría no tiene volumen en esa combinación. */
+  ratioHarinaPan: number | null;
+  ratioMargarina: number | null;
+  ratioMayonesa: number | null;
+  /** Promedios diarios que alimentan cada ratio, para poder auditarlos. */
+  panquecitasKgDia: number;
+  harinaPanKgDia: number;
+  margarinaKgDia: number;
+  mayonesaKgDia: number;
+}
+
+export interface CombinacionesResult {
+  filas: CombinacionRow[];
+  /** PDV cuyo grupo vendedor no cae en ninguna combinación. */
+  sinCombinacion: number;
+  /** Grupos vendedores encontrados en la cartera que no están mapeados. */
+  gruposSinMapear: string[];
+  diasReferencia: number;
+  diasPanquecitas: number;
+  desdePanquecitas: string;
+}
+
+export async function getCombinacionesPiloto(): Promise<CombinacionesResult> {
+  const hoy = todayISO();
+  const diasPanquecitas = contarDiasHabiles(RENDIMIENTO_DIARIO_DESDE, hoy);
+  const vacio: CombinacionesResult = {
+    filas: [],
+    sinCombinacion: 0,
+    gruposSinMapear: [],
+    diasReferencia: DIAS_HABILES_3M,
+    diasPanquecitas,
+    desdePanquecitas: RENDIMIENTO_DIARIO_DESDE,
+  };
+
+  const universoTotal = await getUniverseLocations();
+  const universo = vigentesAl(universoTotal, hoy);
+  if (universo.length === 0) return vacio;
+
+  // locId → combinación. Los que no caen en ninguna se cuentan aparte en vez
+  // de repartirse en la más cercana: un grupo nuevo tiene que verse.
+  const combiPorLoc = new Map<string, number>();
+  const gruposSinMapear = new Set<string>();
+  let sinCombinacion = 0;
+  const clientesPorCombi = new Map<number, number>();
+  for (const l of universo) {
+    if (!sectorGroup(l.oficina_venta)) continue;
+    const numero = combinacionDeGrupo(l.grupo_vendedor);
+    if (numero === null) {
+      sinCombinacion += 1;
+      const g = (l.grupo_vendedor ?? "").trim().toUpperCase();
+      if (g) gruposSinMapear.add(g);
+      continue;
+    }
+    combiPorLoc.set(l.id, numero);
+    clientesPorCombi.set(numero, (clientesPorCombi.get(numero) ?? 0) + 1);
+  }
+
+  const supabase = createSupabaseServiceClient();
+  const [margarina, mayonesa, harinaPan, panquecitas] = await Promise.all([
+    fetchAllRows<{ location_id: string; quantity_kg: number }>(() =>
+      supabase
+        .from(REFERENCIA_TABLA.margarina)
+        .select("location_id, quantity_kg")
+        .eq("product_id", PRODUCT_IDS.MARGARINA)
+    ),
+    fetchAllRows<{ location_id: string; quantity_kg: number }>(() =>
+      supabase
+        .from(REFERENCIA_TABLA.mayonesa)
+        .select("location_id, quantity_kg")
+        .eq("product_id", PRODUCT_IDS.MAYONESA)
+    ),
+    fetchAllRows<{ sap_code: string; quantity_kg: number }>(() =>
+      supabase.from("radar_3m_records").select("sap_code, quantity_kg").eq("product_id", PRODUCT_IDS.HARINA_PAN)
+    ),
+    fetchAllRows<{ location_id: string; quantity_kg: number; date_of_sale: string }>(() =>
+      supabase
+        .from("sap_sell_in_records")
+        .select("location_id, quantity_kg, date_of_sale")
+        .eq("product_id", PRODUCT_IDS.PANQUECITAS)
+    ),
+  ]);
+
+  const locIdBySapCode = new Map(universo.map((l) => [l.sap_code.trim(), l.id]));
+  const kg = new Map<number, { marg: number; mayo: number; pan: number; panq: number }>();
+  const acc = (numero: number) => {
+    let a = kg.get(numero);
+    if (!a) {
+      a = { marg: 0, mayo: 0, pan: 0, panq: 0 };
+      kg.set(numero, a);
+    }
+    return a;
+  };
+  for (const r of margarina) {
+    const n = combiPorLoc.get(r.location_id);
+    if (n != null) acc(n).marg += Number(r.quantity_kg);
+  }
+  for (const r of mayonesa) {
+    const n = combiPorLoc.get(r.location_id);
+    if (n != null) acc(n).mayo += Number(r.quantity_kg);
+  }
+  for (const r of harinaPan) {
+    const locId = locIdBySapCode.get(r.sap_code.trim());
+    const n = locId ? combiPorLoc.get(locId) : undefined;
+    if (n != null) acc(n).pan += Number(r.quantity_kg);
+  }
+  for (const r of panquecitas) {
+    if (r.date_of_sale.slice(0, 10) < RENDIMIENTO_DIARIO_DESDE) continue;
+    const n = combiPorLoc.get(r.location_id);
+    if (n != null) acc(n).panq += Number(r.quantity_kg);
+  }
+
+  const r1 = (v: number) => Math.round(v * 10) / 10;
+  const ratio = (panqDia: number, catDia: number) =>
+    catDia > 0 ? Math.round((panqDia / catDia) * 1000) / 10 : null;
+
+  const filas = COMBINACIONES.map((c) => {
+    const a = kg.get(c.numero) ?? { marg: 0, mayo: 0, pan: 0, panq: 0 };
+    const panqDia = a.panq / diasPanquecitas;
+    const panDia = a.pan / DIAS_HABILES_3M;
+    const margDia = a.marg / DIAS_HABILES_3M;
+    const mayoDia = a.mayo / DIAS_HABILES_3M;
+    return {
+      numero: c.numero,
+      nombre: nombreCombinacion(c.numero),
+      sector: c.sector,
+      ciudad: SECTOR_LABELS[c.sector],
+      precio: c.precio,
+      comunicacion: c.comunicacion,
+      gruposVendedores: [...c.gruposVendedores],
+      clientes: clientesPorCombi.get(c.numero) ?? 0,
+      panquecitasKg: r1(a.panq),
+      ratioHarinaPan: ratio(panqDia, panDia),
+      ratioMargarina: ratio(panqDia, margDia),
+      ratioMayonesa: ratio(panqDia, mayoDia),
+      panquecitasKgDia: r1(panqDia),
+      harinaPanKgDia: r1(panDia),
+      margarinaKgDia: r1(margDia),
+      mayonesaKgDia: r1(mayoDia),
+    };
+  });
+
+  return {
+    filas,
+    sinCombinacion,
+    gruposSinMapear: [...gruposSinMapear].sort(),
+    diasReferencia: DIAS_HABILES_3M,
+    diasPanquecitas,
+    desdePanquecitas: RENDIMIENTO_DIARIO_DESDE,
+  };
 }
 
 // ── Venta diaria por SEGMENTO de cliente y categoría ───────────────
