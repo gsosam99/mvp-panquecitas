@@ -358,21 +358,20 @@ export async function getVentas3MesesPorCiudad(): Promise<Ventas3MesesRow[]> {
 // Comparar Cumaná contra Cabudare mezcla las dos variables a la vez; la
 // unidad de análisis real es la combinación.
 //
-// EL RATIO ES EL UNIVERSAL DEL DASHBOARD (DIENN, 08-09-2026: "los ratios deben
-// llevar la misma lógica universal pero segmentado por esas combinaciones"),
-// el mismo de getRendimiento3M y getRendimientoVsMavesa:
+// EL RATIO, por categoría y por combinación (DIENN, 08/09-09-2026):
 //
-//   promedio de referencia = Σ kg de la categoría ÷ 63 días hábiles
-//   ratio del día          = Panquecitas de ese día ÷ ese promedio
-//   ratio acumulado        = PROMEDIO DE LOS RATIOS DIARIOS
+//   numerador   = Σ kg Panquecitas de esos grupos ÷ días hábiles TRANSCURRIDOS
+//   denominador = Σ kg de esa categoría de esos MISMOS grupos ÷ 63 días hábiles
 //
-// El último paso es el que importa y es una decisión explícita del 18-08-2026:
-// promedio de los ratios diarios, NO Σ kg ÷ Σ referencia. La diferencia está
-// en el divisor de Panquecitas — días CON VENTA, no días hábiles
-// transcurridos — así que un día sin despacho no diluye el ratio.
+// Los dos lados se acotan a los PDV de los grupos vendedores de la
+// combinación: nada usa el total de la ciudad ni del piloto.
 //
-// Lo único que cambia respecto al resto del dashboard es el recorte: acá el
-// scope son los PDV de los grupos vendedores de cada combinación.
+// El denominador es idéntico al del resto del dashboard. El numerador NO: acá
+// divide entre los días hábiles transcurridos y no entre los días CON VENTA
+// que usa el ratio universal. Es deliberado y la razón está en el uso —ver el
+// comentario junto al cálculo—: esta tabla compara cuatro combinaciones entre
+// sí, y con un divisor distinto por fila el orden deja de significar quién
+// vende más.
 //
 // "Ventas kg" es el acumulado de Panquecitas de la combinación — el volumen
 // crudo, sin dividir. OJO: suma solo PDV de la CARTERA, así que no cuadra con
@@ -402,7 +401,12 @@ export interface CombinacionRow {
   harinaPanKgDia: number;
   margarinaKgDia: number;
   mayonesaKgDia: number;
-  /** Días CON VENTA de Panquecitas — el divisor del promedio diario. */
+  /**
+   * Días en que esa combinación despachó Panquecitas. NO es el divisor —el
+   * divisor son los días hábiles transcurridos, igual para las cuatro— sino
+   * el dato de intermitencia: explica por qué dos filas con volumen parecido
+   * pueden rendir distinto.
+   */
   diasConVenta: number;
 }
 
@@ -528,14 +532,25 @@ export async function getCombinacionesPiloto(): Promise<CombinacionesResult> {
     const margDia = a.marg / DIAS_HABILES_3M;
     const mayoDia = a.mayo / DIAS_HABILES_3M;
 
-    // Ratio universal: promedio de los ratios diarios. Como el denominador es
-    // constante, equivale a (Σ Panquecitas ÷ días CON VENTA) ÷ promedio — y es
-    // ahí donde se diferencia de dividir entre los días hábiles transcurridos.
-    const dias = [...(panqPorDia.get(c.numero)?.values() ?? [])];
-    const diasConVenta = dias.length;
-    const panqDia = diasConVenta > 0 ? a.panq / diasConVenta : 0;
-    const ratio = (catDia: number) =>
-      diasConVenta > 0 && catDia > 0 ? Math.round((panqDia / catDia) * 1000) / 10 : null;
+    // Numerador: Panquecitas de la combinación entre los días hábiles
+    // TRANSCURRIDOS desde el arranque del piloto — el MISMO divisor para las
+    // cuatro filas (DIENN, 09-09-2026).
+    //
+    // Acá esta tabla se aparta a propósito del ratio universal, que divide
+    // entre los días CON VENTA. El motivo es el uso de cada uno: el universal
+    // describe UN scope contra su propia referencia, y ahí dividir entre días
+    // con venta evita que un día sin despacho lo diluya. Esta tabla existe
+    // para COMPARAR las cuatro combinaciones entre sí, y con divisores
+    // distintos deja de ser una comparación — una combinación que vendió
+    // concentrada en pocos días quedaba por encima de otra que vendió más
+    // kilos repartidos. Con el mismo divisor, el orden dice quién vende más.
+    //
+    // `diasConVenta` se sigue reportando, pero como dato de intermitencia y no
+    // como divisor: es lo que explica por qué una fila puede rendir distinto
+    // con volúmenes parecidos.
+    const diasConVenta = panqPorDia.get(c.numero)?.size ?? 0;
+    const panqDia = a.panq / diasPanquecitas;
+    const ratio = (catDia: number) => (catDia > 0 ? Math.round((panqDia / catDia) * 1000) / 10 : null);
 
     return {
       numero: c.numero,

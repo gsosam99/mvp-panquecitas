@@ -35,8 +35,8 @@ export function CombinacionesPilotoTabla({ data }: { data: CombinacionesResult }
     { header: "Ratio vs Margarina (%)", value: (r) => r.ratioMargarina, width: 24 },
     { header: "Ratio vs Mayonesa (%)", value: (r) => r.ratioMayonesa, width: 24 },
     { header: "Ventas Panquecitas (kg)", value: (r) => r.panquecitasKg, width: 24 },
-    { header: "Panquecitas (kg/día con venta)", value: (r) => r.panquecitasKgDia, width: 28 },
-    { header: "Días con venta", value: (r) => r.diasConVenta, width: 16 },
+    { header: "Panquecitas (kg/día hábil)", value: (r) => r.panquecitasKgDia, width: 26 },
+    { header: "Días con venta (no es el divisor)", value: (r) => r.diasConVenta, width: 30 },
     { header: "Harina PAN (kg/día)", value: (r) => r.harinaPanKgDia, width: 20 },
     { header: "Margarina (kg/día)", value: (r) => r.margarinaKgDia, width: 20 },
     { header: "Mayonesa (kg/día)", value: (r) => r.mayonesaKgDia, width: 20 },
@@ -120,17 +120,17 @@ export function CombinacionesPilotoTabla({ data }: { data: CombinacionesResult }
         </div>
 
         <p className="text-xs text-slate-400 mt-3">
-          Los <span className="font-medium text-slate-600">ratios</span> usan la misma lógica que el resto del
-          dashboard, solo que acotada a los PDV de los grupos vendedores de cada combinación: el promedio de la
-          categoría es su venta de mayo–julio ÷ {data.diasReferencia} días hábiles, el ratio de cada día es las
-          Panquecitas de ese día ÷ ese promedio, y lo que se muestra es el{" "}
-          <span className="font-medium text-slate-600">promedio de esos ratios diarios</span> — no Σ kg ÷ Σ
-          referencia. Por eso el divisor de Panquecitas son los días CON VENTA y no los días hábiles transcurridos: un
-          día sin despacho no diluye el ratio.{" "}
-          <span className="font-medium text-slate-600">Ventas kg</span> sí es el acumulado del piloto, sin dividir.
-          {" "}
-          <span className="font-medium text-slate-600">No cuadra con la tarjeta de Volumen Radar</span> y es a
-          propósito: acá solo suman los PDV de la cartera, y esa tarjeta además incluye los que están fuera de ella.
+          Cada <span className="font-medium text-slate-600">ratio</span> se calcula solo con los PDV de los grupos
+          vendedores de esa fila, en los dos lados: las Panquecitas de esos grupos ÷ {data.diasPanquecitas} días
+          hábiles transcurridos desde el {data.desdePanquecitas}, contra la venta de esa categoría de esos mismos
+          grupos ÷ {data.diasReferencia} días hábiles de mayo–julio. Nada usa el total de la ciudad ni del piloto.{" "}
+          <span className="font-medium text-slate-600">El divisor de Panquecitas es el mismo para las cuatro filas</span>{" "}
+          — a diferencia del ratio de los gráficos de rendimiento, que divide entre los días con venta de su propio
+          corte. Acá el punto es comparar las combinaciones entre sí, y con divisores distintos la que vendió
+          concentrada en pocos días quedaba por encima de la que vendió más kilos repartidos.{" "}
+          <span className="font-medium text-slate-600">Ventas kg</span> es el acumulado del piloto, sin dividir; y{" "}
+          <span className="font-medium text-slate-600">no cuadra con la tarjeta de Volumen Radar</span> a propósito,
+          porque acá solo suman los PDV de la cartera y esa tarjeta además incluye los que están fuera de ella.
           {data.sinCombinacion > 0 && (
             <>
               {" "}
