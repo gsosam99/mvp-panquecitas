@@ -1,7 +1,7 @@
 import { createSupabaseServiceClient } from "@/lib/supabase/server";
 import { hasDashboardSession } from "@/lib/session";
 import { sectorGroup } from "@/lib/sectors";
-import { COHORTES, cohorteParaClienteNuevo } from "@/lib/cohortes";
+import { COHORTES, cohorteParaClienteNuevo, esFueraDeCartera } from "@/lib/cohortes";
 import type { ParsedCarteraRow } from "@/types";
 
 // Carga/actualización de la cartera de clientes: agrega/actualiza
@@ -104,8 +104,27 @@ export async function POST(req: Request) {
     const nuevosPorCohorte = new Map<string, number>();
     let fechasSobrescritas = 0;
 
+    // ── Cruce contra la cartera ya registrada ────────────────────────
+    // El upsert por sap_code hace imposible duplicar una fila, pero no
+    // dice NADA de cuántos de los códigos subidos ya estaban. Al cargar
+    // un archivo de "solo los nuevos" esa es justamente la cifra a
+    // verificar: si se sube una tanda de 975 y el reporte dice que 40 ya
+    // estaban, esos 40 no son incorporaciones nuevas sino actualizaciones
+    // de ficha, y conservan su fecha de incorporación original.
+    const yaEnCartera: string[] = [];
+    const regularizadosFueraDeCartera: string[] = [];
+
     const locationsToUpsert = Array.from(uniqueByCode.values()).map((row) => {
       const registrada = registradas.get(row.sap_code.trim());
+      if (registrada) {
+        yaEnCartera.push(row.sap_code.trim());
+        // Caso especial: el PDV ya existía marcado "Fuera de cartera"
+        // (vendía por el Radar pero no era cartera del piloto). Incluirlo
+        // en el archivo lo convierte en cartera formal y le asigna tanda,
+        // porque no tiene fecha de incorporación registrada. Es un cambio
+        // de población, no una simple actualización de ficha.
+        if (esFueraDeCartera(registrada.cohorte)) regularizadosFueraDeCartera.push(row.sap_code.trim());
+      }
 
       let fecha_incorporacion: string;
       let cohorte: string | null;
@@ -170,6 +189,15 @@ export async function POST(req: Request) {
       // fecha equivocada.
       nuevos_por_cohorte: Object.fromEntries(nuevosPorCohorte),
       fechas_sobrescritas: fechasSobrescritas,
+      // Cruce contra la cartera existente. `filas_repetidas_en_archivo`
+      // son duplicados DENTRO del archivo subido (se colapsan, gana la
+      // última); `ya_en_cartera` son códigos que ya existían en la base.
+      filas_repetidas_en_archivo: rows.length - uniqueByCode.size,
+      ya_en_cartera: yaEnCartera.length,
+      // Muestra acotada para poder revisarlos a mano sin devolver 975 códigos.
+      ya_en_cartera_codigos: yaEnCartera.slice(0, 100),
+      regularizados_fuera_de_cartera: regularizadosFueraDeCartera.length,
+      regularizados_fuera_de_cartera_codigos: regularizadosFueraDeCartera.slice(0, 100),
     });
   } catch (error) {
     console.error("[POST /api/cartera-upload]", error);

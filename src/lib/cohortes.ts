@@ -41,9 +41,14 @@ export const COHORTE_PILOTO_ORIGINAL: Cohorte = {
 };
 
 /**
- * Tandas posteriores, en orden cronológico. Se evalúan de arriba abajo y gana
- * la primera que calce; la última (sin grupos) es el fallback.
+ * Tandas posteriores. Se evalúan de arriba abajo y gana la primera que calce;
+ * la última (sin grupos) es el fallback.
  *
+ *   - "Indirecto Cumaná 2" (08-09-2026): los 975 PDV de los 7 franquiciados
+ *     que se sumaron al modelo indirecto de Cumaná (zonas de franquicia
+ *     V0411A, V1460A, V1461A, V1463A, V1464A, V1468A y V1471A). Traen los
+ *     MISMOS grupos vendedores U27/U28 que la tanda de agosto, así que el
+ *     grupo no alcanza para separarlas — ver la nota de orden abajo.
  *   - "Indirecto Cumaná" (14-08-2026): el modelo indirecto en Cumaná no
  *     existía antes de esa fecha. Los PDV reales que atiende se distinguen
  *     por los grupos vendedores U27 y U28 — hasta la 006 los únicos grupos
@@ -58,15 +63,29 @@ export const COHORTE_PILOTO_ORIGINAL: Cohorte = {
  *     DISTRIBUIDORAS_INTERMEDIARIAS_SAP_CODES — ya excluidas del universo,
  *     así que no hay nada que agregar allá.
  *
- * OJO con el orden: la última entrada no tiene grupos y atrapa TODO lo que no
- * calzó antes. Una tanda nueva va SIEMPRE antes de ella; si se agrega después,
- * sus clientes se estampan con la fecha del fallback y cuentan retroactivamente
- * en meses ya reportados. Y como cartera-upload nunca recalcula una fecha ya
- * registrada, recargar el archivo no lo corrige.
+ * OJO con el orden, son dos reglas distintas:
  *
- * Ver conversación con Alejandro (21-08-2026) y DIENN (01-09-2026).
+ *   1. La última entrada no tiene grupos y atrapa TODO lo que no calzó antes.
+ *      Una tanda nueva va SIEMPRE antes de ella; si se agrega después, sus
+ *      clientes se estampan con la fecha del fallback y cuentan
+ *      retroactivamente en meses ya reportados.
+ *   2. Cuando dos tandas comparten grupo vendedor, la MÁS RECIENTE va primero
+ *      (por eso esta lista ya no está en orden cronológico). La regla solo se
+ *      consulta para clientes que todavía no tienen fecha registrada: los
+ *      U27/U28 de agosto ya la tienen y nunca se recalculan, así que un
+ *      U27/U28 que aparece por primera vez hoy se está incorporando hoy y le
+ *      toca la tanda de arriba. Si se dejara "Indirecto Cumaná" de primera,
+ *      los 975 nuevos se estamparían con el 14-08 y hundirían todos los
+ *      indicadores de agosto, que pasarían a dividirse entre una cartera que
+ *      en esa fecha no existía.
+ *
+ * En ambos casos, como cartera-upload nunca recalcula una fecha ya registrada,
+ * recargar el archivo no corrige el error: hay que arreglarlo en la base.
+ *
+ * Ver conversación con Alejandro (21-08-2026) y DIENN (01-09 y 11-09-2026).
  */
 export const COHORTES_NUEVAS: readonly Cohorte[] = [
+  { nombre: "Indirecto Cumaná 2", desde: "2026-09-08", gruposVendedores: ["U27", "U28"] },
   { nombre: "Indirecto Cumaná", desde: "2026-08-14", gruposVendedores: ["U27", "U28"] },
   { nombre: "Indirecto Cabudare", desde: "2026-09-01", gruposVendedores: ["W05"] },
   { nombre: "Ampliación", desde: "2026-08-24", gruposVendedores: [] },

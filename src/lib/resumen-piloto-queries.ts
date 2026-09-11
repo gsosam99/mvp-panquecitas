@@ -88,16 +88,22 @@ export async function getResumenPiloto(): Promise<ResumenPiloto> {
     if (grupo) grupo.push(l);
     else locsPorCohorte.set(nombre, [l]);
   }
-  // En el orden de COHORTES (cronológico) + lo que no calce al final
-  // ("Fuera de cartera", "Sin cohorte asignada", o cualquier cohorte nueva
-  // que se agregue en cohortes.ts sin actualizar este archivo).
+  // Por fecha de arranque + lo que no calce al final ("Fuera de cartera",
+  // "Sin cohorte asignada", o cualquier cohorte nueva que se agregue en
+  // cohortes.ts sin actualizar este archivo).
+  //
+  // Se ordena aquí por `desde` en vez de confiar en el orden de COHORTES:
+  // esa lista dejó de ser cronológica cuando "Indirecto Cumaná 2" tuvo que
+  // ponerse antes de "Indirecto Cumaná" para ganarle el match de U27/U28.
   const nombresConocidos = new Set(COHORTES.map((c) => c.nombre));
   const armarCohorte = (nombre: string, desde: string | null): CohorteResumen => {
     const locs = locsPorCohorte.get(nombre) ?? [];
     return { nombre, desde, cantidad: locs.length, ...contarEsquemas(locs) };
   };
   const porCohorte: CohorteResumen[] = [
-    ...COHORTES.map((c) => armarCohorte(c.nombre, c.desde)),
+    ...[...COHORTES]
+      .sort((a, b) => a.desde.localeCompare(b.desde))
+      .map((c) => armarCohorte(c.nombre, c.desde)),
     ...[...locsPorCohorte.keys()].filter((nombre) => !nombresConocidos.has(nombre)).map((nombre) => armarCohorte(nombre, null)),
   ];
 
