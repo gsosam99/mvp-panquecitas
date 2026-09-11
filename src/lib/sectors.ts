@@ -71,17 +71,33 @@ export const DISTRIBUIDORAS_INTERMEDIARIAS_SAP_CODES = [
   "22406035", // DISTRIBUIDORA ANTONELLI F&G, C.A
 ] as const;
 
-// Franquiciadas del modelo indirecto de Cumaná, incorporado el 14-08-2026
-// (Alejandro, 21-08-2026). Mismo tratamiento que las de arriba: no son
-// población, solo se leen para lo facturado y lo pedido. Los PDV reales
+// Franquiciadas del modelo indirecto de Cumaná: 5 con el arranque del
+// 14-08-2026 (Alejandro, 21-08-2026) y 7 más con la ampliación del
+// 08-09-2026 (DIENN, 11-09-2026). Mismo tratamiento que las de arriba: no
+// son población, solo se leen para lo facturado y lo pedido. Los PDV reales
 // que abastecen SÍ son cartera y se distinguen por los grupos vendedores
 // U27/U28 — ver COHORTES_NUEVAS en src/lib/cohortes.ts.
+//
+// Las 7 de la segunda tanda ("Indirecto Cumaná 2", 08-09-2026) salen de las
+// columnas FQ_COD y RS_FQ del archivo de cartera, que dicen qué franquiciada
+// abastece a cada PDV. El comentario entre paréntesis es su zona de franquicia
+// y cuántos PDV atiende, para poder cuadrar la tanda: las 7 suman los 975.
+// Ojo, esas dos columnas están en AE/AF, fuera del rango con filtro del Excel
+// (A:AD), así que no aparecen si solo se mira la tabla filtrada.
 export const FRANQUICIADAS_INDIRECTO_SAP_CODES = [
   "22401000", // COMERCIAL VELIZ SUCRE, C.A.
   "22403226", // KEYKA, C.A.
   "22403689", // DISTRIBUIDORA NURCARLYS, C.A.
   "22405444", // DISTRIBUIDORA RCY 85, C.A.
   "22405792", // INVERSIONES C.C., C.A.
+  // ── Segunda tanda, 08-09-2026 ──
+  "22403033", // DISTRIBUIDORA TRES REIS C.A. (V0411A, 130 PDV)
+  "22401861", // DISTRIBUIDORA BLANCO SALAZAR, S.A. (V1471A, 122 PDV)
+  "22403700", // INVERSIONES KODSO, C.A. (V1463A, 164 PDV)
+  "22405252", // DISTRIBUIDORA HERMANO BLANCO, C.A. (V1460A, 144 PDV)
+  "22405973", // DISTRIBUIDORA MARGON 2024, C.A. (V1468A, 233 PDV)
+  "22406051", // DISTRIBUIDORA LOS GONZALEZ ZZ CA (V1461A, 84 PDV)
+  "22406064", // HERMANOS BENITEZ RAMOS, C.A (V1464A, 98 PDV)
 ] as const;
 
 const EXCLUDED_DISTRIBUIDOR_SAP_CODES = new Set<string>([

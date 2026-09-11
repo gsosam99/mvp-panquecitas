@@ -45,10 +45,11 @@ export const COHORTE_PILOTO_ORIGINAL: Cohorte = {
  * la última (sin grupos) es el fallback.
  *
  *   - "Indirecto Cumaná 2" (08-09-2026): los 975 PDV de los 7 franquiciados
- *     que se sumaron al modelo indirecto de Cumaná (zonas de franquicia
- *     V0411A, V1460A, V1461A, V1463A, V1464A, V1468A y V1471A). Traen los
- *     MISMOS grupos vendedores U27/U28 que la tanda de agosto, así que el
- *     grupo no alcanza para separarlas — ver la nota de orden abajo.
+ *     que se sumaron al modelo indirecto de Cumaná. Traen los MISMOS grupos
+ *     vendedores U27/U28 que la tanda de agosto, así que el grupo no alcanza
+ *     para separarlas — ver la nota de orden abajo. Las 7 franquiciadas están
+ *     en FRANQUICIADAS_INDIRECTO_SAP_CODES (sectors.ts) con su zona y su
+ *     conteo de PDV: fuera del universo, dentro de Pedidos y Facturado.
  *   - "Indirecto Cumaná" (14-08-2026): el modelo indirecto en Cumaná no
  *     existía antes de esa fecha. Los PDV reales que atiende se distinguen
  *     por los grupos vendedores U27 y U28 — hasta la 006 los únicos grupos

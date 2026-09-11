@@ -56,7 +56,7 @@ export default async function ResumenPilotoPage() {
           <CardContent>
             <p className="text-3xl font-bold text-slate-900">{resumen.franquiciados}</p>
             <p className="text-xs text-slate-400 mt-1">
-              Modelo indirecto de Cumaná (14-08). No cuentan como PDV, solo Pedido/Facturado.
+              Modelo indirecto de Cumaná (14-08 y 08-09). No cuentan como PDV, solo Pedido/Facturado.
             </p>
           </CardContent>
         </Card>
