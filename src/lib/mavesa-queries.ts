@@ -7,7 +7,7 @@ import {
   SECTOR_LABELS,
   type Sector,
 } from "@/lib/universe";
-import { DIAS_HABILES_3M, contarDiasHabiles } from "@/lib/business-days";
+import { DIAS_HABILES_3M, contarDiasHabiles, diasDeSerie } from "@/lib/business-days";
 import { COMBINACIONES, combinacionDeGrupo, nombreCombinacion } from "@/lib/combinaciones";
 import { bucketLabelFor, todayISO } from "@/lib/date-buckets";
 import { PRODUCT_IDS } from "@/data/catalog";
@@ -154,21 +154,36 @@ export async function getRendimientoVsMavesa(
   );
 
   const kgPorDia = new Map<string, number>();
+  // Último día reportado en TODO el piloto, SIN recortar por sector ni por
+  // cartera: es el cierre del rango de la serie y tiene que ser el mismo para
+  // las dos ciudades. Si cada sector terminara en su propio último día, la
+  // ciudad que no vendió ese día se quedaría sin él y volvería a pasar
+  // exactamente lo que el relleno de abajo viene a arreglar.
+  let ultimoDiaReportado = "";
   for (const r of panqData) {
-    if (!idsUniverso.has(r.location_id)) continue;
     const dia = r.date_of_sale.slice(0, 10);
     if (dia < RENDIMIENTO_DIARIO_DESDE) continue;
+    if (dia > ultimoDiaReportado) ultimoDiaReportado = dia;
+    if (!idsUniverso.has(r.location_id)) continue;
     kgPorDia.set(dia, (kgPorDia.get(dia) ?? 0) + Number(r.quantity_kg));
   }
 
-  const puntos: RendimientoVsMavesaPunto[] = [...kgPorDia.entries()]
-    .sort(([a], [b]) => a.localeCompare(b))
-    .map(([dia, kg]) => ({
+  // La serie cubre TODOS los días hábiles desde el arranque del piloto, no
+  // solo los que tuvieron venta: un día hábil sin venta vale 0 y cuenta en el
+  // divisor del ratio acumulado (DIENN, 11-09-2026). Ver diasDeSerie().
+  const puntos: RendimientoVsMavesaPunto[] = diasDeSerie(
+    RENDIMIENTO_DIARIO_DESDE,
+    ultimoDiaReportado,
+    kgPorDia.keys()
+  ).map((dia) => {
+    const kg = kgPorDia.get(dia) ?? 0;
+    return {
       dia,
       label: bucketLabelFor(dia, "day"),
       panquecitasKg: Math.round(kg * 10) / 10,
       ratioPct: Math.round((kg / promedioReferencia) * 100 * 10) / 10,
-    }));
+    };
+  });
 
   return {
     categoria,

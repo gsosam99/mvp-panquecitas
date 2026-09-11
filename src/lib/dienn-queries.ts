@@ -2,7 +2,7 @@ import { createSupabaseServiceClient } from "@/lib/supabase/server";
 import { fetchAllRows, fetchAllRowsChunked } from "@/lib/supabase/fetch-all";
 import { PRODUCT_IDS, VARIANT_IDS } from "@/data/catalog";
 import { PVP_TARGETS, PVP_TOLERANCE } from "@/data/pvp-thresholds";
-import { DIAS_HABILES_POR_SEMANA, DIAS_HABILES_3M, contarDiasHabiles } from "@/lib/business-days";
+import { DIAS_HABILES_POR_SEMANA, DIAS_HABILES_3M, contarDiasHabiles, diasDeSerie } from "@/lib/business-days";
 import { getBcvRateLookup, precioVisitaEnUsd } from "@/lib/bcv";
 import {
   PILOT_SECTORS,
@@ -1205,14 +1205,33 @@ export async function getRendimiento3M(
     kgPorDia.set(dia, (kgPorDia.get(dia) ?? 0) + Number(r.quantity_kg));
   }
 
-  const puntos: Rendimiento3MPunto[] = [...kgPorDia.entries()]
-    .sort(([a], [b]) => a.localeCompare(b))
-    .map(([dia, kg]) => ({
+  // Cierre del rango de la serie: el último día reportado en TODO el piloto,
+  // leído de `panqData` (sin recortar por sector ni por población) y no de
+  // `panq`. Las dos ciudades y las dos poblaciones tienen que compartir el
+  // mismo rango; si cada una terminara en su propio último día, la que no
+  // vendió ese día se quedaría sin él y no contaría en su promedio.
+  let ultimoDiaReportado = "";
+  for (const r of panqData) {
+    const dia = r.date_of_sale.slice(0, 10);
+    if (dia >= RENDIMIENTO_DIARIO_DESDE && dia > ultimoDiaReportado) ultimoDiaReportado = dia;
+  }
+
+  // La serie cubre TODOS los días hábiles desde el arranque del piloto, no
+  // solo los que tuvieron venta: un día hábil sin venta vale 0 y cuenta en el
+  // divisor del ratio acumulado (DIENN, 11-09-2026). Ver diasDeSerie().
+  const puntos: Rendimiento3MPunto[] = diasDeSerie(
+    RENDIMIENTO_DIARIO_DESDE,
+    ultimoDiaReportado,
+    kgPorDia.keys()
+  ).map((dia) => {
+    const kg = kgPorDia.get(dia) ?? 0;
+    return {
       dia,
       label: bucketLabelFor(dia, "day"),
       panquecitasKg: Math.round(kg * 10) / 10,
       ratioPct: Math.round((kg / promedio3M) * 100 * 10) / 10,
-    }));
+    };
+  });
 
   return {
     promedio3M: Math.round(promedio3M * 10) / 10,

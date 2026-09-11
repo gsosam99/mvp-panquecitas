@@ -35,6 +35,49 @@ export function contarDiasHabiles(desde: string, hasta: string): number {
 }
 
 /**
+ * Los días hábiles (L–V) de [desde, hasta], ambos incluidos, como fechas ISO.
+ * Lista vacía si el rango no es válido o va al revés. Mismo conteo en UTC y
+ * por el mismo motivo que contarDiasHabiles.
+ */
+export function diasHabilesEntre(desde: string, hasta: string): string[] {
+  const inicio = Date.parse(`${desde.slice(0, 10)}T00:00:00Z`);
+  const fin = Date.parse(`${hasta.slice(0, 10)}T00:00:00Z`);
+  if (Number.isNaN(inicio) || Number.isNaN(fin) || fin < inicio) return [];
+
+  const dias: string[] = [];
+  for (let t = inicio; t <= fin; t += 86_400_000) {
+    const d = new Date(t);
+    const dow = d.getUTCDay(); // 0=Dom, 6=Sáb
+    if (dow !== 0 && dow !== 6) dias.push(d.toISOString().slice(0, 10));
+  }
+  return dias;
+}
+
+/**
+ * Días que tiene que cubrir una serie diaria del piloto: TODOS los días
+ * hábiles de [desde, hasta] más cualquier otro día que sí traiga dato.
+ *
+ * El relleno de los hábiles sin venta es el punto (DIENN, 11-09-2026). Antes
+ * la serie se armaba solo con los días que tenían filas, así que un día hábil
+ * sin venta desaparecía y no entraba al divisor del promedio de ratios: el
+ * 10-09 sin ventas en Cabudare no le bajaba el ratio, cuando no haber vendido
+ * un día hábil es justamente lo que ese indicador debe reflejar.
+ *
+ * Los días NO hábiles solo aparecen si hubo venta. Así un despacho de sábado
+ * no se pierde de la serie, pero un fin de semana vacío tampoco infla el
+ * divisor con días en los que nadie esperaba vender.
+ */
+export function diasDeSerie(
+  desde: string,
+  hasta: string,
+  diasConDato: Iterable<string>
+): string[] {
+  const dias = new Set(diasHabilesEntre(desde, hasta));
+  for (const dia of diasConDato) if (dia >= desde) dias.add(dia);
+  return [...dias].sort();
+}
+
+/**
  * Días hábiles del período de referencia de 3 meses (mayo–julio 2026).
  *
  * Es una CONSTANTE, no un conteo derivado del archivo (decisión del usuario,
