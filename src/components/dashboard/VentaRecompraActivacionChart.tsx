@@ -6,6 +6,7 @@ import type { VentaRecompraActivacionPoint } from "@/lib/dienn-queries";
 const SERIES_LABEL: Record<string, string> = {
   ventaAcumuladaKg: "Venta acumulada",
   recompraPct: "Tasa de recompra",
+  recompraFocoPct: "Tasa de recompra foco",
   activacionPct: "% Activación de clientes",
 };
 
@@ -23,7 +24,13 @@ const Inner = dynamic(
       Legend,
     } = await import("recharts");
 
-    function VentaRecompraActivacionInner({ data }: { data: VentaRecompraActivacionPoint[] }) {
+    function VentaRecompraActivacionInner({
+      data,
+      showRecompraFoco,
+    }: {
+      data: VentaRecompraActivacionPoint[];
+      showRecompraFoco: boolean;
+    }) {
       return (
         <ResponsiveContainer width="100%" height={320}>
           <ComposedChart data={data} margin={{ top: 5, right: 16, left: 0, bottom: 5 }}>
@@ -69,6 +76,19 @@ const Inner = dynamic(
               strokeWidth={2}
               dot={{ r: 3, fill: "#16a34a" }}
             />
+            {/* Recompra foco: mismo verde pero más oscuro y punteado, para que se
+                lea como variante de la recompra y no como una métrica aparte. */}
+            {showRecompraFoco && (
+              <Line
+                yAxisId="right"
+                type="monotone"
+                dataKey="recompraFocoPct"
+                stroke="#14532d"
+                strokeWidth={2.5}
+                strokeDasharray="6 3"
+                dot={{ r: 3, fill: "#14532d" }}
+              />
+            )}
             <Line
               yAxisId="right"
               type="monotone"
@@ -90,6 +110,12 @@ const Inner = dynamic(
   }
 );
 
-export function VentaRecompraActivacionChart({ data }: { data: VentaRecompraActivacionPoint[] }) {
-  return <Inner data={data} />;
+export function VentaRecompraActivacionChart({
+  data,
+  showRecompraFoco = false,
+}: {
+  data: VentaRecompraActivacionPoint[];
+  showRecompraFoco?: boolean;
+}) {
+  return <Inner data={data} showRecompraFoco={showRecompraFoco} />;
 }

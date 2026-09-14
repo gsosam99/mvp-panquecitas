@@ -871,6 +871,12 @@ export interface VentaRecompraActivacionPoint {
   label: string;
   ventaAcumuladaKg: number;
   recompraPct: number;
+  /**
+   * Recompra FOCO: la misma tasa de clientes recurrentes, pero contando solo
+   * clientes de segmentos foco — los que NO están en SEGMENTOS_SIN_ALIMENTOS
+   * (DIENN, 14-09-2026). Numerador y denominador se recortan juntos.
+   */
+  recompraFocoPct: number;
   activacionPct: number;
   /** Cartera vigente al cierre del bucket — denominador de activacionPct. */
   universo: number;
@@ -882,6 +888,7 @@ function computeVentaRecompraActivacionPoints(
   rows: { location_id: string; date_of_sale: string; quantity_kg: number; esCartera: boolean }[],
   fechasRows: { location_id: string; fecha: string }[],
   universoSizeAt: (cierre: string) => number,
+  idsFoco: Set<string>,
   granularity: TimeGranularity
 ): VentaRecompraActivacionPoint[] {
   if (rows.length === 0) return [];
@@ -922,9 +929,19 @@ function computeVentaRecompraActivacionPoints(
     }
     let clientesConVenta = 0;
     let clientesRecurrentes = 0;
-    for (const set of fechasByLoc.values()) {
+    // Recompra foco: mismo conteo, solo clientes de segmentos foco. A
+    // diferencia de la activación "a escala", acá no alcanza con sacar a los
+    // inactivos —en la recompra todos compraron al menos una vez—, así que el
+    // recorte es por segmento en los dos lados de la división.
+    let clientesConVentaFoco = 0;
+    let clientesRecurrentesFoco = 0;
+    for (const [locId, set] of fechasByLoc) {
       clientesConVenta += 1;
       if (set.size >= 2) clientesRecurrentes += 1;
+      if (idsFoco.has(locId)) {
+        clientesConVentaFoco += 1;
+        if (set.size >= 2) clientesRecurrentesFoco += 1;
+      }
     }
 
     // Cartera vigente al CIERRE de este bucket. Se recalcula punto a punto:
@@ -940,6 +957,10 @@ function computeVentaRecompraActivacionPoints(
       ventaAcumuladaFueraKg: Math.round(ventaAcumuladaFueraKg * 10) / 10,
       recompraPct:
         clientesConVenta > 0 ? Math.round((clientesRecurrentes / clientesConVenta) * 1000) / 10 : 0,
+      recompraFocoPct:
+        clientesConVentaFoco > 0
+          ? Math.round((clientesRecurrentesFoco / clientesConVentaFoco) * 1000) / 10
+          : 0,
       activacionPct: universoSize > 0 ? Math.round((activados / universoSize) * 1000) / 10 : 0,
       universo: universoSize,
     });
@@ -1011,10 +1032,16 @@ export async function getVentaRecompraActivacion(
       estabaIncorporado(incorporacionPorId.get(r.location_id), r.fecha.slice(0, 10))
   );
 
+  // Clientes de segmentos foco: todo lo que no está en SEGMENTOS_SIN_ALIMENTOS.
+  // Los "Sin segmento" quedan dentro, mismo criterio que la activación ajustada.
+  const idsFoco = new Set(
+    universoFiltrado.filter((l) => !esSegmentoSinAlimentos(l.segmento_cliente)).map((l) => l.id)
+  );
+
   return {
-    day: computeVentaRecompraActivacionPoints(rows, fechasRows, universoSizeAt, "day"),
-    week: computeVentaRecompraActivacionPoints(rows, fechasRows, universoSizeAt, "week"),
-    month: computeVentaRecompraActivacionPoints(rows, fechasRows, universoSizeAt, "month"),
+    day: computeVentaRecompraActivacionPoints(rows, fechasRows, universoSizeAt, idsFoco, "day"),
+    week: computeVentaRecompraActivacionPoints(rows, fechasRows, universoSizeAt, idsFoco, "week"),
+    month: computeVentaRecompraActivacionPoints(rows, fechasRows, universoSizeAt, idsFoco, "month"),
   };
 }
 

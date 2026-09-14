@@ -269,6 +269,8 @@ export function DiennDashboardClient({
   const [fuenteFilter, setFuenteFilter] = useState<FuenteFilter>("TODOS");
   const [granularity, setGranularity] = useState<TimeGranularity>("week");
   const [comboGranularity, setComboGranularity] = useState<TimeGranularity>("week");
+  // Línea opcional de recompra foco (solo segmentos foco) en el gráfico combo.
+  const [recompraFocoOn, setRecompraFocoOn] = useState(false);
   const [stockOutOpen, setStockOutOpen] = useState(false);
   // Total acumulado: métrica de efectividad + granularidad + series opcionales por modelo.
   const [carteraMetrica, setCarteraMetrica] = useState<"activos" | "facturados" | "pedidos">("activos");
@@ -1691,6 +1693,19 @@ export function DiennDashboardClient({
                 </button>
               ))}
             </div>
+            {/* Recompra foco: la misma tasa contando solo clientes de segmentos
+                foco (sin licorerías, CS, farmacias de barrio, mascotas ni animales). */}
+            <button
+              onClick={() => setRecompraFocoOn((v) => !v)}
+              title="Tasa de recompra contando solo clientes de segmentos foco"
+              className={`px-3 py-1.5 rounded-lg border text-xs font-medium transition-colors ${
+                recompraFocoOn
+                  ? "border-green-900 bg-green-900 text-white"
+                  : "border-slate-200 bg-white text-slate-500 hover:bg-slate-50"
+              }`}
+            >
+              Recompra foco
+            </button>
             <ExportExcelButton
               filename="datos_venta_recompra_activacion"
               rows={comboPoints}
@@ -1698,6 +1713,7 @@ export function DiennDashboardClient({
                 { header: "Período", value: (r) => r.label },
                 { header: "Venta acumulada (kg)", value: (r) => r.ventaAcumuladaKg },
                 { header: "Tasa de recompra (%)", value: (r) => r.recompraPct },
+                { header: "Tasa de recompra foco (%)", value: (r) => r.recompraFocoPct },
                 { header: "Activación (%)", value: (r) => r.activacionPct },
               ]}
             />
@@ -1705,7 +1721,7 @@ export function DiennDashboardClient({
         </CardHeader>
         <CardContent>
           {comboPoints.length > 0 ? (
-            <VentaRecompraActivacionChart data={comboPoints} />
+            <VentaRecompraActivacionChart data={comboPoints} showRecompraFoco={recompraFocoOn} />
           ) : (
             <div className="h-[320px] flex items-center justify-center text-slate-400">
               <div className="text-center">
