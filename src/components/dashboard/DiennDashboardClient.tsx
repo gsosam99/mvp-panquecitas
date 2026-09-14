@@ -81,6 +81,7 @@ import type {
   VentaRecompraActivacionPoint,
   VolumenRadarAcumulado,
   ActivacionAjustadaResult,
+  AlcanceCartera,
 } from "@/lib/dienn-queries";
 import type { MotivoNoVentaRow } from "@/lib/efectividad-queries";
 import type { Sector } from "@/lib/sectors";
@@ -125,7 +126,7 @@ export interface SectorBundle {
   /** Rendimiento diario vs. promedio histórico 3M de Harina PAN, por población. */
   rendimiento3M: Record<Pan3MPoblacion, Rendimiento3MResult>;
   /** Mismo gráfico que rendimiento3M, pero solo segmentos foco y solo ventas de recompra (sin la primera compra). */
-  rendimiento3MFocoRecompra: Record<Pan3MPoblacion, Rendimiento3MResult>;
+  rendimiento3MFocoRecompra: Record<AlcanceCartera, Record<Pan3MPoblacion, Rendimiento3MResult>>;
   /** Rendimiento diario de Panquecitas vs. promedio histórico de Margarina/Mayonesa (Mavesa), por categoría. */
   rendimientoVsMavesa: Record<MavesaCategoria, RendimientoVsMavesaResult>;
   /** Conversión de degustaciones (tickets recibidos ÷ entregados) de la ciudad/sector. */
@@ -339,6 +340,8 @@ export function DiennDashboardClient({
   // Gráfico adicional de 3M: solo segmentos foco y solo recompra. Estado
   // propio, para que sus botones no muevan el gráfico de arriba.
   const [focoRecPoblacion, setFocoRecPoblacion] = useState<Pan3MPoblacion>("clientes");
+  // Cartera vigente completa o solo la cartera piloto original (los 358).
+  const [focoRecCartera, setFocoRecCartera] = useState<AlcanceCartera>("completa");
   const [showPanDiarioFocoRec, setShowPanDiarioFocoRec] = useState(true);
   const [ratioPorCiudadFocoRec, setRatioPorCiudadFocoRec] = useState(false);
   const [ciudadFocoRec, setCiudadFocoRec] = useState<"TOTAL" | Sector>("TOTAL");
@@ -670,8 +673,8 @@ export function DiennDashboardClient({
   // diarios, por ciudad contra su propio promedio de PAN—, sobre sus datos.
   const focoRecData =
     ciudadFocoRec === "TOTAL"
-      ? bundle.rendimiento3MFocoRecompra[focoRecPoblacion]
-      : bundles[ciudadFocoRec].rendimiento3MFocoRecompra[focoRecPoblacion];
+      ? bundle.rendimiento3MFocoRecompra[focoRecCartera][focoRecPoblacion]
+      : bundles[ciudadFocoRec].rendimiento3MFocoRecompra[focoRecCartera][focoRecPoblacion];
 
   const ratioAcumuladoFocoRec = useMemo(() => {
     const puntos = focoRecData.puntos;
@@ -684,7 +687,7 @@ export function DiennDashboardClient({
     const base = focoRecData.puntos;
     if (base.length === 0) return [];
     const porDia = (s: Sector) =>
-      new Map(bundles[s].rendimiento3MFocoRecompra[focoRecPoblacion].puntos.map((p) => [p.dia, p]));
+      new Map(bundles[s].rendimiento3MFocoRecompra[focoRecCartera][focoRecPoblacion].puntos.map((p) => [p.dia, p]));
     const c = porDia("cumana");
     const b = porDia("barquisimeto_este");
 
@@ -709,7 +712,7 @@ export function DiennDashboardClient({
         ratioCabudareAcum: bDias > 0 ? Math.round((bSuma / bDias) * 10) / 10 : null,
       };
     });
-  }, [focoRecData, bundles, focoRecPoblacion]);
+  }, [focoRecData, bundles, focoRecCartera, focoRecPoblacion]);
 
   // Mismo patrón que el gráfico de 3M de PAN, pero para Margarina/Mayonesa
   // (sección "Rendimiento vs. Margarina/Mayonesa"): no hay distinción
@@ -1214,6 +1217,30 @@ export function DiennDashboardClient({
             </p>
           </div>
           <div className="flex flex-wrap items-center gap-2 print:hidden">
+            {/* Cartera vigente completa o solo la cartera piloto original (los 358). */}
+            <div className="flex rounded-lg border border-slate-200 overflow-hidden text-xs font-medium">
+              {(
+                [
+                  ["completa", "Cartera completa"],
+                  ["piloto", "Cartera piloto"],
+                ] as const
+              ).map(([key, label]) => (
+                <button
+                  key={key}
+                  onClick={() => setFocoRecCartera(key)}
+                  title={
+                    key === "piloto"
+                      ? "Solo los clientes de la cartera piloto original (los 358 del arranque)"
+                      : "Toda la cartera vigente"
+                  }
+                  className={`px-3 py-1.5 transition-colors ${
+                    focoRecCartera === key ? "bg-emerald-700 text-white" : "bg-white text-slate-500 hover:bg-slate-50"
+                  }`}
+                >
+                  {label}
+                </button>
+              ))}
+            </div>
             <div className="flex rounded-lg border border-slate-200 overflow-hidden text-xs font-medium">
               {(
                 [

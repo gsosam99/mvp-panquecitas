@@ -18,6 +18,7 @@ import {
   getUniverseLocations,
   getVolumenLocations,
   esFueraDeCartera,
+  COHORTE_PILOTO_ORIGINAL,
   type Sector,
 } from "@/lib/universe";
 import {
@@ -1312,17 +1313,25 @@ function primeraCompraPorCliente(filas: { cliente: string; fecha: string; kg: nu
   return primera;
 }
 
+/**
+ * Qué cartera entra en el gráfico de foco y recompra: la vigente completa, o
+ * solo la tanda "Piloto original" (los 358 del arranque), mismo recorte por
+ * `cohorte` que la tabla de combinaciones del piloto inicial.
+ */
+export type AlcanceCartera = "completa" | "piloto";
+
 export async function getRendimiento3MFocoRecompra(
   sector?: Sector
-): Promise<Record<Pan3MPoblacion, Rendimiento3MResult>> {
-  const vacio = { clientes: RENDIMIENTO_3M_VACIO, universo: RENDIMIENTO_3M_VACIO };
+): Promise<Record<AlcanceCartera, Record<Pan3MPoblacion, Rendimiento3MResult>>> {
+  const vacioPoblacion = { clientes: RENDIMIENTO_3M_VACIO, universo: RENDIMIENTO_3M_VACIO };
+  const vacio = { completa: vacioPoblacion, piloto: vacioPoblacion };
   const universoTotal = await getUniverseLocations();
   const delSector = sector ? universoTotal.filter((l) => sectorGroup(l.oficina_venta) === sector) : universoTotal;
   // Cartera vigente hoy y solo segmentos foco. Los "Sin segmento" quedan
   // dentro, mismo criterio que la recompra foco y la activación ajustada.
-  const foco = vigentesAl(delSector, todayISO()).filter((l) => !esSegmentoSinAlimentos(l.segmento_cliente));
-  if (foco.length === 0) return vacio;
-  const idsFoco = new Set(foco.map((l) => l.id));
+  const focoCompleta = vigentesAl(delSector, todayISO()).filter((l) => !esSegmentoSinAlimentos(l.segmento_cliente));
+  if (focoCompleta.length === 0) return vacio;
+  const focoPiloto = focoCompleta.filter((l) => (l.cohorte ?? "").trim() === COHORTE_PILOTO_ORIGINAL.nombre);
 
   const supabase = createSupabaseServiceClient();
 
@@ -1359,27 +1368,20 @@ export async function getRendimiento3MFocoRecompra(
 
   // PAN resuelto por SAP_CODE contra la cartera de hoy, igual que en 4d.
   const locIdBySapCode = new Map(universoTotal.map((l) => [l.sap_code.trim(), l.id]));
+  // La primera compra es de cada cliente, así que se calcula una sola vez sobre
+  // la cartera completa y sirve igual para el recorte del piloto original.
+  const idsFocoCompleta = new Set(focoCompleta.map((l) => l.id));
   const panFoco = pan3m
     .map((r) => ({
       locId: locIdBySapCode.get(r.sap_code.trim()),
       fecha: r.date_of_sale.slice(0, 10),
       kg: Number(r.quantity_kg),
     }))
-    .filter((r): r is { locId: string; fecha: string; kg: number } => r.locId !== undefined && idsFoco.has(r.locId));
+    .filter(
+      (r): r is { locId: string; fecha: string; kg: number } => r.locId !== undefined && idsFocoCompleta.has(r.locId)
+    );
   const primeraPan = primeraCompraPorCliente(panFoco.map((r) => ({ cliente: r.locId, fecha: r.fecha, kg: r.kg })));
   const panRecompra = panFoco.filter((r) => r.fecha !== primeraPan.get(r.locId));
-
-  // Panquecitas de recompra por día, solo segmentos foco. Misma serie que 4d:
-  // desde el arranque del piloto y con sábado/domingo sumados al lunes.
-  const kgPorDia = new Map<string, number>();
-  for (const r of panqData) {
-    if (!idsFoco.has(r.location_id)) continue;
-    const fecha = r.date_of_sale.slice(0, 10);
-    if (fecha < RENDIMIENTO_DIARIO_DESDE) continue;
-    if (fecha === primeraPanq.get(r.location_id)) continue;
-    const dia = siguienteDiaHabil(fecha);
-    kgPorDia.set(dia, (kgPorDia.get(dia) ?? 0) + Number(r.quantity_kg));
-  }
 
   // Mismo cierre de rango que 4d, leído de TODO el piloto, para que las dos
   // ciudades y los dos gráficos compartan los mismos días.
@@ -1391,15 +1393,13 @@ export async function getRendimiento3MFocoRecompra(
     if (dia > ultimoDiaReportado) ultimoDiaReportado = dia;
   }
 
-  // "PAN Cliente": clientes foco que compran Panquecitas (neto > 0), mismo
-  // criterio que 4d. "PAN Universo": toda la cartera foco.
+  // Neto de Panquecitas por cliente, para la población "PAN Cliente".
   const totalesPanq = new Map<string, number>();
   for (const r of panqData) {
     totalesPanq.set(r.location_id, (totalesPanq.get(r.location_id) ?? 0) + Number(r.quantity_kg));
   }
-  const idsClientesPanq = new Set(foco.filter((l) => (totalesPanq.get(l.id) ?? 0) > 0).map((l) => l.id));
 
-  const armar = (idsPan: Set<string>): Rendimiento3MResult => {
+  const armar = (idsPan: Set<string>, kgPorDia: Map<string, number>): Rendimiento3MResult => {
     const filas = panRecompra.filter((r) => idsPan.has(r.locId));
     if (filas.length === 0) return RENDIMIENTO_3M_VACIO;
     const totalPanKg = filas.reduce((s, r) => s + r.kg, 0);
@@ -1433,7 +1433,31 @@ export async function getRendimiento3MFocoRecompra(
     };
   };
 
-  return { clientes: armar(idsClientesPanq), universo: armar(idsFoco) };
+  // Por alcance de cartera: la serie de Panquecitas y las dos poblaciones del
+  // promedio de PAN se recortan a esa cartera foco.
+  const porAlcance = (foco: typeof focoCompleta): Record<Pan3MPoblacion, Rendimiento3MResult> => {
+    if (foco.length === 0) return vacioPoblacion;
+    const idsFoco = new Set(foco.map((l) => l.id));
+
+    // Panquecitas de recompra por día. Misma serie que 4d: desde el arranque
+    // del piloto y con sábado/domingo sumados al lunes.
+    const kgPorDia = new Map<string, number>();
+    for (const r of panqData) {
+      if (!idsFoco.has(r.location_id)) continue;
+      const fecha = r.date_of_sale.slice(0, 10);
+      if (fecha < RENDIMIENTO_DIARIO_DESDE) continue;
+      if (fecha === primeraPanq.get(r.location_id)) continue;
+      const dia = siguienteDiaHabil(fecha);
+      kgPorDia.set(dia, (kgPorDia.get(dia) ?? 0) + Number(r.quantity_kg));
+    }
+
+    // "PAN Cliente": clientes foco que compran Panquecitas (neto > 0), mismo
+    // criterio que 4d. "PAN Universo": toda la cartera foco.
+    const idsClientesPanq = new Set(foco.filter((l) => (totalesPanq.get(l.id) ?? 0) > 0).map((l) => l.id));
+    return { clientes: armar(idsClientesPanq, kgPorDia), universo: armar(idsFoco, kgPorDia) };
+  };
+
+  return { completa: porAlcance(focoCompleta), piloto: porAlcance(focoPiloto) };
 }
 // ── 5. Cobertura y Comunicación por sector (semanal) ───────────────
 // Ver decisión #11: no hay datos reales de campañas de comunicación ni
