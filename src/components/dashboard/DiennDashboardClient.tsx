@@ -126,7 +126,7 @@ export interface SectorBundle {
   /** Rendimiento diario vs. promedio histórico 3M de Harina PAN, por población. */
   rendimiento3M: Record<Pan3MPoblacion, Rendimiento3MResult>;
   /** Mismo gráfico que rendimiento3M, pero solo segmentos foco y solo ventas de recompra (sin la primera compra). */
-  rendimiento3MFocoRecompra: Record<AlcanceCartera, Record<Pan3MPoblacion, Rendimiento3MResult>>;
+  rendimiento3MFocoRecompra: Record<AlcanceCartera, Rendimiento3MResult>;
   /** Rendimiento diario de Panquecitas vs. promedio histórico de Margarina/Mayonesa (Mavesa), por categoría. */
   rendimientoVsMavesa: Record<MavesaCategoria, RendimientoVsMavesaResult>;
   /** Conversión de degustaciones (tickets recibidos ÷ entregados) de la ciudad/sector. */
@@ -339,7 +339,6 @@ export function DiennDashboardClient({
   const [ciudad3M, setCiudad3M] = useState<"TOTAL" | Sector>("TOTAL");
   // Gráfico adicional de 3M: solo segmentos foco y solo recompra. Estado
   // propio, para que sus botones no muevan el gráfico de arriba.
-  const [focoRecPoblacion, setFocoRecPoblacion] = useState<Pan3MPoblacion>("clientes");
   // Cartera vigente completa o solo la cartera piloto original (los 358).
   const [focoRecCartera, setFocoRecCartera] = useState<AlcanceCartera>("completa");
   const [showPanDiarioFocoRec, setShowPanDiarioFocoRec] = useState(true);
@@ -673,8 +672,8 @@ export function DiennDashboardClient({
   // diarios, por ciudad contra su propio promedio de PAN—, sobre sus datos.
   const focoRecData =
     ciudadFocoRec === "TOTAL"
-      ? bundle.rendimiento3MFocoRecompra[focoRecCartera][focoRecPoblacion]
-      : bundles[ciudadFocoRec].rendimiento3MFocoRecompra[focoRecCartera][focoRecPoblacion];
+      ? bundle.rendimiento3MFocoRecompra[focoRecCartera]
+      : bundles[ciudadFocoRec].rendimiento3MFocoRecompra[focoRecCartera];
 
   const ratioAcumuladoFocoRec = useMemo(() => {
     const puntos = focoRecData.puntos;
@@ -687,7 +686,7 @@ export function DiennDashboardClient({
     const base = focoRecData.puntos;
     if (base.length === 0) return [];
     const porDia = (s: Sector) =>
-      new Map(bundles[s].rendimiento3MFocoRecompra[focoRecCartera][focoRecPoblacion].puntos.map((p) => [p.dia, p]));
+      new Map(bundles[s].rendimiento3MFocoRecompra[focoRecCartera].puntos.map((p) => [p.dia, p]));
     const c = porDia("cumana");
     const b = porDia("barquisimeto_este");
 
@@ -712,7 +711,7 @@ export function DiennDashboardClient({
         ratioCabudareAcum: bDias > 0 ? Math.round((bSuma / bDias) * 10) / 10 : null,
       };
     });
-  }, [focoRecData, bundles, focoRecCartera, focoRecPoblacion]);
+  }, [focoRecData, bundles, focoRecCartera]);
 
   // Mismo patrón que el gráfico de 3M de PAN, pero para Margarina/Mayonesa
   // (sección "Rendimiento vs. Margarina/Mayonesa"): no hay distinción
@@ -1207,14 +1206,13 @@ export function DiennDashboardClient({
           <div>
             <CardTitle>Rendimiento Diario vs. Promedio 3 Meses — Segmentos Foco y Recompra</CardTitle>
             <p className="text-xs text-slate-400 mt-1">
-              Misma lectura que el gráfico anterior, con dos recortes. Solo{" "}
-              <span className="font-medium">segmentos foco</span> (sin licorerías, CS, farmacias de barrio, mascotas ni
-              animales), en el promedio de Harina PAN y en la venta de Panquecitas. Y solo{" "}
-              <span className="font-medium">ventas de recompra</span>: de cada cliente se descarta su primera compra del
-              producto y se cuenta desde la segunda, tanto en PAN como en Panquecitas. El reporte{" "}
-              <span className="font-medium">Radar últimos 3 Meses</span> se lee igual que en el gráfico anterior (último
-              corte de cada mes por cliente y material) y el promedio de PAN es ese acumulado de recompra ÷ días hábiles.
-              La venta de Panquecitas es solo de la cartera foco: no incluye PDV fuera de cartera.
+              Compara a los clientes de <span className="font-medium">segmentos foco</span> (sin licorerías, CS,
+              farmacias de barrio, mascotas ni animales) <span className="font-medium">activados con recompra</span> —con
+              Panquecitas en al menos 2 fechas distintas— contra el promedio de Harina PAN de{" "}
+              <span className="font-medium">esos mismos clientes</span>. La venta de Panquecitas es la de esos clientes sin
+              su primera compra. El PAN se lee igual que en el gráfico anterior (reporte{" "}
+              <span className="font-medium">Radar últimos 3 Meses</span>, último corte de cada mes) ÷ días hábiles.{" "}
+              <span className="font-medium">Cartera piloto</span> deja solo a los clientes del piloto original (los 358).
             </p>
           </div>
           <div className="flex flex-wrap items-center gap-2 print:hidden">
@@ -1236,24 +1234,6 @@ export function DiennDashboardClient({
                   }
                   className={`px-3 py-1.5 transition-colors ${
                     focoRecCartera === key ? "bg-emerald-700 text-white" : "bg-white text-slate-500 hover:bg-slate-50"
-                  }`}
-                >
-                  {label}
-                </button>
-              ))}
-            </div>
-            <div className="flex rounded-lg border border-slate-200 overflow-hidden text-xs font-medium">
-              {(
-                [
-                  ["clientes", "PAN Cliente"],
-                  ["universo", "PAN Universo"],
-                ] as const
-              ).map(([key, label]) => (
-                <button
-                  key={key}
-                  onClick={() => setFocoRecPoblacion(key)}
-                  className={`px-3 py-1.5 transition-colors ${
-                    focoRecPoblacion === key ? "bg-slate-900 text-white" : "bg-white text-slate-500 hover:bg-slate-50"
                   }`}
                 >
                   {label}
@@ -1319,7 +1299,7 @@ export function DiennDashboardClient({
                 {ratioAcumuladoFocoRec && (
                   <div
                     className="absolute right-0 top-0 z-10 rounded-lg border border-slate-200 bg-white/90 px-3 py-1.5 pointer-events-none"
-                    title={`Promedio de los ${ratioAcumuladoFocoRec.dias} ratios diarios del período (Panquecitas de recompra del día ÷ promedio diario de Harina PAN de recompra, solo segmentos foco).`}
+                    title={`Promedio de los ${ratioAcumuladoFocoRec.dias} ratios diarios del período (Panquecitas del día de los clientes foco con recompra, sin su primera compra ÷ promedio diario de Harina PAN de esos mismos clientes).`}
                   >
                     <p className="text-xs uppercase tracking-wide text-slate-500 leading-none">Ratio acumulado</p>
                     <p
@@ -1340,14 +1320,14 @@ export function DiennDashboardClient({
                 />
               </div>
               <p className="text-xs text-slate-400 mt-2">
-                Promedio PAN 3M (foco · recompra):{" "}
+                Promedio PAN 3M de los clientes foco con recompra:{" "}
                 <span className="font-medium text-slate-600">
                   {focoRecData.promedio3M.toLocaleString("es-VE", { maximumFractionDigits: 1 })} kg/día
                 </span>{" "}
                 ({focoRecData.totalPanKg.toLocaleString("es-VE", { maximumFractionDigits: 0 })} kg ÷{" "}
-                {focoRecData.diasPeriodo} días hábiles, del {focoRecData.desde} al {focoRecData.hasta}) · recompra de{" "}
+                {focoRecData.diasPeriodo} días hábiles, del {focoRecData.desde} al {focoRecData.hasta}) · aportado por{" "}
                 <span className="font-medium text-slate-600">
-                  {focoRecData.clientesPan} de {focoRecData.clientesPoblacion} PDV foco
+                  {focoRecData.clientesPan} de {focoRecData.clientesPoblacion} PDV foco con recompra
                 </span>{" "}
                 · Meta 4%:{" "}
                 <span className="font-medium text-emerald-700">
@@ -1366,9 +1346,9 @@ export function DiennDashboardClient({
                   </>
                 ) : (
                   <>
-                    <p>Faltan las ventas por día del reporte &quot;Radar últimos 3 Meses&quot;.</p>
+                    <p>Sin promedio de PAN para los clientes foco con recompra.</p>
                     <p className="text-xs mt-1">
-                      Hay que correr el migration 024 y volver a subir el reporte en el menú &quot;Radar 3 Meses&quot;.
+                      Revisa que el reporte &quot;Radar últimos 3 Meses&quot; esté cargado (menú &quot;Radar 3 Meses&quot;).
                     </p>
                   </>
                 )}
