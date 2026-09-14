@@ -23,9 +23,11 @@ import { presentacionFromVariant } from "@/lib/sellout-utils";
 // que los dos cuadros cuadran entre sí; ese lista la diferencia, este la
 // ordena por proporción.
 //
-// Los PDV visitados con inventario 0 no entran: sin producto no hay nada
-// estancado — esos son stock out y ya tienen su propia lista. Se cuentan
-// aparte para que no desaparezcan en silencio.
+// POBLACIÓN: PDV visitados por un mercaderista Y con venta Radar, los dos a la
+// vez (DIENN, 14-09-2026). Un PDV sin visita no tiene inventario que cruzar y
+// uno sin Radar no tiene venta contra la cual medir. Los visitados sin Radar
+// se cuentan aparte para que no desaparezcan en silencio. Los que tienen
+// Radar pero inventario 0 SÍ entran, con su propio nivel: se vendió todo.
 
 /** Desde esta proporción el producto se considera estancado. */
 export const CRUCE_UMBRAL_ALTO_PCT = 50;
@@ -33,11 +35,11 @@ export const CRUCE_UMBRAL_ALTO_PCT = 50;
 export const CRUCE_UMBRAL_MEDIO_PCT = 20;
 
 /**
- * - SIN_VENTA_RADAR: el mercaderista ve producto pero el Radar no registra
- *   venta al PDV (le llegó por otra vía o el código no cruza).
  * - ALTO / MEDIO / ROTANDO: según la proporción inventario ÷ Radar.
+ * - SIN_PRODUCTO: tiene venta Radar pero el mercaderista no encontró
+ *   producto (inventario 0): se vendió todo, toca reponer.
  */
-export type NivelApoyo = "SIN_VENTA_RADAR" | "ALTO" | "MEDIO" | "ROTANDO";
+export type NivelApoyo = "ALTO" | "MEDIO" | "ROTANDO" | "SIN_PRODUCTO";
 
 export interface CruceInventarioRadarRow {
   locationId: string;
@@ -59,8 +61,8 @@ export interface CruceInventarioRadarRow {
   depositoIncluido: boolean;
   inventarioKg: number;
   radarKg: number;
-  /** inventario ÷ Radar × 100. null si el Radar no registra venta. */
-  proporcionPct: number | null;
+  /** inventario ÷ Radar × 100. */
+  proporcionPct: number;
   nivel: NivelApoyo;
 }
 
@@ -68,8 +70,8 @@ export interface CruceInventarioRadarResult {
   filas: CruceInventarioRadarRow[];
   /** PDV de la cartera vigente con al menos una visita. */
   visitados: number;
-  /** De esos, los que en su última visita no tenían producto (fuera del cruce). */
-  visitadosSinInventario: number;
+  /** De esos, los que no tienen venta Radar (fuera del cruce). */
+  visitadosSinRadar: number;
   umbralAltoPct: number;
   umbralMedioPct: number;
 }
@@ -85,8 +87,8 @@ interface VisitaCruce {
   deposit_access: boolean;
 }
 
-function nivelDe(proporcionPct: number | null): NivelApoyo {
-  if (proporcionPct === null) return "SIN_VENTA_RADAR";
+function nivelDe(inventarioKg: number, proporcionPct: number): NivelApoyo {
+  if (inventarioKg <= 0) return "SIN_PRODUCTO";
   if (proporcionPct >= CRUCE_UMBRAL_ALTO_PCT) return "ALTO";
   if (proporcionPct >= CRUCE_UMBRAL_MEDIO_PCT) return "MEDIO";
   return "ROTANDO";
@@ -96,7 +98,7 @@ export async function getCruceInventarioRadar(): Promise<CruceInventarioRadarRes
   const vacio: CruceInventarioRadarResult = {
     filas: [],
     visitados: 0,
-    visitadosSinInventario: 0,
+    visitadosSinRadar: 0,
     umbralAltoPct: CRUCE_UMBRAL_ALTO_PCT,
     umbralMedioPct: CRUCE_UMBRAL_MEDIO_PCT,
   };
@@ -166,24 +168,26 @@ export async function getCruceInventarioRadar(): Promise<CruceInventarioRadarRes
 
   const r1 = (v: number) => Math.round(v * 10) / 10;
   const filas: CruceInventarioRadarRow[] = [];
-  let visitadosSinInventario = 0;
+  let visitadosSinRadar = 0;
 
   for (const l of universo) {
+    // Solo PDV visitados por un mercaderista…
     const v = ultimaVisita.get(l.id);
     if (!v) continue;
+
+    // …y con venta Radar.
+    const radarKg = radarKgPorLoc.get(l.id) ?? 0;
+    if (radarKg <= 0) {
+      visitadosSinRadar += 1;
+      continue;
+    }
 
     const unidades400 = v.anaquel_400_units ?? 0;
     const unidades800 = v.anaquel_800_units ?? 0;
     const anaquelKg = unidades400 * 0.4 + unidades800 * 0.8;
     const depositoKg = v.deposit_access ? depositoKgPorVisita.get(v.id) ?? 0 : 0;
     const inventarioKg = anaquelKg + depositoKg;
-    if (inventarioKg <= 0) {
-      visitadosSinInventario += 1;
-      continue;
-    }
-
-    const radarKg = radarKgPorLoc.get(l.id) ?? 0;
-    const proporcionPct = radarKg > 0 ? r1((inventarioKg / radarKg) * 100) : null;
+    const proporcionPct = r1((inventarioKg / radarKg) * 100);
 
     filas.push({
       locationId: l.id,
@@ -204,7 +208,7 @@ export async function getCruceInventarioRadar(): Promise<CruceInventarioRadarRes
       inventarioKg: r1(inventarioKg),
       radarKg: r1(radarKg),
       proporcionPct,
-      nivel: nivelDe(proporcionPct),
+      nivel: nivelDe(inventarioKg, proporcionPct),
     });
   }
 
@@ -213,7 +217,7 @@ export async function getCruceInventarioRadar(): Promise<CruceInventarioRadarRes
   return {
     filas,
     visitados: ultimaVisita.size,
-    visitadosSinInventario,
+    visitadosSinRadar,
     umbralAltoPct: CRUCE_UMBRAL_ALTO_PCT,
     umbralMedioPct: CRUCE_UMBRAL_MEDIO_PCT,
   };

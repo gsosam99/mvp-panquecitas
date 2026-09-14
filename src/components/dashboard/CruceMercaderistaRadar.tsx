@@ -20,16 +20,12 @@ import type {
 
 const NIVELES: Record<NivelApoyo, { label: string; color: string; badge: string }> = {
   ALTO: { label: "Estancado", color: "#dc2626", badge: "border-red-300 text-red-700 bg-red-50" },
-  SIN_VENTA_RADAR: {
-    label: "Sin venta Radar",
-    color: "#7c3aed",
-    badge: "border-violet-300 text-violet-700 bg-violet-50",
-  },
   MEDIO: { label: "Rotación lenta", color: "#f59e0b", badge: "border-amber-300 text-amber-700 bg-amber-50" },
   ROTANDO: { label: "Rotando", color: "#16a34a", badge: "border-emerald-300 text-emerald-700 bg-emerald-50" },
+  SIN_PRODUCTO: { label: "Sin producto", color: "#64748b", badge: "border-slate-300 text-slate-600 bg-slate-50" },
 };
 
-const ORDEN_NIVEL: NivelApoyo[] = ["ALTO", "SIN_VENTA_RADAR", "MEDIO", "ROTANDO"];
+const ORDEN_NIVEL: NivelApoyo[] = ["ALTO", "MEDIO", "ROTANDO", "SIN_PRODUCTO"];
 
 type Orden = "proporcion" | "inventario";
 type FiltroNivel = "TODOS" | NivelApoyo;
@@ -94,11 +90,6 @@ const Grafico = dynamic(
   }
 );
 
-/** Proporción para ordenar: sin venta Radar va arriba de todo. */
-function claveProporcion(r: CruceInventarioRadarRow): number {
-  return r.proporcionPct ?? Number.POSITIVE_INFINITY;
-}
-
 export function CruceMercaderistaRadar({
   data,
   sector,
@@ -121,17 +112,13 @@ export function CruceMercaderistaRadar({
 
   const resumen = useMemo(() => {
     const inventario = delSector.reduce((s, r) => s + r.inventarioKg, 0);
-    // La proporción global solo con PDV que tienen Radar: los "sin venta"
-    // inflarían el numerador sin nada en el denominador.
-    const conRadar = delSector.filter((r) => r.radarKg > 0);
-    const invConRadar = conRadar.reduce((s, r) => s + r.inventarioKg, 0);
-    const radar = conRadar.reduce((s, r) => s + r.radarKg, 0);
+    const radar = delSector.reduce((s, r) => s + r.radarKg, 0);
     const porNivel = new Map<NivelApoyo, number>();
     for (const r of delSector) porNivel.set(r.nivel, (porNivel.get(r.nivel) ?? 0) + 1);
     return {
       inventario,
       radar,
-      proporcion: radar > 0 ? Math.round((invConRadar / radar) * 1000) / 10 : null,
+      proporcion: radar > 0 ? Math.round((inventario / radar) * 1000) / 10 : null,
       porNivel,
     };
   }, [delSector]);
@@ -141,7 +128,7 @@ export function CruceMercaderistaRadar({
     return [...base].sort((a, b) =>
       orden === "inventario"
         ? b.inventarioKg - a.inventarioKg
-        : claveProporcion(b) - claveProporcion(a) || b.inventarioKg - a.inventarioKg
+        : b.proporcionPct - a.proporcionPct || b.inventarioKg - a.inventarioKg
     );
   }, [delSector, filtroNivel, orden]);
 
@@ -151,7 +138,7 @@ export function CruceMercaderistaRadar({
         nombre: r.name.length > 30 ? `${r.name.slice(0, 29)}…` : r.name,
         inventarioKg: r.inventarioKg,
         radarKg: r.radarKg,
-        etiqueta: r.proporcionPct == null ? "sin venta Radar" : `${pct(r.proporcionPct)} del Radar`,
+        etiqueta: r.nivel === "SIN_PRODUCTO" ? "sin producto" : `${pct(r.proporcionPct)} del Radar`,
         color: NIVELES[r.nivel].color,
       })),
     [filas]
@@ -173,11 +160,11 @@ export function CruceMercaderistaRadar({
     { header: "Depósito (kg)", value: (r) => (r.depositoIncluido ? r.depositoKg : "sin acceso"), width: 14 },
     { header: "Inventario reportado (kg)", value: (r) => r.inventarioKg, width: 22 },
     { header: "Vendido según Radar (kg)", value: (r) => r.radarKg, width: 22 },
-    { header: "Inventario / Radar (%)", value: (r) => r.proporcionPct ?? "sin venta Radar", width: 20 },
+    { header: "Inventario / Radar (%)", value: (r) => r.proporcionPct, width: 20 },
     { header: "Nivel", value: (r) => NIVELES[r.nivel].label, width: 16 },
   ];
 
-  const enAlerta = (resumen.porNivel.get("ALTO") ?? 0) + (resumen.porNivel.get("SIN_VENTA_RADAR") ?? 0);
+  const enAlerta = resumen.porNivel.get("ALTO") ?? 0;
 
   return (
     <Card className="mb-6 print-avoid-break">
@@ -185,7 +172,8 @@ export function CruceMercaderistaRadar({
         <div>
           <CardTitle>¿Dónde hace falta apoyo? — Mercaderistas vs Radar</CardTitle>
           <p className="text-xs text-slate-400 mt-1">
-            Por cada PDV visitado, lo que <span className="font-medium">contó el mercaderista</span> en su última
+            Solo PDV <span className="font-medium">visitados por un mercaderista y con venta Radar</span>. Por cada
+            uno, lo que <span className="font-medium">contó el mercaderista</span> en su última
             visita (anaquel + depósito) contra lo que <span className="font-medium">el Radar dice que se vendió</span>{" "}
             a ese PDV. La proporción es qué parte de lo vendido sigue en la tienda: mientras más alta, más producto
             estancado y más apoyo necesita ese punto. {filtroTexto}.
@@ -222,7 +210,7 @@ export function CruceMercaderistaRadar({
           <div className="h-[200px] flex items-center justify-center text-slate-400">
             <div className="text-center">
               <p className="text-4xl mb-2">📦</p>
-              <p>Sin visitas de mercaderista con producto para este corte.</p>
+              <p>Sin PDV visitados con venta Radar para este corte.</p>
             </div>
           </div>
         ) : (
@@ -231,7 +219,7 @@ export function CruceMercaderistaRadar({
               <div className="rounded-lg border border-slate-200 p-3">
                 <p className="text-[11px] uppercase tracking-wide text-slate-400">Inventario reportado</p>
                 <p className="text-xl font-bold text-slate-900">{kg(resumen.inventario)}</p>
-                <p className="text-xs text-slate-400">{delSector.length} PDV con producto</p>
+                <p className="text-xs text-slate-400">{delSector.length} PDV visitados con venta Radar</p>
               </div>
               <div className="rounded-lg border border-slate-200 p-3">
                 <p className="text-[11px] uppercase tracking-wide text-slate-400">Vendido según Radar</p>
@@ -241,12 +229,12 @@ export function CruceMercaderistaRadar({
               <div className="rounded-lg border border-slate-200 p-3">
                 <p className="text-[11px] uppercase tracking-wide text-slate-400">Proporción global</p>
                 <p className="text-xl font-bold text-slate-900">{pct(resumen.proporcion)}</p>
-                <p className="text-xs text-slate-400">inventario ÷ Radar (PDV con Radar)</p>
+                <p className="text-xs text-slate-400">inventario ÷ Radar</p>
               </div>
               <div className="rounded-lg border border-red-200 bg-red-50/40 p-3">
                 <p className="text-[11px] uppercase tracking-wide text-red-500">PDV que necesitan apoyo</p>
                 <p className="text-xl font-bold text-red-700">{enAlerta}</p>
-                <p className="text-xs text-slate-500">estancados o con producto sin venta Radar</p>
+                <p className="text-xs text-slate-500">producto estancado (≥ {data.umbralAltoPct}% de lo vendido)</p>
               </div>
             </div>
 
@@ -348,11 +336,10 @@ export function CruceMercaderistaRadar({
           <span className="font-medium text-red-700">Estancado</span>: el inventario es ≥ {data.umbralAltoPct}% de lo
           vendido; <span className="font-medium text-amber-700">rotación lenta</span>: entre {data.umbralMedioPct}% y{" "}
           {data.umbralAltoPct}%; <span className="font-medium text-emerald-700">rotando</span>: menos de{" "}
-          {data.umbralMedioPct}%. <span className="font-medium text-violet-700">Sin venta Radar</span>: el
-          mercaderista ve producto pero el Radar no registra venta a ese PDV (le llegó por otra vía o el código no
-          cruza). Una proporción mayor a 100% significa más producto en tienda que todo lo que el Radar le vendió.{" "}
-          De {data.visitados} PDV visitados en total, {data.visitadosSinInventario} no tenían producto en su última
-          visita y no entran en este cruce (ver Stock Out).
+          {data.umbralMedioPct}%. <span className="font-medium text-slate-600">Sin producto</span>: tiene venta Radar
+          pero el mercaderista no encontró producto — se vendió todo y toca reponer. Una proporción mayor a 100%
+          significa más producto en tienda que todo lo que el Radar le vendió. De {data.visitados} PDV visitados en
+          total, {data.visitadosSinRadar} no tienen venta Radar y no entran en este cruce.
         </p>
       </CardContent>
     </Card>

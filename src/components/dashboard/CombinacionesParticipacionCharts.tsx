@@ -7,156 +7,307 @@ import { ExportExcelButton } from "@/components/dashboard/ExportExcelButton";
 import type { ExcelColumn } from "@/lib/export-excel";
 import type { CombinacionRow, CombinacionesResult } from "@/lib/mavesa-queries";
 
-// Participación de cada PRECIO, cada COMUNICACIÓN y su cruce sobre las ventas
-// totales de Panquecitas (DIENN, 14-09-2026). Pensado para la cartera del
-// piloto inicial: recibe el mismo CombinacionesResult de la tabla, ya recortado
-// a esa tanda en el servidor, y solo agrupa sus filas.
+// Ventas de Panquecitas por PRECIO, por COMUNICACIÓN y la unión de los dos
+// (DIENN, 14-09-2026). Recibe el mismo CombinacionesResult de la tabla —ya
+// recortado en el servidor a la cartera actual o al piloto inicial— y solo
+// agrupa sus filas.
 //
-// Dos vistas:
-//   - % de las ventas: kg del grupo ÷ ventas totales del alcance.
-//   - kg por PDV: kg del grupo ÷ sus PDV. Hace falta porque el % depende del
-//     tamaño del grupo — la combinación 1 tiene tres grupos vendedores y la 2
-//     uno solo.
+// Codificación fija en los tres gráficos, para que el tercero se lea solo:
+//   - COMUNICACIÓN = barra (azul Practicidad, verde Nutrición),
+//   - PRECIO       = punto, con el mismo color en todos los gráficos.
+// En la unión, la barra es el total de la comunicación y cada punto es lo que
+// aportó un precio dentro de ella.
+//
+// El eje Y son las ventas. Tres lecturas:
+//   - kg: ventas de Panquecitas del grupo.
+//   - %: kg del grupo ÷ ventas totales del alcance.
+//   - kg por PDV: kg del grupo ÷ sus PDV. Quita el efecto del tamaño — la
+//     combinación 1 tiene tres grupos vendedores y la 2 uno solo.
 
-type Vista = "pct" | "porPdv";
+type Vista = "kg" | "pct" | "porPdv";
 
-interface Grupo {
-  categoria: string;
-  detalle: string;
-  kg: number;
-  clientes: number;
-  pct: number;
-  porPdv: number;
-  color: string;
-}
+const VISTAS: { key: Vista; label: string; eje: string }[] = [
+  { key: "kg", label: "Ventas (kg)", eje: "Ventas (kg)" },
+  { key: "pct", label: "% de las ventas totales", eje: "% de las ventas totales" },
+  { key: "porPdv", label: "kg por PDV", eje: "kg por PDV" },
+];
 
-interface CrucePunto {
-  precio: string;
-  detalle: string;
-  practicidadPct: number;
-  practicidadPorPdv: number;
-  practicidadKg: number;
-  practicidadPdv: number;
-  nutricionPct: number;
-  nutricionPorPdv: number;
-  nutricionKg: number;
-  nutricionPdv: number;
-}
+const ejeDe = (vista: Vista) => VISTAS.find((x) => x.key === vista)?.eje ?? "";
 
 const COLOR_COMUNICACION: Record<string, string> = { Practicidad: "#0284c7", Nutrición: "#059669" };
-const COLORES_PRECIO = ["#6366f1", "#c026d3", "#0d9488", "#ea580c"];
+const COLORES_PRECIO = ["#ea580c", "#7c3aed", "#db2777", "#ca8a04"];
+const COLOR_BARRA_LEYENDA = "#94a3b8";
 
 const precioTxt = (v: number) => v.toLocaleString("es-VE", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
 const kgTxt = (v: number) => `${v.toLocaleString("es-VE", { maximumFractionDigits: 1 })} kg`;
 const fmtVista = (v: number, vista: Vista) =>
   vista === "pct"
     ? `${v.toLocaleString("es-VE", { maximumFractionDigits: 1 })}%`
-    : `${v.toLocaleString("es-VE", { maximumFractionDigits: 2 })} kg`;
+    : vista === "porPdv"
+    ? `${v.toLocaleString("es-VE", { maximumFractionDigits: 2 })} kg`
+    : `${v.toLocaleString("es-VE", { maximumFractionDigits: 0 })} kg`;
+const fmtEje = (v: number, vista: Vista) =>
+  vista === "pct"
+    ? `${v.toLocaleString("es-VE", { maximumFractionDigits: 0 })}%`
+    : v.toLocaleString("es-VE", { maximumFractionDigits: vista === "porPdv" ? 1 : 0 });
 
 const r1 = (v: number) => Math.round(v * 10) / 10;
 const r2 = (v: number) => Math.round(v * 100) / 100;
 
+/** Precio de la combinación: son dos presentaciones, el par completo. */
 function precioDe(f: CombinacionRow) {
   return `800g ${precioTxt(f.precio800)} · 400g ${precioTxt(f.precio400)}`;
 }
 
+interface Precio {
+  /** Clave de la serie en el gráfico de unión: "p0", "p1"… */
+  key: string;
+  label: string;
+  ciudad: string;
+  color: string;
+}
+
+/** Fila de los gráficos: lo fijo más las columnas por precio del de unión. */
+interface Fila {
+  categoria: string;
+  detalle: string;
+  /** Valor de la vista activa: altura de la barra o del punto. */
+  valor: number;
+  kg: number;
+  clientes: number;
+  color: string;
+  [columna: string]: string | number;
+}
+
+/** Techo del eje Y con aire para las etiquetas. */
+function techo(valores: number[]): number {
+  const max = Math.max(0, ...valores);
+  return max > 0 ? max * 1.18 : 1;
+}
+
 const Graficos = dynamic(
   async () => {
-    const { ResponsiveContainer, BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, Legend, LabelList, Cell } =
+    const { ResponsiveContainer, ComposedChart, Bar, Line, XAxis, YAxis, CartesianGrid, Tooltip, Legend, LabelList, Cell } =
       await import("recharts");
 
-    function PanelSimple({ data, vista }: { data: Grupo[]; vista: Vista }) {
+    /** Punto de un precio, con el color que trae su fila. */
+    function puntoPrecio(props: unknown) {
+      const { cx, cy, index, payload } = props as {
+        cx?: number;
+        cy?: number;
+        index?: number;
+        payload?: { color?: string };
+      };
       return (
-        <ResponsiveContainer width="100%" height={280}>
-          <BarChart data={data} margin={{ top: 28, right: 16, left: 16, bottom: 4 }}>
+        <circle
+          key={`punto-${index ?? 0}`}
+          cx={cx}
+          cy={cy}
+          r={9}
+          fill={payload?.color ?? COLORES_PRECIO[0]}
+          stroke="#ffffff"
+          strokeWidth={2}
+        />
+      );
+    }
+
+    function GraficoPrecio({ data, vista }: { data: Fila[]; vista: Vista }) {
+      const max = techo(data.map((f) => f.valor));
+      return (
+        <ResponsiveContainer width="100%" height={300}>
+          <ComposedChart data={data} margin={{ top: 28, right: 24, left: 8, bottom: 4 }}>
             <CartesianGrid strokeDasharray="3 3" stroke="#f1f5f9" vertical={false} />
             <XAxis dataKey="categoria" tick={{ fontSize: 11, fill: "#475569" }} interval={0} />
-            <YAxis hide />
+            {/* El eje va directo en el gráfico y no envuelto en un componente
+                propio: Recharts ubica sus ejes por tipo de hijo. */}
+            <YAxis
+              domain={[0, max]}
+              width={72}
+              tick={{ fontSize: 11, fill: "#64748b" }}
+              tickFormatter={(v) => fmtEje(Number(v ?? 0), vista)}
+              label={{
+                value: ejeDe(vista),
+                angle: -90,
+                position: "insideLeft",
+                style: { fontSize: 11, fill: "#64748b", textAnchor: "middle" },
+              }}
+            />
             <Tooltip
               contentStyle={{ fontSize: 12, borderRadius: 8, border: "1px solid #e2e8f0" }}
               formatter={(value, _name, item) => {
-                const g = item?.payload as Grupo | undefined;
+                const f = (item as unknown as { payload?: Fila } | undefined)?.payload;
                 return [
-                  g ? `${fmtVista(Number(value ?? 0), vista)} · ${kgTxt(g.kg)} · ${g.clientes} PDV` : String(value),
-                  vista === "pct" ? "% de las ventas" : "kg por PDV",
+                  f ? `${fmtVista(Number(value ?? 0), vista)} · ${kgTxt(f.kg)} · ${f.clientes} PDV` : String(value),
+                  "Precio",
                 ];
               }}
               labelFormatter={(label, payload) => {
-                const g = payload?.[0]?.payload as Grupo | undefined;
-                return g ? `${label} — ${g.detalle}` : String(label);
+                const f = payload?.[0]?.payload as Fila | undefined;
+                return f ? `${label} — ${f.detalle}` : String(label);
               }}
             />
-            <Bar dataKey={vista} radius={[4, 4, 0, 0]} maxBarSize={90}>
-              {data.map((g) => (
-                <Cell key={g.categoria} fill={g.color} />
-              ))}
+            {/* Sin línea: solo puntos. Unirlos dibujaría una tendencia entre
+                precios que no son una serie. */}
+            <Line
+              type="linear"
+              dataKey="valor"
+              name="Precio"
+              stroke={COLORES_PRECIO[0]}
+              strokeWidth={0}
+              legendType="circle"
+              dot={puntoPrecio}
+              activeDot={false}
+              isAnimationActive={false}
+            >
               <LabelList
-                dataKey={vista}
+                dataKey="valor"
                 position="top"
+                offset={16}
                 fontSize={12}
                 fontWeight={700}
-                formatter={(v) => fmtVista(Number(v ?? 0), vista)}
+                fill="#334155"
+                formatter={(v) => (v == null ? "" : fmtVista(Number(v), vista))}
               />
-            </Bar>
-          </BarChart>
+            </Line>
+          </ComposedChart>
         </ResponsiveContainer>
       );
     }
 
-    function PanelCruce({ data, vista }: { data: CrucePunto[]; vista: Vista }) {
-      const sufijo = vista === "pct" ? "Pct" : "PorPdv";
+    function GraficoComunicacion({ data, vista }: { data: Fila[]; vista: Vista }) {
+      const max = techo(data.map((f) => f.valor));
       return (
-        <ResponsiveContainer width="100%" height={320}>
-          <BarChart data={data} margin={{ top: 28, right: 16, left: 16, bottom: 4 }}>
+        <ResponsiveContainer width="100%" height={300}>
+          <ComposedChart data={data} margin={{ top: 28, right: 24, left: 8, bottom: 4 }}>
             <CartesianGrid strokeDasharray="3 3" stroke="#f1f5f9" vertical={false} />
-            <XAxis dataKey="precio" tick={{ fontSize: 11, fill: "#475569" }} interval={0} />
-            <YAxis hide />
+            <XAxis dataKey="categoria" tick={{ fontSize: 11, fill: "#475569" }} interval={0} />
+            {/* El eje va directo en el gráfico y no envuelto en un componente
+                propio: Recharts ubica sus ejes por tipo de hijo. */}
+            <YAxis
+              domain={[0, max]}
+              width={72}
+              tick={{ fontSize: 11, fill: "#64748b" }}
+              tickFormatter={(v) => fmtEje(Number(v ?? 0), vista)}
+              label={{
+                value: ejeDe(vista),
+                angle: -90,
+                position: "insideLeft",
+                style: { fontSize: 11, fill: "#64748b", textAnchor: "middle" },
+              }}
+            />
+            <Tooltip
+              contentStyle={{ fontSize: 12, borderRadius: 8, border: "1px solid #e2e8f0" }}
+              formatter={(value, _name, item) => {
+                const f = (item as unknown as { payload?: Fila } | undefined)?.payload;
+                return [
+                  f ? `${fmtVista(Number(value ?? 0), vista)} · ${kgTxt(f.kg)} · ${f.clientes} PDV` : String(value),
+                  "Comunicación",
+                ];
+              }}
+              labelFormatter={(label, payload) => {
+                const f = payload?.[0]?.payload as Fila | undefined;
+                return f ? `${label} — ${f.detalle}` : String(label);
+              }}
+            />
+            <Bar dataKey="valor" name="Comunicación" radius={[4, 4, 0, 0]} maxBarSize={110} isAnimationActive={false}>
+              {data.map((f, i) => (
+                <Cell key={i} fill={f.color} />
+              ))}
+              <LabelList
+                dataKey="valor"
+                position="top"
+                fontSize={12}
+                fontWeight={700}
+                fill="#334155"
+                formatter={(v) => (v == null ? "" : fmtVista(Number(v), vista))}
+              />
+            </Bar>
+          </ComposedChart>
+        </ResponsiveContainer>
+      );
+    }
+
+    function GraficoUnion({ data, precios, vista }: { data: Fila[]; precios: Precio[]; vista: Vista }) {
+      const max = techo(data.flatMap((f) => [f.valor, ...precios.map((p) => Number(f[p.key] ?? 0))]));
+      return (
+        <ResponsiveContainer width="100%" height={360}>
+          <ComposedChart data={data} margin={{ top: 32, right: 24, left: 8, bottom: 4 }}>
+            <CartesianGrid strokeDasharray="3 3" stroke="#f1f5f9" vertical={false} />
+            <XAxis dataKey="categoria" tick={{ fontSize: 12, fill: "#475569" }} interval={0} />
+            {/* El eje va directo en el gráfico y no envuelto en un componente
+                propio: Recharts ubica sus ejes por tipo de hijo. */}
+            <YAxis
+              domain={[0, max]}
+              width={72}
+              tick={{ fontSize: 11, fill: "#64748b" }}
+              tickFormatter={(v) => fmtEje(Number(v ?? 0), vista)}
+              label={{
+                value: ejeDe(vista),
+                angle: -90,
+                position: "insideLeft",
+                style: { fontSize: 11, fill: "#64748b", textAnchor: "middle" },
+              }}
+            />
             <Tooltip
               contentStyle={{ fontSize: 12, borderRadius: 8, border: "1px solid #e2e8f0" }}
               formatter={(value, name, item) => {
-                const p = item?.payload as CrucePunto | undefined;
-                const esPract = name === "Practicidad";
-                const kg = p ? (esPract ? p.practicidadKg : p.nutricionKg) : 0;
-                const pdv = p ? (esPract ? p.practicidadPdv : p.nutricionPdv) : 0;
+                const f = (item as unknown as { payload?: Fila } | undefined)?.payload;
+                const precio = precios.find((p) => p.label === name);
+                const kg = f ? Number(precio ? f[`${precio.key}_kg`] ?? 0 : f.kg) : 0;
+                const pdv = f ? Number(precio ? f[`${precio.key}_pdv`] ?? 0 : f.clientes) : 0;
                 return [`${fmtVista(Number(value ?? 0), vista)} · ${kgTxt(kg)} · ${pdv} PDV`, String(name ?? "")];
-              }}
-              labelFormatter={(label, payload) => {
-                const p = payload?.[0]?.payload as CrucePunto | undefined;
-                return p ? `${label} — ${p.detalle}` : String(label);
               }}
             />
             <Legend wrapperStyle={{ fontSize: 12 }} />
             <Bar
-              dataKey={`practicidad${sufijo}`}
-              name="Practicidad"
-              fill={COLOR_COMUNICACION.Practicidad}
+              dataKey="valor"
+              name="Total de la comunicación"
+              fill={COLOR_BARRA_LEYENDA}
               radius={[4, 4, 0, 0]}
-              maxBarSize={80}
+              maxBarSize={140}
+              isAnimationActive={false}
             >
+              {data.map((f, i) => (
+                <Cell key={i} fill={f.color} fillOpacity={0.35} stroke={f.color} strokeWidth={1.5} />
+              ))}
               <LabelList
-                dataKey={`practicidad${sufijo}`}
+                dataKey="valor"
                 position="top"
+                offset={14}
                 fontSize={12}
                 fontWeight={700}
-                formatter={(v) => fmtVista(Number(v ?? 0), vista)}
+                fill="#334155"
+                formatter={(v) => (v == null ? "" : `Total ${fmtVista(Number(v), vista)}`)}
               />
             </Bar>
-            <Bar
-              dataKey={`nutricion${sufijo}`}
-              name="Nutrición"
-              fill={COLOR_COMUNICACION["Nutrición"]}
-              radius={[4, 4, 0, 0]}
-              maxBarSize={80}
-            >
-              <LabelList
-                dataKey={`nutricion${sufijo}`}
-                position="top"
-                fontSize={12}
-                fontWeight={700}
-                formatter={(v) => fmtVista(Number(v ?? 0), vista)}
-              />
-            </Bar>
-          </BarChart>
+            {precios.map((p, i) => (
+              <Line
+                key={p.key}
+                type="linear"
+                dataKey={p.key}
+                name={p.label}
+                stroke={p.color}
+                strokeWidth={0}
+                legendType="circle"
+                dot={{ r: 9, fill: p.color, stroke: "#ffffff", strokeWidth: 2 }}
+                activeDot={{ r: 11 }}
+                isAnimationActive={false}
+              >
+                {/* Un precio a cada lado del punto: si dos precios aportan
+                    parecido dentro de la misma comunicación, sus etiquetas no
+                    se pisan. */}
+                <LabelList
+                  dataKey={p.key}
+                  position={i % 2 === 0 ? "left" : "right"}
+                  offset={14}
+                  fontSize={12}
+                  fontWeight={700}
+                  fill={p.color}
+                  formatter={(v) => (v == null ? "" : fmtVista(Number(v), vista))}
+                />
+              </Line>
+            ))}
+          </ComposedChart>
         </ResponsiveContainer>
       );
     }
@@ -164,12 +315,14 @@ const Graficos = dynamic(
     function ParticipacionInner({
       porPrecio,
       porComunicacion,
-      cruce,
+      union,
+      precios,
       vista,
     }: {
-      porPrecio: Grupo[];
-      porComunicacion: Grupo[];
-      cruce: CrucePunto[];
+      porPrecio: Fila[];
+      porComunicacion: Fila[];
+      union: Fila[];
+      precios: Precio[];
       vista: Vista;
     }) {
       return (
@@ -177,22 +330,22 @@ const Graficos = dynamic(
           <div className="grid grid-cols-1 gap-6 lg:grid-cols-2">
             <div>
               <p className="text-xs font-semibold uppercase tracking-widest text-muted-foreground mb-1">
-                1 · Por precio
+                1 · Por precio (puntos)
               </p>
-              <PanelSimple data={porPrecio} vista={vista} />
+              <GraficoPrecio data={porPrecio} vista={vista} />
             </div>
             <div>
               <p className="text-xs font-semibold uppercase tracking-widest text-muted-foreground mb-1">
-                2 · Por comunicación
+                2 · Por comunicación (barras)
               </p>
-              <PanelSimple data={porComunicacion} vista={vista} />
+              <GraficoComunicacion data={porComunicacion} vista={vista} />
             </div>
           </div>
           <div>
             <p className="text-xs font-semibold uppercase tracking-widest text-muted-foreground mb-1">
-              3 · Precio × comunicación
+              3 · Comunicación × precio — la barra es el total de la comunicación, cada punto lo que aportó un precio
             </p>
-            <PanelCruce data={cruce} vista={vista} />
+            <GraficoUnion data={union} precios={precios} vista={vista} />
           </div>
         </div>
       );
@@ -202,7 +355,7 @@ const Graficos = dynamic(
   },
   {
     ssr: false,
-    loading: () => <div className="h-[640px] bg-slate-50 rounded-lg animate-pulse" />,
+    loading: () => <div className="h-[700px] bg-slate-50 rounded-lg animate-pulse" />,
   }
 );
 
@@ -216,90 +369,87 @@ export function CombinacionesParticipacionCharts({
   /** Cómo se nombra la población en los textos, ej. "los PDV del piloto inicial". */
   alcance: string;
 }) {
-  const [vista, setVista] = useState<Vista>("pct");
+  const [vista, setVista] = useState<Vista>("kg");
 
   const calculo = useMemo(() => {
     const sumaFilas = data.filas.reduce((s, f) => s + f.panquecitasKg, 0);
     // Ventas totales del alcance: incluye PDV sin combinación. Si el servidor
     // no lo trae, la suma de las filas.
     const total = data.totalPanquecitasKg > 0 ? data.totalPanquecitasKg : sumaFilas;
-    const pctDe = (v: number) => (total > 0 ? r1((v / total) * 100) : 0);
+    const pctDe = (kg: number) => (total > 0 ? r1((kg / total) * 100) : 0);
+    const valorDe = (kg: number, clientes: number) =>
+      vista === "pct" ? pctDe(kg) : vista === "porPdv" ? (clientes > 0 ? r2(kg / clientes) : 0) : r1(kg);
 
-    function agrupar(clave: (f: CombinacionRow) => string, detalle: (f: CombinacionRow) => string) {
-      const acc = new Map<string, { kg: number; clientes: number; detalles: Set<string> }>();
-      for (const f of data.filas) {
-        const k = clave(f);
-        const a = acc.get(k) ?? { kg: 0, clientes: 0, detalles: new Set<string>() };
-        a.kg += f.panquecitasKg;
-        a.clientes += f.clientes;
-        a.detalles.add(detalle(f));
-        acc.set(k, a);
-      }
-      return [...acc.entries()].map(([categoria, a]) => ({
-        categoria,
-        detalle: [...a.detalles].join(" / "),
-        kg: r1(a.kg),
-        clientes: a.clientes,
-        pct: pctDe(a.kg),
-        porPdv: a.clientes > 0 ? r2(a.kg / a.clientes) : 0,
-      }));
+    // Precios distintos, del más barato al más caro. El color queda fijo por
+    // precio y se repite en el gráfico de puntos y en el de unión.
+    const precios: Precio[] = [];
+    for (const f of [...data.filas].sort((a, b) => a.precio800 - b.precio800 || a.precio400 - b.precio400)) {
+      const label = precioDe(f);
+      if (precios.some((p) => p.label === label)) continue;
+      precios.push({
+        key: `p${precios.length}`,
+        label,
+        ciudad: f.ciudad,
+        color: COLORES_PRECIO[precios.length % COLORES_PRECIO.length],
+      });
     }
+    const precioDeFila = (f: CombinacionRow) => precios.find((p) => p.label === precioDe(f))!;
 
-    const porPrecio: Grupo[] = agrupar(precioDe, (f) => f.ciudad).map((g, i) => ({
-      ...g,
-      color: COLORES_PRECIO[i % COLORES_PRECIO.length],
-    }));
-    const porComunicacion: Grupo[] = agrupar(
-      (f) => f.comunicacion,
-      (f) => f.ciudad
-    ).map((g) => ({ ...g, color: COLOR_COMUNICACION[g.categoria] ?? "#64748b" }));
+    const porPrecio: Fila[] = precios.map((p) => {
+      const filas = data.filas.filter((f) => precioDe(f) === p.label);
+      const kg = filas.reduce((s, f) => s + f.panquecitasKg, 0);
+      const clientes = filas.reduce((s, f) => s + f.clientes, 0);
+      return {
+        categoria: `${p.label} (${p.ciudad})`,
+        detalle: p.ciudad,
+        valor: valorDe(kg, clientes),
+        kg: r1(kg),
+        clientes,
+        color: p.color,
+      };
+    });
 
-    const crucePorPrecio = new Map<string, CrucePunto>();
-    for (const f of data.filas) {
-      const precio = precioDe(f);
-      const p =
-        crucePorPrecio.get(precio) ??
-        ({
-          precio,
-          detalle: f.ciudad,
-          practicidadPct: 0,
-          practicidadPorPdv: 0,
-          practicidadKg: 0,
-          practicidadPdv: 0,
-          nutricionPct: 0,
-          nutricionPorPdv: 0,
-          nutricionKg: 0,
-          nutricionPdv: 0,
-        } satisfies CrucePunto);
-      if (f.comunicacion === "Nutrición") {
-        p.nutricionKg += f.panquecitasKg;
-        p.nutricionPdv += f.clientes;
-      } else {
-        p.practicidadKg += f.panquecitasKg;
-        p.practicidadPdv += f.clientes;
+    const comunicaciones = [...new Set(data.filas.map((f) => f.comunicacion))];
+
+    const porComunicacion: Fila[] = [];
+    const union: Fila[] = [];
+    for (const c of comunicaciones) {
+      const filas = data.filas.filter((f) => f.comunicacion === c);
+      const kg = filas.reduce((s, f) => s + f.panquecitasKg, 0);
+      const clientes = filas.reduce((s, f) => s + f.clientes, 0);
+      const base: Fila = {
+        categoria: c,
+        detalle: [...new Set(filas.map((f) => f.ciudad))].join(" / "),
+        valor: valorDe(kg, clientes),
+        kg: r1(kg),
+        clientes,
+        color: COLOR_COMUNICACION[c] ?? "#64748b",
+      };
+      porComunicacion.push(base);
+
+      const fila: Fila = { ...base };
+      for (const p of precios) {
+        const delPrecio = filas.filter((f) => precioDeFila(f).key === p.key);
+        const kgP = delPrecio.reduce((s, f) => s + f.panquecitasKg, 0);
+        const pdvP = delPrecio.reduce((s, f) => s + f.clientes, 0);
+        fila[p.key] = valorDe(kgP, pdvP);
+        fila[`${p.key}_kg`] = r1(kgP);
+        fila[`${p.key}_pdv`] = pdvP;
       }
-      crucePorPrecio.set(precio, p);
+      union.push(fila);
     }
-    const cruce = [...crucePorPrecio.values()].map((p) => ({
-      ...p,
-      practicidadKg: r1(p.practicidadKg),
-      nutricionKg: r1(p.nutricionKg),
-      practicidadPct: pctDe(p.practicidadKg),
-      nutricionPct: pctDe(p.nutricionKg),
-      practicidadPorPdv: p.practicidadPdv > 0 ? r2(p.practicidadKg / p.practicidadPdv) : 0,
-      nutricionPorPdv: p.nutricionPdv > 0 ? r2(p.nutricionKg / p.nutricionPdv) : 0,
-    }));
 
     return {
       total,
       totalPdv: data.filas.reduce((s, f) => s + f.clientes, 0) + data.sinCombinacion,
       fueraDeCombinacionKg: r1(Math.max(0, total - sumaFilas)),
+      precios,
       porPrecio,
       porComunicacion,
-      cruce,
+      union,
       pctDe,
     };
-  }, [data]);
+  }, [data, vista]);
 
   if (data.filas.length === 0) return null;
 
@@ -322,19 +472,14 @@ export function CombinacionesParticipacionCharts({
         <div>
           <CardTitle>{titulo}</CardTitle>
           <p className="text-xs text-slate-400 mt-1">
-            Cuánto de las <span className="font-medium">ventas totales de Panquecitas</span> de {alcance} (
-            {kgTxt(calculo.total)}, {calculo.totalPdv} PDV) salió de cada precio, de cada eje de comunicación y de cada
-            cruce entre los dos.
+            Ventas de Panquecitas de {alcance}: <span className="font-medium">{kgTxt(calculo.total)}</span> en{" "}
+            {calculo.totalPdv} PDV. Cuánto salió de cada precio (puntos), de cada eje de comunicación (barras) y de
+            la unión de los dos.
           </p>
         </div>
         <div className="flex flex-wrap items-center gap-2 print:hidden">
           <div className="flex rounded-lg border border-slate-200 overflow-hidden text-xs font-medium">
-            {(
-              [
-                ["pct", "% de las ventas"],
-                ["porPdv", "kg por PDV"],
-              ] as const
-            ).map(([key, label]) => (
+            {VISTAS.map(({ key, label }) => (
               <button
                 key={key}
                 onClick={() => setVista(key)}
@@ -346,7 +491,7 @@ export function CombinacionesParticipacionCharts({
               </button>
             ))}
           </div>
-          <ExportExcelButton filename={`${titulo}`} rows={data.filas} columns={columnas} />
+          <ExportExcelButton filename={titulo} rows={data.filas} columns={columnas} />
         </div>
       </CardHeader>
       <CardContent>
@@ -354,7 +499,8 @@ export function CombinacionesParticipacionCharts({
           <Graficos
             porPrecio={calculo.porPrecio}
             porComunicacion={calculo.porComunicacion}
-            cruce={calculo.cruce}
+            union={calculo.union}
+            precios={calculo.precios}
             vista={vista}
           />
         ) : (
@@ -366,26 +512,33 @@ export function CombinacionesParticipacionCharts({
           </div>
         )}
         <p className="text-xs text-slate-400 mt-3">
-          {vista === "pct" ? (
+          El eje vertical son las ventas desde el {data.desdePanquecitas}.{" "}
+          {vista === "kg" && (
             <>
-              <span className="font-medium text-slate-600">% de las ventas</span>: kg de Panquecitas del grupo ÷ las
-              ventas totales de {alcance} desde el {data.desdePanquecitas}. Los porcentajes dependen también de cuántos
-              PDV tiene cada grupo — para comparar rendimiento, cambiá a{" "}
-              <span className="font-medium">kg por PDV</span>.
+              <span className="font-medium text-slate-600">Ventas (kg)</span>: kg de Panquecitas del grupo. En la
+              unión, los puntos de una misma barra suman el total de esa comunicación.
             </>
-          ) : (
+          )}
+          {vista === "pct" && (
             <>
-              <span className="font-medium text-slate-600">kg por PDV</span>: kg de Panquecitas del grupo ÷ sus PDV
-              (hayan comprado o no). Quita el efecto del tamaño de cada grupo.
+              <span className="font-medium text-slate-600">% de las ventas totales</span>: kg del grupo ÷ las ventas
+              totales de {alcance}. En la unión, los puntos de una misma barra suman el % de esa comunicación.
+            </>
+          )}
+          {vista === "porPdv" && (
+            <>
+              <span className="font-medium text-slate-600">kg por PDV</span>: kg del grupo ÷ sus PDV (hayan comprado o
+              no). Quita el efecto del tamaño de cada grupo; acá los puntos no suman la barra, porque cada uno se
+              divide entre sus propios PDV.
             </>
           )}{" "}
-          Cada precio corrió en una sola ciudad (Cumaná o Cabudare), así que la comparación por precio también es una
-          comparación entre ciudades.
+          Kg y % dependen también de cuántos PDV tiene cada grupo. Cada precio corrió en una sola ciudad (Cumaná o
+          Cabudare), así que comparar precios también es comparar ciudades.
           {calculo.fueraDeCombinacionKg > 0 && (
             <>
               {" "}
               {kgTxt(calculo.fueraDeCombinacionKg)} vienen de PDV cuyo grupo vendedor no está en ninguna combinación:
-              cuentan en el total pero en ninguna barra, por eso los porcentajes no suman 100%.
+              cuentan en el total pero en ningún gráfico.
             </>
           )}
         </p>
