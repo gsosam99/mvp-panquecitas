@@ -1211,9 +1211,10 @@ export function DiennDashboardClient({
               <span className="font-medium">segmentos foco</span> (sin licorerías, CS, farmacias de barrio, mascotas ni
               animales), en el promedio de Harina PAN y en la venta de Panquecitas. Y solo{" "}
               <span className="font-medium">ventas de recompra</span>: de cada cliente se descarta su primera compra del
-              producto y se cuenta desde la segunda, tanto en PAN como en Panquecitas. El promedio de PAN es la suma de
-              las ventas diarias de recompra del reporte <span className="font-medium">Radar últimos 3 Meses</span> ÷ días
-              hábiles. La venta de Panquecitas es solo de la cartera foco: no incluye PDV fuera de cartera.
+              producto y se cuenta desde la segunda, tanto en PAN como en Panquecitas. El reporte{" "}
+              <span className="font-medium">Radar últimos 3 Meses</span> se lee igual que en el gráfico anterior (último
+              corte de cada mes por cliente y material) y el promedio de PAN es ese acumulado de recompra ÷ días hábiles.
+              La venta de Panquecitas es solo de la cartera foco: no incluye PDV fuera de cartera.
             </p>
           </div>
           <div className="flex flex-wrap items-center gap-2 print:hidden">

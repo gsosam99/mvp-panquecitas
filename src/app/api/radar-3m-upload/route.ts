@@ -206,8 +206,10 @@ export async function POST(req: Request) {
       >();
       for (const r of rows) {
         const product_id = SAP_RADAR_MATERIAL_PRODUCT_MAP[r.material_code];
-        // Una fila en cero no es una compra; las negativas (devoluciones) sí restan.
-        if (!product_id || r.quantity_kg === 0) continue;
+        // Se guardan TODAS las filas, también las de cero: el gráfico lee el
+        // documento igual que radar_3m_records (último corte del mes) y un corte
+        // en cero cambia cuál es el último.
+        if (!product_id) continue;
         const sap_code = r.sap_code.trim();
         porDia.set(`${sap_code}|${r.material_code}|${r.fecha}`, {
           sap_code,

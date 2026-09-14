@@ -1299,8 +1299,9 @@ export async function getRendimiento3M(
 //      producto —su primera fecha con kg > 0, todas las presentaciones de ese
 //      día— y se cuenta desde la segunda. En PAN y en Panquecitas.
 //   3. El PAN sale de radar_3m_ventas_dia (migration 024): las filas del
-//      reporte por día, sumadas. radar_3m_records se queda con el último corte
-//      del mes y ahí la fecha de la primera compra ya no existe.
+//      reporte por día, SIN colapsar, porque en radar_3m_records la fecha de la
+//      primera compra ya no existe. Pero se lee igual que el original: quitada
+//      la primera compra, se colapsa al último corte de cada mes.
 
 /** cliente → su primera fecha con compra (kg > 0). */
 function primeraCompraPorCliente(filas: { cliente: string; fecha: string; kg: number }[]): Map<string, string> {
@@ -1338,13 +1339,14 @@ export async function getRendimiento3MFocoRecompra(
   // Si todavía no se corrió el migration 024 la lectura falla: el gráfico queda
   // vacío en vez de romper la página. Tabla vacía = falta volver a subir el
   // reporte de 3 meses.
-  let pan3m: { sap_code: string; quantity_kg: number; date_of_sale: string }[];
+  let pan3m: { sap_code: string; material_code: string; quantity_kg: number; date_of_sale: string }[];
   try {
-    pan3m = await fetchAllRows<{ sap_code: string; quantity_kg: number; date_of_sale: string }>(() =>
-      supabase
-        .from("radar_3m_ventas_dia")
-        .select("sap_code, quantity_kg, date_of_sale")
-        .eq("product_id", PRODUCT_IDS.HARINA_PAN)
+    pan3m = await fetchAllRows<{ sap_code: string; material_code: string; quantity_kg: number; date_of_sale: string }>(
+      () =>
+        supabase
+          .from("radar_3m_ventas_dia")
+          .select("sap_code, material_code, quantity_kg, date_of_sale")
+          .eq("product_id", PRODUCT_IDS.HARINA_PAN)
     );
   } catch (error) {
     console.error("[getRendimiento3MFocoRecompra] radar_3m_ventas_dia no disponible:", error);
@@ -1374,14 +1376,30 @@ export async function getRendimiento3MFocoRecompra(
   const panFoco = pan3m
     .map((r) => ({
       locId: locIdBySapCode.get(r.sap_code.trim()),
+      material: r.material_code,
       fecha: r.date_of_sale.slice(0, 10),
       kg: Number(r.quantity_kg),
     }))
     .filter(
-      (r): r is { locId: string; fecha: string; kg: number } => r.locId !== undefined && idsFocoCompleta.has(r.locId)
+      (r): r is { locId: string; material: string; fecha: string; kg: number } =>
+        r.locId !== undefined && idsFocoCompleta.has(r.locId)
     );
   const primeraPan = primeraCompraPorCliente(panFoco.map((r) => ({ cliente: r.locId, fecha: r.fecha, kg: r.kg })));
-  const panRecompra = panFoco.filter((r) => r.fecha !== primeraPan.get(r.locId));
+
+  // El documento se lee IGUAL que en radar_3m_records / getRendimiento3M: por
+  // cliente+material+mes vale solo el ÚLTIMO corte, y si ese corte no es > 0 el
+  // mes no suma. La única diferencia es que, antes de colapsar, se sacan las
+  // filas del día de la primera compra del cliente. Sumar todas las filas
+  // diarias daba un promedio ~1,7x mayor que el del gráfico original y dejaba
+  // de ser comparable (DIENN, 14-09-2026).
+  const ultimoCorte = new Map<string, (typeof panFoco)[number]>();
+  for (const r of panFoco) {
+    if (r.fecha === primeraPan.get(r.locId)) continue;
+    const key = `${r.locId}|${r.material}|${r.fecha.slice(0, 7)}`;
+    const prev = ultimoCorte.get(key);
+    if (!prev || r.fecha > prev.fecha) ultimoCorte.set(key, r);
+  }
+  const panRecompra = [...ultimoCorte.values()].filter((r) => r.kg > 0);
 
   // Mismo cierre de rango que 4d, leído de TODO el piloto, para que las dos
   // ciudades y los dos gráficos compartan los mismos días.
