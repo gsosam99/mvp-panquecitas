@@ -26,6 +26,8 @@ export interface CarteraTotalDiaChartPoint {
    */
   efectCumanaEscala?: number | null;
   efectCabudareEscala?: number | null;
+  /** Misma activación "a escala" pero del total del piloto (las dos ciudades). */
+  efectTotalEscala?: number | null;
 }
 
 function formatKg(value: number): string {
@@ -52,6 +54,7 @@ const Inner = dynamic(
       showCumana,
       showEscalaCumana,
       showEscalaCabudare,
+      showEscalaTotal,
       showCabudare,
     }: {
       data: CarteraTotalDiaChartPoint[];
@@ -68,6 +71,7 @@ const Inner = dynamic(
       showCumana: boolean;
       showEscalaCumana: boolean;
       showEscalaCabudare: boolean;
+      showEscalaTotal: boolean;
       showCabudare: boolean;
     }) {
       // Con cualquier desglose de barras prendido (modelo o ciudad) se oculta la
@@ -116,6 +120,7 @@ const Inner = dynamic(
         // salían encimados.
         if (showEscalaCumana && punto.efectCumanaEscala != null) ratios.push(punto.efectCumanaEscala);
         if (showEscalaCabudare && punto.efectCabudareEscala != null) ratios.push(punto.efectCabudareEscala);
+        if (showEscalaTotal && punto.efectTotalEscala != null) ratios.push(punto.efectTotalEscala);
 
         const yArriba = y + 12;
         const yAbajo = base - 6;
@@ -167,6 +172,8 @@ const Inner = dynamic(
                   return [`${Number(value ?? 0)}%`, "Cumaná a escala (sin no vendibles)"];
                 if (name === "efectCabudareEscala")
                   return [`${Number(value ?? 0)}%`, "Cabudare a escala (sin no vendibles)"];
+                if (name === "efectTotalEscala")
+                  return [`${Number(value ?? 0)}%`, "Activación total a escala (segmentos foco)"];
                 return [String(value ?? ""), String(name ?? "")];
               }}
             />
@@ -200,6 +207,8 @@ const Inner = dynamic(
                   ? "Cumaná a escala"
                   : value === "efectCabudareEscala"
                   ? "Cabudare a escala"
+                  : value === "efectTotalEscala"
+                  ? "Total a escala"
                   : value
               }
               wrapperStyle={{ fontSize: 12 }}
@@ -525,6 +534,35 @@ const Inner = dynamic(
                 />
               </Line>
             )}
+            {/* Activación TOTAL a escala: la del piloto completo contra la
+                cartera de segmentos foco (sin los inactivos no vendibles).
+                Verde esmeralda oscuro, más gruesa que las de ciudad, para que
+                se lea como la línea resumen de la familia "a escala". Etiqueta
+                abajo con offset corto: ese hueco no lo usa ninguna otra serie. */}
+            {showEscalaTotal && (
+              <Line
+                yAxisId="pct"
+                dataKey="efectTotalEscala"
+                stroke="#065f46"
+                strokeWidth={3.5}
+                dot={{ r: 3, fill: "#065f46" }}
+                connectNulls
+                isAnimationActive={false}
+              >
+                <LabelList
+                  dataKey="efectTotalEscala"
+                  position="bottom"
+                  offset={14}
+                  fill="#065f46"
+                  fontSize={10}
+                  fontWeight={700}
+                  stroke="#ffffff"
+                  strokeWidth={3}
+                  paintOrder="stroke"
+                  formatter={(v) => (v == null ? "" : `${Number(v)}%`)}
+                />
+              </Line>
+            )}
           </ComposedChart>
         </ResponsiveContainer>
       );
@@ -553,6 +591,7 @@ export function CarteraTotalDiaChart({
   showCumana = true,
   showEscalaCumana = false,
   showEscalaCabudare = false,
+  showEscalaTotal = false,
   showCabudare = true,
 }: {
   data: CarteraTotalDiaChartPoint[];
@@ -569,6 +608,7 @@ export function CarteraTotalDiaChart({
   showCumana?: boolean;
   showEscalaCumana?: boolean;
   showEscalaCabudare?: boolean;
+  showEscalaTotal?: boolean;
   showCabudare?: boolean;
 }) {
   return (
@@ -587,6 +627,7 @@ export function CarteraTotalDiaChart({
       showCumana={showCumana}
       showEscalaCumana={showEscalaCumana}
       showEscalaCabudare={showEscalaCabudare}
+      showEscalaTotal={showEscalaTotal}
       showCabudare={showCabudare}
     />
   );

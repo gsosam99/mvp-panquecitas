@@ -300,6 +300,9 @@ export function DiennDashboardClient({
   // inactivos de segmentos no vendibles (ver SEGMENTOS_SIN_ALIMENTOS).
   const [escalaCumanaOn, setEscalaCumanaOn] = useState(false);
   const [escalaCabudareOn, setEscalaCabudareOn] = useState(false);
+  // Lo mismo para el TOTAL del piloto: activación acumulada contra la cartera
+  // de segmentos foco (DIENN, 14-09-2026).
+  const [escalaTotalOn, setEscalaTotalOn] = useState(false);
 
   const [sellOutClienteOpen, setSellOutClienteOpen] = useState(false);
   // Posición del producto en PDV: una sola tarjeta, se ve por conteo de clientes
@@ -480,6 +483,11 @@ export function DiennDashboardClient({
         // acumulado no baja a hueco.
         efectCumanaEscala: cEscala,
         efectCabudareEscala: bEscala,
+        // Total a escala: sale directo del punto del total (`p`), que el
+        // servidor ya calcula contra la cartera vendible del piloto completo
+        // en cada bucket. No hace falta arrastrar valor: la serie del total
+        // tiene todos los buckets.
+        efectTotalEscala: p.efectividadActivosAcumVendible,
       };
     });
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -1497,6 +1505,20 @@ export function DiennDashboardClient({
                 >
                   Cabudare a escala
                 </button>
+                {/* Activación TOTAL a escala: el piloto completo contra la cartera
+                    de segmentos foco. Siempre es activación por Radar, igual que
+                    las de ciudad, sin importar la métrica elegida arriba. */}
+                <button
+                  onClick={() => setEscalaTotalOn((v) => !v)}
+                  title={`Activación acumulada del total sin los ${bundles.TOTAL.activacionAjustada.descartados} PDV inactivos de segmentos no vendibles (solo segmentos foco)`}
+                  className={`px-3 py-1.5 rounded-lg border text-xs font-medium transition-colors ${
+                    escalaTotalOn
+                      ? "border-emerald-800 bg-emerald-800 text-white"
+                      : "border-slate-200 bg-white text-slate-500 hover:bg-slate-50"
+                  }`}
+                >
+                  Total a escala
+                </button>
                 {/* Cuál ciudad se superpone (aplica a ambas capas de ciudad). */}
                 <select
                   value={ciudadSel}
@@ -1533,6 +1555,7 @@ export function DiennDashboardClient({
               showCabudare={ciudadSel !== "cumana"}
               showEscalaCumana={escalaCumanaOn}
               showEscalaCabudare={escalaCabudareOn}
+              showEscalaTotal={escalaTotalOn}
             />
           </CardContent>
         </Card>
