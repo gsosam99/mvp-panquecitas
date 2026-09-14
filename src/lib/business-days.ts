@@ -54,27 +54,26 @@ export function diasHabilesEntre(desde: string, hasta: string): string[] {
 }
 
 /**
- * Días que tiene que cubrir una serie diaria del piloto: TODOS los días
- * hábiles de [desde, hasta] más cualquier otro día que sí traiga dato.
+ * El día hábil al que se imputa una venta: la misma fecha si cae de lunes a
+ * viernes, y el lunes siguiente si cae sábado o domingo (DIENN, 14-09-2026).
  *
- * El relleno de los hábiles sin venta es el punto (DIENN, 11-09-2026). Antes
- * la serie se armaba solo con los días que tenían filas, así que un día hábil
- * sin venta desaparecía y no entraba al divisor del promedio de ratios: el
- * 10-09 sin ventas en Cabudare no le bajaba el ratio, cuando no haber vendido
- * un día hábil es justamente lo que ese indicador debe reflejar.
+ * Las series diarias del piloto son SOLO de días hábiles: cada día hábil
+ * aparece, con 0 si no hubo venta, y entra al divisor del promedio de ratios
+ * (DIENN, 11-09-2026 — el 10-09 sin ventas en Cabudare tiene que bajarle el
+ * ratio). Una venta de fin de semana no puede quedar como un punto aparte,
+ * porque sumaría un día que no es hábil al divisor, ni puede descartarse,
+ * porque son kilos reales. Se suma al siguiente hábil.
  *
- * Los días NO hábiles solo aparecen si hubo venta. Así un despacho de sábado
- * no se pierde de la serie, pero un fin de semana vacío tampoco infla el
- * divisor con días en los que nadie esperaba vender.
+ * Hay que aplicarla ANTES de agrupar por día y también al calcular el último
+ * día reportado: una venta de sábado que cierra el reporte extiende la serie
+ * hasta el lunes.
  */
-export function diasDeSerie(
-  desde: string,
-  hasta: string,
-  diasConDato: Iterable<string>
-): string[] {
-  const dias = new Set(diasHabilesEntre(desde, hasta));
-  for (const dia of diasConDato) if (dia >= desde) dias.add(dia);
-  return [...dias].sort();
+export function siguienteDiaHabil(dia: string): string {
+  const t = Date.parse(`${dia.slice(0, 10)}T00:00:00Z`);
+  if (Number.isNaN(t)) return dia.slice(0, 10);
+  const dow = new Date(t).getUTCDay(); // 0=Dom, 6=Sáb
+  const salto = dow === 6 ? 2 : dow === 0 ? 1 : 0;
+  return new Date(t + salto * 86_400_000).toISOString().slice(0, 10);
 }
 
 /**

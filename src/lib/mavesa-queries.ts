@@ -7,7 +7,7 @@ import {
   SECTOR_LABELS,
   type Sector,
 } from "@/lib/universe";
-import { DIAS_HABILES_3M, contarDiasHabiles, diasDeSerie } from "@/lib/business-days";
+import { DIAS_HABILES_3M, contarDiasHabiles, diasHabilesEntre, siguienteDiaHabil } from "@/lib/business-days";
 import { COMBINACIONES, combinacionDeGrupo, nombreCombinacion } from "@/lib/combinaciones";
 import { bucketLabelFor, todayISO } from "@/lib/date-buckets";
 import { PRODUCT_IDS } from "@/data/catalog";
@@ -161,8 +161,11 @@ export async function getRendimientoVsMavesa(
   // exactamente lo que el relleno de abajo viene a arreglar.
   let ultimoDiaReportado = "";
   for (const r of panqData) {
-    const dia = r.date_of_sale.slice(0, 10);
-    if (dia < RENDIMIENTO_DIARIO_DESDE) continue;
+    const fecha = r.date_of_sale.slice(0, 10);
+    // El corte del arranque se mira sobre la fecha REAL: una venta del
+    // domingo 02-08 es previa al piloto y no se arrastra a su primer lunes.
+    if (fecha < RENDIMIENTO_DIARIO_DESDE) continue;
+    const dia = siguienteDiaHabil(fecha);
     if (dia > ultimoDiaReportado) ultimoDiaReportado = dia;
     if (!idsUniverso.has(r.location_id)) continue;
     kgPorDia.set(dia, (kgPorDia.get(dia) ?? 0) + Number(r.quantity_kg));
@@ -170,11 +173,11 @@ export async function getRendimientoVsMavesa(
 
   // La serie cubre TODOS los días hábiles desde el arranque del piloto, no
   // solo los que tuvieron venta: un día hábil sin venta vale 0 y cuenta en el
-  // divisor del ratio acumulado (DIENN, 11-09-2026). Ver diasDeSerie().
-  const puntos: RendimientoVsMavesaPunto[] = diasDeSerie(
+  // divisor del ratio acumulado (DIENN, 11-09-2026). Las ventas de fin de
+  // semana ya vienen sumadas al lunes siguiente. Ver siguienteDiaHabil().
+  const puntos: RendimientoVsMavesaPunto[] = diasHabilesEntre(
     RENDIMIENTO_DIARIO_DESDE,
-    ultimoDiaReportado,
-    kgPorDia.keys()
+    ultimoDiaReportado
   ).map((dia) => {
     const kg = kgPorDia.get(dia) ?? 0;
     return {
@@ -524,8 +527,11 @@ export async function getCombinacionesPiloto(): Promise<CombinacionesResult> {
   // el acumulado.
   const panqPorDia = new Map<number, Map<string, number>>();
   for (const r of panquecitas) {
-    const dia = r.date_of_sale.slice(0, 10);
-    if (dia < RENDIMIENTO_DIARIO_DESDE) continue;
+    const fecha = r.date_of_sale.slice(0, 10);
+    if (fecha < RENDIMIENTO_DIARIO_DESDE) continue;
+    // Fin de semana → lunes siguiente, igual que las series diarias: así
+    // `diasConVenta` se cuenta en días hábiles (ver siguienteDiaHabil).
+    const dia = siguienteDiaHabil(fecha);
     const n = combiPorLoc.get(r.location_id);
     if (n == null) continue;
     acc(n).panq += Number(r.quantity_kg);
@@ -551,14 +557,13 @@ export async function getCombinacionesPiloto(): Promise<CombinacionesResult> {
     // TRANSCURRIDOS desde el arranque del piloto — el MISMO divisor para las
     // cuatro filas (DIENN, 09-09-2026).
     //
-    // Acá esta tabla se aparta a propósito del ratio universal, que divide
-    // entre los días CON VENTA. El motivo es el uso de cada uno: el universal
-    // describe UN scope contra su propia referencia, y ahí dividir entre días
-    // con venta evita que un día sin despacho lo diluya. Esta tabla existe
-    // para COMPARAR las cuatro combinaciones entre sí, y con divisores
-    // distintos deja de ser una comparación — una combinación que vendió
-    // concentrada en pocos días quedaba por encima de otra que vendió más
-    // kilos repartidos. Con el mismo divisor, el orden dice quién vende más.
+    // Esta tabla existe para COMPARAR las cuatro combinaciones entre sí, y
+    // con divisores distintos deja de ser una comparación — una combinación
+    // que vendió concentrada en pocos días quedaba por encima de otra que
+    // vendió más kilos repartidos. Con el mismo divisor, el orden dice quién
+    // vende más. Desde el 11-09-2026 el ratio universal de los gráficos
+    // también cuenta todos los días hábiles (con 0 los que no hubo venta),
+    // así que los dos criterios ya coinciden.
     //
     // `diasConVenta` se sigue reportando, pero como dato de intermitencia y no
     // como divisor: es lo que explica por qué una fila puede rendir distinto

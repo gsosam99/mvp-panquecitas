@@ -2,7 +2,13 @@ import { createSupabaseServiceClient } from "@/lib/supabase/server";
 import { fetchAllRows, fetchAllRowsChunked } from "@/lib/supabase/fetch-all";
 import { PRODUCT_IDS, VARIANT_IDS } from "@/data/catalog";
 import { PVP_TARGETS, PVP_TOLERANCE } from "@/data/pvp-thresholds";
-import { DIAS_HABILES_POR_SEMANA, DIAS_HABILES_3M, contarDiasHabiles, diasDeSerie } from "@/lib/business-days";
+import {
+  DIAS_HABILES_POR_SEMANA,
+  DIAS_HABILES_3M,
+  contarDiasHabiles,
+  diasHabilesEntre,
+  siguienteDiaHabil,
+} from "@/lib/business-days";
 import { getBcvRateLookup, precioVisitaEnUsd } from "@/lib/bcv";
 import {
   PILOT_SECTORS,
@@ -1198,10 +1204,14 @@ export async function getRendimiento3M(
   // Panquecitas agregadas por día, solo del 03-08-2026 en adelante: el gráfico
   // muestra el comportamiento del piloto, no el histórico de referencia.
   // date_of_sale es ISO (YYYY-MM-DD…), así que comparar strings es correcto.
+  // Las ventas de sábado o domingo se suman al lunes siguiente: la serie es
+  // solo de días hábiles (ver siguienteDiaHabil). El corte del arranque se
+  // mira sobre la fecha REAL, para no arrastrar un domingo previo al piloto.
   const kgPorDia = new Map<string, number>();
   for (const r of panq) {
-    const dia = r.date_of_sale.slice(0, 10);
-    if (dia < RENDIMIENTO_DIARIO_DESDE) continue;
+    const fecha = r.date_of_sale.slice(0, 10);
+    if (fecha < RENDIMIENTO_DIARIO_DESDE) continue;
+    const dia = siguienteDiaHabil(fecha);
     kgPorDia.set(dia, (kgPorDia.get(dia) ?? 0) + Number(r.quantity_kg));
   }
 
@@ -1209,20 +1219,22 @@ export async function getRendimiento3M(
   // leído de `panqData` (sin recortar por sector ni por población) y no de
   // `panq`. Las dos ciudades y las dos poblaciones tienen que compartir el
   // mismo rango; si cada una terminara en su propio último día, la que no
-  // vendió ese día se quedaría sin él y no contaría en su promedio.
+  // vendió ese día se quedaría sin él y no contaría en su promedio. También
+  // pasa por siguienteDiaHabil: un sábado que cierra el reporte llega al lunes.
   let ultimoDiaReportado = "";
   for (const r of panqData) {
-    const dia = r.date_of_sale.slice(0, 10);
-    if (dia >= RENDIMIENTO_DIARIO_DESDE && dia > ultimoDiaReportado) ultimoDiaReportado = dia;
+    const fecha = r.date_of_sale.slice(0, 10);
+    if (fecha < RENDIMIENTO_DIARIO_DESDE) continue;
+    const dia = siguienteDiaHabil(fecha);
+    if (dia > ultimoDiaReportado) ultimoDiaReportado = dia;
   }
 
   // La serie cubre TODOS los días hábiles desde el arranque del piloto, no
   // solo los que tuvieron venta: un día hábil sin venta vale 0 y cuenta en el
-  // divisor del ratio acumulado (DIENN, 11-09-2026). Ver diasDeSerie().
-  const puntos: Rendimiento3MPunto[] = diasDeSerie(
+  // divisor del ratio acumulado (DIENN, 11-09-2026).
+  const puntos: Rendimiento3MPunto[] = diasHabilesEntre(
     RENDIMIENTO_DIARIO_DESDE,
-    ultimoDiaReportado,
-    kgPorDia.keys()
+    ultimoDiaReportado
   ).map((dia) => {
     const kg = kgPorDia.get(dia) ?? 0;
     return {
@@ -1429,8 +1441,12 @@ export async function getRankingVolumenPorSegmento(sector?: Sector): Promise<Ran
   );
 
   const fechas = ((fechasData ?? []) as { date_of_sale: string }[]).map((r) => r.date_of_sale.slice(0, 10));
+  // Si el reporte cierra en sábado o domingo, esa venta se imputa al lunes
+  // siguiente (ver siguienteDiaHabil), así que el período llega hasta ese lunes.
   const diasPeriodo =
-    fechas.length > 0 ? contarDiasHabiles(RENDIMIENTO_DIARIO_DESDE, fechas[fechas.length - 1]) : 1;
+    fechas.length > 0
+      ? contarDiasHabiles(RENDIMIENTO_DIARIO_DESDE, siguienteDiaHabil(fechas[fechas.length - 1]))
+      : 1;
 
   const bySegmento = new Map<string, Location[]>();
   for (const l of universo) {
