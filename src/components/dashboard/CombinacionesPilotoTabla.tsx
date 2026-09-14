@@ -1,5 +1,6 @@
 "use client";
 
+import type { ReactNode } from "react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
@@ -20,7 +21,18 @@ const pct = (v: number | null) =>
   v == null ? "—" : `${v.toLocaleString("es-VE", { maximumFractionDigits: 1 })}%`;
 const precio = (v: number) => v.toLocaleString("es-VE", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
 
-export function CombinacionesPilotoTabla({ data }: { data: CombinacionesResult }) {
+export function CombinacionesPilotoTabla({
+  data,
+  titulo = "Combinaciones del Piloto — precio y comunicación",
+  descripcion,
+  excelFilename = "Combinaciones del piloto",
+}: {
+  data: CombinacionesResult;
+  titulo?: string;
+  /** Reemplaza el texto bajo el título. Sin él, el de la cartera completa. */
+  descripcion?: ReactNode;
+  excelFilename?: string;
+}) {
   if (data.filas.length === 0) return null;
 
   const columnas: ExcelColumn<CombinacionRow>[] = [
@@ -49,16 +61,20 @@ export function CombinacionesPilotoTabla({ data }: { data: CombinacionesResult }
     <Card className="mb-6 print-avoid-break">
       <CardHeader className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between space-y-0">
         <div>
-          <CardTitle>Combinaciones del Piloto — precio y comunicación</CardTitle>
+          <CardTitle>{titulo}</CardTitle>
           <p className="text-xs text-slate-400 mt-1">
-            El piloto no corrió una sola dinámica: cada grupo vendedor trabajó con un{" "}
-            <span className="font-medium">precio</span> y un{" "}
-            <span className="font-medium">eje de comunicación</span> distintos. Comparar Cumaná contra Cabudare mezcla
-            las dos variables a la vez — acá cada fila es una configuración concreta, y sus ratios salen solo de los
-            PDV de sus grupos vendedores.
+            {descripcion ?? (
+              <>
+                El piloto no corrió una sola dinámica: cada grupo vendedor trabajó con un{" "}
+                <span className="font-medium">precio</span> y un{" "}
+                <span className="font-medium">eje de comunicación</span> distintos. Comparar Cumaná contra Cabudare
+                mezcla las dos variables a la vez — acá cada fila es una configuración concreta, y sus ratios salen
+                solo de los PDV de sus grupos vendedores.
+              </>
+            )}
           </p>
         </div>
-        <ExportExcelButton filename="Combinaciones del piloto" rows={data.filas} columns={columnas} />
+        <ExportExcelButton filename={excelFilename} rows={data.filas} columns={columnas} />
       </CardHeader>
       <CardContent>
         <div className="overflow-x-auto">

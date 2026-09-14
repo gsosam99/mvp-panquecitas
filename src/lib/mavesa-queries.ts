@@ -437,9 +437,25 @@ export interface CombinacionesResult {
   diasReferencia: number;
   diasPanquecitas: number;
   desdePanquecitas: string;
+  /**
+   * Panquecitas (kg) de TODOS los PDV del alcance, incluidos los que no caen
+   * en ninguna combinación. Es el "ventas totales" contra el que se mide la
+   * participación de cada precio y cada comunicación.
+   */
+  totalPanquecitasKg: number;
+  /** Tanda a la que se recortó la cartera, o null si es la cartera completa. */
+  cohorte: string | null;
 }
 
-export async function getCombinacionesPiloto(): Promise<CombinacionesResult> {
+/**
+ * @param opciones.soloCohorte Recorta la cartera a UNA tanda (ej. "Piloto
+ *   original", los 358 del arranque). Sin él, la cartera vigente completa —
+ *   el comportamiento de siempre de la tabla de combinaciones.
+ */
+export async function getCombinacionesPiloto(
+  opciones: { soloCohorte?: string } = {}
+): Promise<CombinacionesResult> {
+  const { soloCohorte } = opciones;
   const hoy = todayISO();
   const diasPanquecitas = contarDiasHabiles(RENDIMIENTO_DIARIO_DESDE, hoy);
   const vacio: CombinacionesResult = {
@@ -449,10 +465,17 @@ export async function getCombinacionesPiloto(): Promise<CombinacionesResult> {
     diasReferencia: DIAS_HABILES_3M,
     diasPanquecitas,
     desdePanquecitas: RENDIMIENTO_DIARIO_DESDE,
+    totalPanquecitasKg: 0,
+    cohorte: soloCohorte ?? null,
   };
 
   const universoTotal = await getUniverseLocations();
-  const universo = vigentesAl(universoTotal, hoy);
+  // El recorte por tanda se aplica ANTES de todo lo demás, así que alcanza a
+  // los dos lados del ratio (Panquecitas y la categoría de referencia) y al
+  // conteo de PDV. Un cliente sin cohorte registrada no cae en ninguna tanda.
+  const universo = vigentesAl(universoTotal, hoy).filter(
+    (l) => !soloCohorte || (l.cohorte ?? "").trim() === soloCohorte
+  );
   if (universo.length === 0) return vacio;
 
   // locId → combinación. Los que no caen en ninguna se cuentan aparte en vez
@@ -461,8 +484,11 @@ export async function getCombinacionesPiloto(): Promise<CombinacionesResult> {
   const gruposSinMapear = new Set<string>();
   let sinCombinacion = 0;
   const clientesPorCombi = new Map<number, number>();
+  // PDV del alcance, estén o no en una combinación: base de totalPanquecitasKg.
+  const enAlcance = new Set<string>();
   for (const l of universo) {
     if (!sectorGroup(l.oficina_venta)) continue;
+    enAlcance.add(l.id);
     const numero = combinacionDeGrupo(l.grupo_vendedor);
     if (numero === null) {
       sinCombinacion += 1;
@@ -526,9 +552,11 @@ export async function getCombinacionesPiloto(): Promise<CombinacionesResult> {
   // de los ratios diarios, así que hace falta el detalle día a día y no solo
   // el acumulado.
   const panqPorDia = new Map<number, Map<string, number>>();
+  let totalPanquecitasKg = 0;
   for (const r of panquecitas) {
     const fecha = r.date_of_sale.slice(0, 10);
     if (fecha < RENDIMIENTO_DIARIO_DESDE) continue;
+    if (enAlcance.has(r.location_id)) totalPanquecitasKg += Number(r.quantity_kg);
     // Fin de semana → lunes siguiente, igual que las series diarias: así
     // `diasConVenta` se cuenta en días hábiles (ver siguienteDiaHabil).
     const dia = siguienteDiaHabil(fecha);
@@ -601,6 +629,8 @@ export async function getCombinacionesPiloto(): Promise<CombinacionesResult> {
     diasReferencia: DIAS_HABILES_3M,
     diasPanquecitas,
     desdePanquecitas: RENDIMIENTO_DIARIO_DESDE,
+    totalPanquecitasKg: r1(totalPanquecitasKg),
+    cohorte: soloCohorte ?? null,
   };
 }
 

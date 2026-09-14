@@ -26,7 +26,8 @@ import { getIndiceTiendaPerfecta } from "@/lib/admin-queries";
 import { getMotivosNoVenta } from "@/lib/efectividad-queries";
 import { computeSellOut, getSellOutPorClienteDiff } from "@/lib/sellout-queries";
 import { getAvailableZonasYAsesores } from "@/lib/sellout-utils";
-import { getUniverseLocations, SECTOR_LABELS, type Sector } from "@/lib/universe";
+import { getUniverseLocations, COHORTE_PILOTO_ORIGINAL, SECTOR_LABELS, type Sector } from "@/lib/universe";
+import { getCruceInventarioRadar } from "@/lib/cruce-mercaderista-radar";
 import {
   getRendimientoVsMavesa,
   getComparativaPortafolioPorCiudad,
@@ -118,7 +119,7 @@ async function getBundle(sector?: Sector): Promise<SectorBundle> {
 // Sell-Out completo (sin filtrar), y se le pasan al cliente, que decide
 // qué mostrar sin volver a pedir datos.
 export async function DiennStrategicDashboard() {
-  const [total, cumana, barquisimetoEste, coberturaComunicacion, tiendaIdeal, sellOutRecords, sellOutClientes, universo, motivosNoVenta, posicionPorCliente, carteraPorSegmento, precioCorrecto, portafolioPorCiudad, ventas3MesesPorCiudad, ventaDiariaPorSegmento, combinacionesPiloto] =
+  const [total, cumana, barquisimetoEste, coberturaComunicacion, tiendaIdeal, sellOutRecords, sellOutClientes, universo, motivosNoVenta, posicionPorCliente, carteraPorSegmento, precioCorrecto, portafolioPorCiudad, ventas3MesesPorCiudad, ventaDiariaPorSegmento, combinacionesPiloto, combinacionesPilotoOriginal, cruceMercaderistaRadar] =
     await Promise.all([
       getBundle(undefined),
       getBundle("cumana"),
@@ -136,6 +137,9 @@ export async function DiennStrategicDashboard() {
       getVentas3MesesPorCiudad(),
       getVentaDiariaPorSegmento(),
       getCombinacionesPiloto(),
+      // Misma tabla, solo con la cartera del arranque (los 358).
+      getCombinacionesPiloto({ soloCohorte: COHORTE_PILOTO_ORIGINAL.nombre }),
+      getCruceInventarioRadar(),
     ]);
 
   const { zonas, asesores } = getAvailableZonasYAsesores(universo);
@@ -159,6 +163,8 @@ export async function DiennStrategicDashboard() {
       ventas3MesesPorCiudad={ventas3MesesPorCiudad}
       ventaDiariaPorSegmento={ventaDiariaPorSegmento}
       combinacionesPiloto={combinacionesPiloto}
+      combinacionesPilotoOriginal={combinacionesPilotoOriginal}
+      cruceMercaderistaRadar={cruceMercaderistaRadar}
     />
   );
 }

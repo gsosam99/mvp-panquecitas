@@ -36,6 +36,9 @@ import {
   type VentaSegmentoPunto,
 } from "@/components/dashboard/VentaDiariaPorSegmentoChart";
 import { CombinacionesPilotoTabla } from "@/components/dashboard/CombinacionesPilotoTabla";
+import { CombinacionesParticipacionCharts } from "@/components/dashboard/CombinacionesParticipacionCharts";
+import { CruceMercaderistaRadar } from "@/components/dashboard/CruceMercaderistaRadar";
+import type { CruceInventarioRadarResult } from "@/lib/cruce-mercaderista-radar";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Separator } from "@/components/ui/separator";
 import {
@@ -243,6 +246,10 @@ interface Props {
   ventaDiariaPorSegmento: VentaPorSegmentoResult;
   /** Ratios y volumen por combinación de precio × comunicación del piloto. Global. */
   combinacionesPiloto: CombinacionesResult;
+  /** Las mismas combinaciones, solo con la cartera del piloto inicial (tanda "Piloto original"). Global. */
+  combinacionesPilotoOriginal: CombinacionesResult;
+  /** Inventario reportado por mercaderistas vs venta Radar, por PDV. Global; se corta por ciudad en el cliente. */
+  cruceMercaderistaRadar: CruceInventarioRadarResult;
 }
 
 export function DiennDashboardClient({
@@ -262,6 +269,8 @@ export function DiennDashboardClient({
   ventas3MesesPorCiudad,
   ventaDiariaPorSegmento,
   combinacionesPiloto,
+  combinacionesPilotoOriginal,
+  cruceMercaderistaRadar,
 }: Props) {
   const [filter, setFilter] = useState<FilterKey>("TOTAL");
   const [zonaFilter, setZonaFilter] = useState("");
@@ -2004,6 +2013,14 @@ export function DiennDashboardClient({
         )}
       </Card>
 
+      {/* ── Cruce mercaderistas vs Radar: dónde hay producto sin vender ─── */}
+      <CruceMercaderistaRadar
+        data={cruceMercaderistaRadar}
+        sector={filter}
+        filtroTexto={filtroTexto}
+        sectorLabels={sectorLabels}
+      />
+
       <Separator className="mb-4 print:hidden" />
 
       {/* ── BLOQUE 3 · Métricas complementarias (tarjetas restantes) ────── */}
@@ -2453,6 +2470,35 @@ export function DiennDashboardClient({
 
       {/* ── Combinaciones del piloto (precio × comunicación) ───────────── */}
       <CombinacionesPilotoTabla data={combinacionesPiloto} />
+      <CombinacionesParticipacionCharts
+        data={combinacionesPiloto}
+        titulo="Cartera actual — ventas por precio y comunicación"
+        alcance="la cartera actual"
+      />
+
+      {/* ── Las mismas combinaciones, solo cartera del piloto inicial ──── */}
+      <CombinacionesPilotoTabla
+        data={combinacionesPilotoOriginal}
+        titulo="Combinaciones del Piloto — solo cartera del piloto inicial"
+        excelFilename="Combinaciones del piloto inicial"
+        descripcion={
+          <>
+            Misma tabla de arriba, pero solo con los{" "}
+            <span className="font-medium">
+              {combinacionesPilotoOriginal.filas.reduce((s, f) => s + f.clientes, 0) +
+                combinacionesPilotoOriginal.sinCombinacion}{" "}
+              PDV de la cartera con la que arrancó el piloto
+            </span>{" "}
+            el 03-08-2026 (tanda &quot;Piloto original&quot;). Deja fuera las ampliaciones posteriores, que entraron más
+            tarde y con menos días de venta. Ratios y ventas salen solo de esos PDV.
+          </>
+        }
+      />
+      <CombinacionesParticipacionCharts
+        data={combinacionesPilotoOriginal}
+        titulo="Piloto inicial — ventas por precio y comunicación"
+        alcance="los PDV del piloto inicial"
+      />
 
       {/* ── Promedio de venta diaria por SEGMENTO y categoría ──────────── */}
       <Card className="mb-6 print-avoid-break">
