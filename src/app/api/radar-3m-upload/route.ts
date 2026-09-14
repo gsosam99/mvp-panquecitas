@@ -181,12 +181,75 @@ export async function POST(req: Request) {
       reemplazadas = (borradas ?? []).length;
     }
 
+    // ── Ventas por DÍA → radar_3m_ventas_dia (migration 024) ──
+    // Las mismas filas del archivo, leídas igual, pero SIN colapsar por mes:
+    // una por cliente+material+día. Las usa el gráfico adicional de segmentos
+    // foco y recompra, que tiene que saber cuál fue la primera compra de cada
+    // cliente para descartarla (getRendimiento3MFocoRecompra). radar_3m_records
+    // no cambia.
+    //
+    // NO es crítico: si falta el migration 024 se registra y la carga sigue,
+    // mismo criterio que radar_ventas_fechas en la Carga Radar.
+    let ventasDiaGuardadas = 0;
+    let ventasDiaError: string | null = null;
+    try {
+      const porDia = new Map<
+        string,
+        {
+          sap_code: string;
+          material_code: string;
+          product_id: string;
+          quantity_kg: number;
+          date_of_sale: string;
+          upload_batch_id: string;
+        }
+      >();
+      for (const r of rows) {
+        const product_id = SAP_RADAR_MATERIAL_PRODUCT_MAP[r.material_code];
+        // Una fila en cero no es una compra; las negativas (devoluciones) sí restan.
+        if (!product_id || r.quantity_kg === 0) continue;
+        const sap_code = r.sap_code.trim();
+        porDia.set(`${sap_code}|${r.material_code}|${r.fecha}`, {
+          sap_code,
+          material_code: r.material_code,
+          product_id,
+          quantity_kg: r.quantity_kg,
+          date_of_sale: r.fecha,
+          upload_batch_id: batchId,
+        });
+      }
+      const filasDia = [...porDia.values()];
+      for (let i = 0; i < filasDia.length; i += TANDA_FILAS) {
+        const { error: diaError } = await supabase
+          .from("radar_3m_ventas_dia")
+          .upsert(filasDia.slice(i, i + TANDA_FILAS), {
+            onConflict: "sap_code,material_code,date_of_sale",
+            ignoreDuplicates: false,
+          });
+        if (diaError) throw diaError;
+      }
+      // Igual que arriba: el borrado de la carga anterior solo en la última tanda.
+      if (finalizar) {
+        const { error: staleDiaError } = await supabase
+          .from("radar_3m_ventas_dia")
+          .delete()
+          .or(`upload_batch_id.is.null,upload_batch_id.neq.${batchId}`);
+        if (staleDiaError) throw staleDiaError;
+      }
+      ventasDiaGuardadas = filasDia.length;
+    } catch (diaErr) {
+      console.error("[POST /api/radar-3m-upload] no se pudieron guardar las ventas por día (no crítico):", diaErr);
+      ventasDiaError = errorDetail(diaErr);
+    }
+
     // Diagnóstico: sin esto, un "10 registros" no dice si el archivo venía
     // corto, si los clientes no calzan con la cartera o si faltan meses.
     const fechas = toInsert.map((r) => r.date_of_sale).sort();
     return Response.json({
       inserted: toInsert.length,
       reemplazadas,
+      ventas_dia_guardadas: ventasDiaGuardadas,
+      ventas_dia_error: ventasDiaError,
       // Contra la CARTERA de verdad (getUniverseLocations: sectores piloto,
       // sin distribuidoras/franquiciadas, sin cohorte "Fuera de cartera"), no
       // contra cualquier sap_code que exista en `locations`. Ese conteo viejo

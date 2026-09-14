@@ -105,6 +105,8 @@ export function Radar3MDropzone() {
       desde?: string;
       hasta?: string;
       total_kg?: number;
+      ventas_dia_guardadas?: number;
+      ventas_dia_error?: string | null;
       error?: string;
       detail?: string;
     };
@@ -122,6 +124,8 @@ export function Radar3MDropzone() {
       desde: "",
       hasta: "",
       total_kg: 0,
+      ventas_dia_guardadas: 0,
+      ventas_dia_error: "",
     };
 
     try {
@@ -158,6 +162,8 @@ export function Radar3MDropzone() {
         if (parcial.desde && (!acumulado.desde || parcial.desde < acumulado.desde)) acumulado.desde = parcial.desde;
         if (parcial.hasta && parcial.hasta > acumulado.hasta) acumulado.hasta = parcial.hasta;
         acumulado.total_kg += parcial.total_kg ?? 0;
+        acumulado.ventas_dia_guardadas += parcial.ventas_dia_guardadas ?? 0;
+        if (parcial.ventas_dia_error) acumulado.ventas_dia_error = parcial.ventas_dia_error;
       }
 
       const data = {
@@ -206,6 +212,15 @@ export function Radar3MDropzone() {
         partes.push(`${data.clientes_fuera_cartera} clientes del archivo NO están en la cartera (ignorados)`);
       }
       if (data.reemplazadas) partes.push(`${data.reemplazadas} filas de la carga anterior reemplazadas`);
+      // Ventas por día para el gráfico de segmentos foco y recompra. No frena la
+      // carga si fallan, pero sin ellas ese gráfico queda vacío.
+      if (acumulado.ventas_dia_error) {
+        partes.push(
+          `ATENCIÓN: no se guardaron las ventas por día (${acumulado.ventas_dia_error}) — ¿falta correr el migration 024? El gráfico de segmentos foco y recompra queda vacío`
+        );
+      } else {
+        partes.push(`${acumulado.ventas_dia_guardadas} ventas por día guardadas (gráfico foco y recompra)`);
+      }
       if (tandas.length > 1) partes.push(`subido en ${tandas.length} tandas`);
       // Lo único que hay que mirar para saber si la carga sirve: si no cubrió
       // la cartera completa, el promedio de referencia va a salir corto y el

@@ -1285,6 +1285,156 @@ export async function getRendimiento3M(
     puntos,
   };
 }
+
+// ── 4e. Rendimiento diario vs. promedio 3M — segmentos foco y recompra ─
+// Gráfico ADICIONAL al de 4d (DIENN, 14-09-2026); getRendimiento3M no cambia.
+// Misma mecánica —promedio de PAN ÷ DIAS_HABILES_3M, meta del 4%, serie diaria
+// desde RENDIMIENTO_DIARIO_DESDE con el fin de semana sumado al lunes— con tres
+// diferencias:
+//   1. Solo SEGMENTOS FOCO (fuera los de SEGMENTOS_SIN_ALIMENTOS), tanto en el
+//      promedio de PAN como en la venta de Panquecitas. Los PDV fuera de
+//      cartera no tienen segmento, así que no entran en ninguno de los dos.
+//   2. Solo RECOMPRA: de cada cliente se descarta su PRIMERA compra del
+//      producto —su primera fecha con kg > 0, todas las presentaciones de ese
+//      día— y se cuenta desde la segunda. En PAN y en Panquecitas.
+//   3. El PAN sale de radar_3m_ventas_dia (migration 024): las filas del
+//      reporte por día, sumadas. radar_3m_records se queda con el último corte
+//      del mes y ahí la fecha de la primera compra ya no existe.
+
+/** cliente → su primera fecha con compra (kg > 0). */
+function primeraCompraPorCliente(filas: { cliente: string; fecha: string; kg: number }[]): Map<string, string> {
+  const primera = new Map<string, string>();
+  for (const f of filas) {
+    if (f.kg <= 0) continue;
+    const prev = primera.get(f.cliente);
+    if (!prev || f.fecha < prev) primera.set(f.cliente, f.fecha);
+  }
+  return primera;
+}
+
+export async function getRendimiento3MFocoRecompra(
+  sector?: Sector
+): Promise<Record<Pan3MPoblacion, Rendimiento3MResult>> {
+  const vacio = { clientes: RENDIMIENTO_3M_VACIO, universo: RENDIMIENTO_3M_VACIO };
+  const universoTotal = await getUniverseLocations();
+  const delSector = sector ? universoTotal.filter((l) => sectorGroup(l.oficina_venta) === sector) : universoTotal;
+  // Cartera vigente hoy y solo segmentos foco. Los "Sin segmento" quedan
+  // dentro, mismo criterio que la recompra foco y la activación ajustada.
+  const foco = vigentesAl(delSector, todayISO()).filter((l) => !esSegmentoSinAlimentos(l.segmento_cliente));
+  if (foco.length === 0) return vacio;
+  const idsFoco = new Set(foco.map((l) => l.id));
+
+  const supabase = createSupabaseServiceClient();
+
+  // Si todavía no se corrió el migration 024 la lectura falla: el gráfico queda
+  // vacío en vez de romper la página. Tabla vacía = falta volver a subir el
+  // reporte de 3 meses.
+  let pan3m: { sap_code: string; quantity_kg: number; date_of_sale: string }[];
+  try {
+    pan3m = await fetchAllRows<{ sap_code: string; quantity_kg: number; date_of_sale: string }>(() =>
+      supabase
+        .from("radar_3m_ventas_dia")
+        .select("sap_code, quantity_kg, date_of_sale")
+        .eq("product_id", PRODUCT_IDS.HARINA_PAN)
+    );
+  } catch (error) {
+    console.error("[getRendimiento3MFocoRecompra] radar_3m_ventas_dia no disponible:", error);
+    return vacio;
+  }
+  if (pan3m.length === 0) return vacio;
+
+  const panqData = await fetchAllRows<{ location_id: string; quantity_kg: number; date_of_sale: string }>(() =>
+    supabase
+      .from("sap_sell_in_records")
+      .select("location_id, quantity_kg, date_of_sale")
+      .eq("product_id", PRODUCT_IDS.PANQUECITAS)
+  );
+
+  // Primera compra de Panquecitas de cada cliente sobre TODO su histórico, no
+  // solo desde el arranque de la serie: si compró antes, lo que se ve en la
+  // serie ya es recompra.
+  const primeraPanq = primeraCompraPorCliente(
+    panqData.map((r) => ({ cliente: r.location_id, fecha: r.date_of_sale.slice(0, 10), kg: Number(r.quantity_kg) }))
+  );
+
+  // PAN resuelto por SAP_CODE contra la cartera de hoy, igual que en 4d.
+  const locIdBySapCode = new Map(universoTotal.map((l) => [l.sap_code.trim(), l.id]));
+  const panFoco = pan3m
+    .map((r) => ({
+      locId: locIdBySapCode.get(r.sap_code.trim()),
+      fecha: r.date_of_sale.slice(0, 10),
+      kg: Number(r.quantity_kg),
+    }))
+    .filter((r): r is { locId: string; fecha: string; kg: number } => r.locId !== undefined && idsFoco.has(r.locId));
+  const primeraPan = primeraCompraPorCliente(panFoco.map((r) => ({ cliente: r.locId, fecha: r.fecha, kg: r.kg })));
+  const panRecompra = panFoco.filter((r) => r.fecha !== primeraPan.get(r.locId));
+
+  // Panquecitas de recompra por día, solo segmentos foco. Misma serie que 4d:
+  // desde el arranque del piloto y con sábado/domingo sumados al lunes.
+  const kgPorDia = new Map<string, number>();
+  for (const r of panqData) {
+    if (!idsFoco.has(r.location_id)) continue;
+    const fecha = r.date_of_sale.slice(0, 10);
+    if (fecha < RENDIMIENTO_DIARIO_DESDE) continue;
+    if (fecha === primeraPanq.get(r.location_id)) continue;
+    const dia = siguienteDiaHabil(fecha);
+    kgPorDia.set(dia, (kgPorDia.get(dia) ?? 0) + Number(r.quantity_kg));
+  }
+
+  // Mismo cierre de rango que 4d, leído de TODO el piloto, para que las dos
+  // ciudades y los dos gráficos compartan los mismos días.
+  let ultimoDiaReportado = "";
+  for (const r of panqData) {
+    const fecha = r.date_of_sale.slice(0, 10);
+    if (fecha < RENDIMIENTO_DIARIO_DESDE) continue;
+    const dia = siguienteDiaHabil(fecha);
+    if (dia > ultimoDiaReportado) ultimoDiaReportado = dia;
+  }
+
+  // "PAN Cliente": clientes foco que compran Panquecitas (neto > 0), mismo
+  // criterio que 4d. "PAN Universo": toda la cartera foco.
+  const totalesPanq = new Map<string, number>();
+  for (const r of panqData) {
+    totalesPanq.set(r.location_id, (totalesPanq.get(r.location_id) ?? 0) + Number(r.quantity_kg));
+  }
+  const idsClientesPanq = new Set(foco.filter((l) => (totalesPanq.get(l.id) ?? 0) > 0).map((l) => l.id));
+
+  const armar = (idsPan: Set<string>): Rendimiento3MResult => {
+    const filas = panRecompra.filter((r) => idsPan.has(r.locId));
+    if (filas.length === 0) return RENDIMIENTO_3M_VACIO;
+    const totalPanKg = filas.reduce((s, r) => s + r.kg, 0);
+    const promedio3M = totalPanKg / DIAS_HABILES_3M;
+    if (promedio3M <= 0) return RENDIMIENTO_3M_VACIO;
+
+    const fechasPan = filas.map((r) => r.fecha).sort();
+    const puntos: Rendimiento3MPunto[] = diasHabilesEntre(RENDIMIENTO_DIARIO_DESDE, ultimoDiaReportado).map((dia) => {
+      const kg = kgPorDia.get(dia) ?? 0;
+      return {
+        dia,
+        label: bucketLabelFor(dia, "day"),
+        panquecitasKg: Math.round(kg * 10) / 10,
+        ratioPct: Math.round((kg / promedio3M) * 100 * 10) / 10,
+      };
+    });
+
+    return {
+      promedio3M: Math.round(promedio3M * 10) / 10,
+      meta4Pct: Math.round(promedio3M * 0.04 * 10) / 10,
+      diasPeriodo: DIAS_HABILES_3M,
+      desde: `${fechasPan[0].slice(0, 7)}-01`,
+      hasta: ultimoDiaDelMes(fechasPan[fechasPan.length - 1].slice(0, 7)),
+      totalPanKg: Math.round(totalPanKg * 10) / 10,
+      // PDV con al menos una RECOMPRA de PAN en el reporte.
+      clientesPan: new Set(filas.map((r) => r.locId)).size,
+      clientesPoblacion: idsPan.size,
+      // Fuera de cartera no tiene segmento: acá no entra.
+      panquecitasFueraKg: 0,
+      puntos,
+    };
+  };
+
+  return { clientes: armar(idsClientesPanq), universo: armar(idsFoco) };
+}
 // ── 5. Cobertura y Comunicación por sector (semanal) ───────────────
 // Ver decisión #11: no hay datos reales de campañas de comunicación ni
 // metas por ciudad, así que se usa un proxy con datos existentes.
