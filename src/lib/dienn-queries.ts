@@ -292,13 +292,17 @@ export async function getVolumenRadarAcumulado(sector?: Sector): Promise<Volumen
   }[]) {
     const esFuera = idsFuera.has(r.location_id);
     if (!esFuera && !idsCartera.has(r.location_id)) continue;
-    // Mismo criterio que las series: una venta anterior a la incorporación
-    // del cliente no cuenta. Sin este filtro la tarjeta sumaba histórico de
-    // clientes que en esa fecha no eran cartera y quedaba por encima de los
-    // gráficos. Los "fuera de cartera" no tienen fecha y cuentan completo.
-    if (!esFuera && !estabaIncorporado(idsCartera.get(r.location_id), r.date_of_sale.slice(0, 10))) continue;
+    const esPanquecitas = r.product_id === PRODUCT_IDS.PANQUECITAS;
+    // Panquecitas: TODO el Radar, también lo vendido antes de la incorporación
+    // del cliente. El volumen de la tarjeta tiene que dar el total del reporte
+    // (DIENN, 15-09-2026: 12.432 kg); la fecha de incorporación solo acota
+    // poblaciones y tasas, no kilos. Las barras de venta acumulada del gráfico
+    // combinado siguen el mismo criterio para seguir calzando con esta tarjeta.
+    // Harina PAN conserva el filtro: no se pidió cambiarla.
+    if (!esPanquecitas && !esFuera && !estabaIncorporado(idsCartera.get(r.location_id), r.date_of_sale.slice(0, 10)))
+      continue;
 
-    if (r.product_id === PRODUCT_IDS.PANQUECITAS) {
+    if (esPanquecitas) {
       panquecitasKg += r.quantity_kg;
       if (esFuera) {
         fueraKg += r.quantity_kg;
@@ -886,7 +890,7 @@ export interface VentaRecompraActivacionPoint {
 }
 
 function computeVentaRecompraActivacionPoints(
-  rows: { location_id: string; date_of_sale: string; quantity_kg: number; esCartera: boolean }[],
+  rows: { location_id: string; date_of_sale: string; quantity_kg: number; esCartera: boolean; incorporado: boolean }[],
   fechasRows: { location_id: string; fecha: string }[],
   universoSizeAt: (cierre: string) => number,
   idsFoco: Set<string>,
@@ -914,7 +918,7 @@ function computeVentaRecompraActivacionPoints(
     // `quantity_kg > 0` a propósito: una devolución resta volumen pero no
     // activa a nadie.
     const activados = new Set(
-      rowsUpToBucket.filter((r) => r.esCartera && r.quantity_kg > 0).map((r) => r.location_id)
+      rowsUpToBucket.filter((r) => r.esCartera && r.incorporado && r.quantity_kg > 0).map((r) => r.location_id)
     ).size;
 
     // Recompra = TASA DE CLIENTES RECURRENTES (punto 3 del documento de cambios,
@@ -1001,21 +1005,24 @@ export async function getVentaRecompraActivacion(
   // con la tarjeta y con el resto del dashboard— y el conteo de clientes usa
   // solo las de cartera.
   //
-  // Para la cartera vale el mismo criterio que el denominador: una venta
-  // anterior a la incorporación del cliente no cuenta. Si contara, un cliente
-  // de la tanda del 24-08 con histórico previo aparecería "activado" en
-  // semanas en las que no estaba en el denominador, y la tasa pasaría del
-  // 100%. Los de fuera de cartera no tienen fecha de incorporación y no
-  // entran en ninguna tasa, así que su volumen cuenta completo.
+  // El VOLUMEN suma también lo vendido antes de la incorporación del cliente,
+  // igual que la tarjeta: tiene que dar el total del reporte (DIENN,
+  // 15-09-2026). La ACTIVACIÓN no: una venta anterior a la incorporación no
+  // activa a nadie, porque un cliente de la tanda del 24-08 con histórico
+  // previo aparecería "activado" en semanas en las que no estaba en el
+  // denominador y la tasa pasaría del 100%. Por eso cada fila lleva
+  // `incorporado`. Los de fuera de cartera no tienen fecha y no entran en
+  // ninguna tasa.
   const { fuera } = await getScopeVolumen(sector);
   const rows = ((data ?? []) as { location_id: string; date_of_sale: string; quantity_kg: number }[])
-    .filter(
-      (r) =>
+    .filter((r) => fuera.has(r.location_id) || incorporacionPorId.has(r.location_id))
+    .map((r) => ({
+      ...r,
+      esCartera: !fuera.has(r.location_id),
+      incorporado:
         fuera.has(r.location_id) ||
-        (incorporacionPorId.has(r.location_id) &&
-          estabaIncorporado(incorporacionPorId.get(r.location_id), r.date_of_sale.slice(0, 10)))
-    )
-    .map((r) => ({ ...r, esCartera: !fuera.has(r.location_id) }));
+        estabaIncorporado(incorporacionPorId.get(r.location_id), r.date_of_sale.slice(0, 10)),
+    }));
   if (rows.length === 0) return empty;
 
   // Fechas de venta Radar (para la recompra por fechas distintas). Si la tabla
@@ -1295,9 +1302,9 @@ export async function getRendimiento3M(
 //     SEGMENTOS_SIN_ALIMENTOS; los "Sin segmento" quedan dentro) y con
 //     Panquecitas en ≥2 fechas distintas con kg > 0. Con "Cartera piloto",
 //     además solo la cohorte "Piloto original" (los 358).
-//   - Panquecitas: la venta diaria de esos clientes SIN su primera compra (su
-//     primera fecha con kg > 0), desde RENDIMIENTO_DIARIO_DESDE y con el fin de
-//     semana sumado al lunes, igual que 4d.
+//   - Panquecitas: TODA la venta diaria de esos mismos clientes (sin descartar
+//     la primera compra: la recompra solo define quiénes entran), desde
+//     RENDIMIENTO_DIARIO_DESDE y con el fin de semana sumado al lunes, igual que 4d.
 //   - Promedio de PAN: el Harina PAN de esos clientes leído EXACTAMENTE igual
 //     que 4d —radar_3m_records, último corte de cada mes—, sin descartar nada,
 //     ÷ DIAS_HABILES_3M. Los dos gráficos tienen que leer el documento igual:
@@ -1338,8 +1345,7 @@ export async function getRendimiento3MFocoRecompra(
   );
 
   // Fechas distintas con compra de Panquecitas (kg > 0) por cliente, sobre todo
-  // su histórico: ≥2 = activado con recompra; la más temprana = primera compra.
-  // Una devolución no es una compra.
+  // su histórico: ≥2 = activado con recompra. Una devolución no es una compra.
   const fechasCompra = new Map<string, Set<string>>();
   for (const r of panqData) {
     if (Number(r.quantity_kg) <= 0) continue;
@@ -1347,8 +1353,6 @@ export async function getRendimiento3MFocoRecompra(
     fechas.add(r.date_of_sale.slice(0, 10));
     fechasCompra.set(r.location_id, fechas);
   }
-  const primeraCompra = new Map<string, string>();
-  for (const [id, fechas] of fechasCompra) primeraCompra.set(id, [...fechas].sort()[0]);
 
   const conRecompra = focoCompleta.filter((l) => (fechasCompra.get(l.id)?.size ?? 0) >= 2);
   const conRecompraPiloto = conRecompra.filter(
@@ -1385,13 +1389,12 @@ export async function getRendimiento3MFocoRecompra(
     const promedio3M = totalPanKg / DIAS_HABILES_3M;
     if (promedio3M <= 0) return RENDIMIENTO_3M_VACIO;
 
-    // Panquecitas de esos clientes sin su primera compra.
+    // Todas las Panquecitas de esos mismos clientes.
     const kgPorDia = new Map<string, number>();
     for (const r of panqData) {
       if (!ids.has(r.location_id)) continue;
       const fecha = r.date_of_sale.slice(0, 10);
       if (fecha < RENDIMIENTO_DIARIO_DESDE) continue;
-      if (fecha === primeraCompra.get(r.location_id)) continue;
       const dia = siguienteDiaHabil(fecha);
       kgPorDia.set(dia, (kgPorDia.get(dia) ?? 0) + Number(r.quantity_kg));
     }

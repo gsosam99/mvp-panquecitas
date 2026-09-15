@@ -125,7 +125,7 @@ export interface SectorBundle {
   rankingSegmentos: RankingSegmentoRow[];
   /** Rendimiento diario vs. promedio histórico 3M de Harina PAN, por población. */
   rendimiento3M: Record<Pan3MPoblacion, Rendimiento3MResult>;
-  /** Mismo gráfico que rendimiento3M, pero solo segmentos foco y solo ventas de recompra (sin la primera compra). */
+  /** Mismo gráfico que rendimiento3M, pero solo clientes foco activados con recompra: sus Panquecitas vs. su PAN. */
   rendimiento3MFocoRecompra: Record<AlcanceCartera, Rendimiento3MResult>;
   /** Rendimiento diario de Panquecitas vs. promedio histórico de Margarina/Mayonesa (Mavesa), por categoría. */
   rendimientoVsMavesa: Record<MavesaCategoria, RendimientoVsMavesaResult>;
@@ -1209,8 +1209,8 @@ export function DiennDashboardClient({
               Compara a los clientes de <span className="font-medium">segmentos foco</span> (sin licorerías, CS,
               farmacias de barrio, mascotas ni animales) <span className="font-medium">activados con recompra</span> —con
               Panquecitas en al menos 2 fechas distintas— contra el promedio de Harina PAN de{" "}
-              <span className="font-medium">esos mismos clientes</span>. La venta de Panquecitas es la de esos clientes sin
-              su primera compra. El PAN se lee igual que en el gráfico anterior (reporte{" "}
+              <span className="font-medium">esos mismos clientes</span>. La venta de Panquecitas es toda la de esos mismos
+              clientes. El PAN se lee igual que en el gráfico anterior (reporte{" "}
               <span className="font-medium">Radar últimos 3 Meses</span>, último corte de cada mes) ÷ días hábiles.{" "}
               <span className="font-medium">Cartera piloto</span> deja solo a los clientes del piloto original (los 358).
             </p>
@@ -1299,7 +1299,7 @@ export function DiennDashboardClient({
                 {ratioAcumuladoFocoRec && (
                   <div
                     className="absolute right-0 top-0 z-10 rounded-lg border border-slate-200 bg-white/90 px-3 py-1.5 pointer-events-none"
-                    title={`Promedio de los ${ratioAcumuladoFocoRec.dias} ratios diarios del período (Panquecitas del día de los clientes foco con recompra, sin su primera compra ÷ promedio diario de Harina PAN de esos mismos clientes).`}
+                    title={`Promedio de los ${ratioAcumuladoFocoRec.dias} ratios diarios del período (Panquecitas del día de los clientes foco con recompra ÷ promedio diario de Harina PAN de esos mismos clientes).`}
                   >
                     <p className="text-xs uppercase tracking-wide text-slate-500 leading-none">Ratio acumulado</p>
                     <p
