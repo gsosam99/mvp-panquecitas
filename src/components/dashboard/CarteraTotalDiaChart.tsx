@@ -29,10 +29,12 @@ export interface CarteraTotalDiaChartPoint {
   /** Misma activación "a escala" pero del total del piloto (las dos ciudades). */
   efectTotalEscala?: number | null;
   /**
-   * Activación "aterrizada" del total, por FACTURADO: la cartera de hoy como si existiera desde
-   * el día 1 (denominador fijo, sin recorte por fecha de incorporación).
+   * Activación acumulada "aterrizada": la de siempre, pero contra la cartera de hoy
+   * completa desde el día 1 (sin saltos por ampliación de cartera). Total y por ciudad.
    */
   efectTotalAterrizada?: number | null;
+  efectCumanaAterrizada?: number | null;
+  efectCabudareAterrizada?: number | null;
 }
 
 function formatKg(value: number): string {
@@ -61,6 +63,8 @@ const Inner = dynamic(
       showEscalaCabudare,
       showEscalaTotal,
       showAterrizadaTotal,
+      showAterrizadaCumana,
+      showAterrizadaCabudare,
       showCabudare,
     }: {
       data: CarteraTotalDiaChartPoint[];
@@ -79,6 +83,8 @@ const Inner = dynamic(
       showEscalaCabudare: boolean;
       showEscalaTotal: boolean;
       showAterrizadaTotal: boolean;
+      showAterrizadaCumana: boolean;
+      showAterrizadaCabudare: boolean;
       showCabudare: boolean;
     }) {
       // Con cualquier desglose de barras prendido (modelo o ciudad) se oculta la
@@ -129,6 +135,8 @@ const Inner = dynamic(
         if (showEscalaCabudare && punto.efectCabudareEscala != null) ratios.push(punto.efectCabudareEscala);
         if (showEscalaTotal && punto.efectTotalEscala != null) ratios.push(punto.efectTotalEscala);
         if (showAterrizadaTotal && punto.efectTotalAterrizada != null) ratios.push(punto.efectTotalAterrizada);
+        if (showAterrizadaCumana && punto.efectCumanaAterrizada != null) ratios.push(punto.efectCumanaAterrizada);
+        if (showAterrizadaCabudare && punto.efectCabudareAterrizada != null) ratios.push(punto.efectCabudareAterrizada);
 
         const yArriba = y + 12;
         const yAbajo = base - 6;
@@ -183,7 +191,11 @@ const Inner = dynamic(
                 if (name === "efectTotalEscala")
                   return [`${Number(value ?? 0)}%`, "Activación total a escala (segmentos foco)"];
                 if (name === "efectTotalAterrizada")
-                  return [`${Number(value ?? 0)}%`, "Activación total aterrizada — facturado (cartera de hoy desde el día 1)"];
+                  return [`${Number(value ?? 0)}%`, "Activación total aterrizada (cartera de hoy desde el día 1)"];
+                if (name === "efectCumanaAterrizada")
+                  return [`${Number(value ?? 0)}%`, "Cumaná aterrizada (cartera de hoy desde el día 1)"];
+                if (name === "efectCabudareAterrizada")
+                  return [`${Number(value ?? 0)}%`, "Cabudare aterrizada (cartera de hoy desde el día 1)"];
                 return [String(value ?? ""), String(name ?? "")];
               }}
             />
@@ -220,7 +232,11 @@ const Inner = dynamic(
                   : value === "efectTotalEscala"
                   ? "Total a escala"
                   : value === "efectTotalAterrizada"
-                  ? "Total aterrizado (facturado)"
+                  ? "Total aterrizado"
+                  : value === "efectCumanaAterrizada"
+                  ? "Cumaná aterrizado"
+                  : value === "efectCabudareAterrizada"
+                  ? "Cabudare aterrizado"
                   : value
               }
               wrapperStyle={{ fontSize: 12 }}
@@ -603,6 +619,59 @@ const Inner = dynamic(
                 />
               </Line>
             )}
+            {/* Activación ATERRIZADA por ciudad: misma idea que la del total, cada
+                ciudad contra su cartera de hoy. Violeta claro (Cumaná) y oscuro
+                (Cabudare), punteadas como la del total. */}
+            {showAterrizadaCumana && (
+              <Line
+                yAxisId="pct"
+                dataKey="efectCumanaAterrizada"
+                stroke="#8b5cf6"
+                strokeWidth={2.5}
+                strokeDasharray="6 3"
+                dot={{ r: 2.5, fill: "#8b5cf6" }}
+                connectNulls
+                isAnimationActive={false}
+              >
+                <LabelList
+                  dataKey="efectCumanaAterrizada"
+                  position="top"
+                  offset={84}
+                  fill="#8b5cf6"
+                  fontSize={10}
+                  fontWeight={700}
+                  stroke="#ffffff"
+                  strokeWidth={3}
+                  paintOrder="stroke"
+                  formatter={(v) => (v == null ? "" : `${Number(v)}%`)}
+                />
+              </Line>
+            )}
+            {showAterrizadaCabudare && (
+              <Line
+                yAxisId="pct"
+                dataKey="efectCabudareAterrizada"
+                stroke="#4c1d95"
+                strokeWidth={2.5}
+                strokeDasharray="6 3"
+                dot={{ r: 2.5, fill: "#4c1d95" }}
+                connectNulls
+                isAnimationActive={false}
+              >
+                <LabelList
+                  dataKey="efectCabudareAterrizada"
+                  position="bottom"
+                  offset={66}
+                  fill="#4c1d95"
+                  fontSize={10}
+                  fontWeight={700}
+                  stroke="#ffffff"
+                  strokeWidth={3}
+                  paintOrder="stroke"
+                  formatter={(v) => (v == null ? "" : `${Number(v)}%`)}
+                />
+              </Line>
+            )}
           </ComposedChart>
         </ResponsiveContainer>
       );
@@ -633,6 +702,8 @@ export function CarteraTotalDiaChart({
   showEscalaCabudare = false,
   showEscalaTotal = false,
   showAterrizadaTotal = false,
+  showAterrizadaCumana = false,
+  showAterrizadaCabudare = false,
   showCabudare = true,
 }: {
   data: CarteraTotalDiaChartPoint[];
@@ -651,6 +722,8 @@ export function CarteraTotalDiaChart({
   showEscalaCabudare?: boolean;
   showEscalaTotal?: boolean;
   showAterrizadaTotal?: boolean;
+  showAterrizadaCumana?: boolean;
+  showAterrizadaCabudare?: boolean;
   showCabudare?: boolean;
 }) {
   return (
@@ -671,6 +744,8 @@ export function CarteraTotalDiaChart({
       showEscalaCabudare={showEscalaCabudare}
       showEscalaTotal={showEscalaTotal}
       showAterrizadaTotal={showAterrizadaTotal}
+      showAterrizadaCumana={showAterrizadaCumana}
+      showAterrizadaCabudare={showAterrizadaCabudare}
       showCabudare={showCabudare}
     />
   );

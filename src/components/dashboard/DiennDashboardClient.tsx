@@ -182,7 +182,7 @@ const TOTAL_ACUM_COLUMNS: ExcelColumn<CarteraTotalDiaPunto>[] = [
   { header: "% Acum. Indirecto", value: (r) => r.efectividadIndirectoAcum, width: 18 },
   { header: "Radar Directo (kg)", value: (r) => r.radarKgDiaDirecto, width: 18 },
   { header: "Radar Indirecto (kg)", value: (r) => r.radarKgDiaIndirecto, width: 20 },
-  { header: "% Acum. aterrizado facturado (cartera de hoy)", value: (r) => r.efectividadActivosAcumAterrizada, width: 30 },
+  { header: "% Acum. aterrizado (cartera de hoy)", value: (r) => r.efectividadActivosAcumAterrizada, width: 30 },
 ];
 const TOTAL_ACUM_CHART: ExcelChartConfig = {
   categoryCol: 0,
@@ -321,9 +321,11 @@ export function DiennDashboardClient({
   // Lo mismo para el TOTAL del piloto: activación acumulada contra la cartera
   // de segmentos foco (DIENN, 14-09-2026).
   const [escalaTotalOn, setEscalaTotalOn] = useState(false);
-  // Activación "aterrizada" por facturado: como si la cartera de hoy existiera desde el día 1
-  // (denominador fijo, sin recorte por fecha de incorporación).
+  // Activación "aterrizada": la acumulada de siempre contra la cartera de hoy
+  // completa desde el día 1 (sin saltos por ampliación de cartera). Total y por ciudad.
   const [aterrizadaTotalOn, setAterrizadaTotalOn] = useState(false);
+  const [aterrizadaCumanaOn, setAterrizadaCumanaOn] = useState(false);
+  const [aterrizadaCabudareOn, setAterrizadaCabudareOn] = useState(false);
 
   const [sellOutClienteOpen, setSellOutClienteOpen] = useState(false);
   // Posición del producto en PDV: una sola tarjeta, se ve por conteo de clientes
@@ -487,6 +489,8 @@ export function DiennDashboardClient({
     let bAcum: number | null = null;
     let cEscala: number | null = null;
     let bEscala: number | null = null;
+    let cAterrizada: number | null = null;
+    let bAterrizada: number | null = null;
     return base.map((p) => {
       const c = cIdx.get(p.dia);
       const b = bIdx.get(p.dia);
@@ -494,6 +498,8 @@ export function DiennDashboardClient({
       if (b) bAcum = metricAcum(b);
       if (c) cEscala = c.efectividadActivosAcumVendible;
       if (b) bEscala = b.efectividadActivosAcumVendible;
+      if (c) cAterrizada = c.efectividadActivosAcumAterrizada;
+      if (b) bAterrizada = b.efectividadActivosAcumAterrizada;
       return {
         ...mapTotalPoint(p),
         // Volumen Radar del bucket partido por ciudad (para las barras por ciudad).
@@ -516,6 +522,9 @@ export function DiennDashboardClient({
         efectTotalEscala: p.efectividadActivosAcumVendible,
         // Total aterrizado: la cartera de hoy como denominador fijo desde el día 1.
         efectTotalAterrizada: p.efectividadActivosAcumAterrizada,
+        // Aterrizada por ciudad: se arrastra el último valor, igual que la "a escala".
+        efectCumanaAterrizada: cAterrizada,
+        efectCabudareAterrizada: bAterrizada,
       };
     });
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -1381,8 +1390,8 @@ export function DiennDashboardClient({
                 <span className="font-medium">Ventas Cumaná / Cabudare</span>, en dos tonos de azul que se repiten en
                 sus líneas de activación), y la línea de efectividad total se apaga con{" "}
                 <span className="font-medium">Línea total</span>. <span className="font-medium">Total aterrizado</span>{" "}
-                muestra la activación por facturado como si la cartera de hoy existiera desde el día 1 (mismo denominador en todas las
-                fechas y cuenta también lo facturado antes de la incorporación). El resto aplica también a los gráficos comparativos
+                muestra la activación acumulada contra la cartera de hoy completa desde el día 1 (mismo denominador en todas
+                las fechas, sin los saltos por ampliación de cartera); también por ciudad. El resto aplica también a los gráficos comparativos
                 (Cumaná / Cabudare).
               </p>
             </div>
@@ -1588,11 +1597,34 @@ export function DiennDashboardClient({
                 >
                   Total a escala
                 </button>
-                {/* Activación aterrizada: la cartera de hoy como si existiera desde el
-                    día 1 — denominador fijo y sin recorte por fecha de incorporación. */}
+                {/* Aterrizada por ciudad: la acumulada de cada ciudad contra su cartera de hoy. */}
+                <button
+                  onClick={() => setAterrizadaCumanaOn((v) => !v)}
+                  title="Activación acumulada de Cumaná contra su cartera de hoy completa desde el día 1"
+                  className={`px-3 py-1.5 rounded-lg border text-xs font-medium transition-colors ${
+                    aterrizadaCumanaOn
+                      ? "border-violet-500 bg-violet-500 text-white"
+                      : "border-slate-200 bg-white text-slate-500 hover:bg-slate-50"
+                  }`}
+                >
+                  Cumaná aterrizado
+                </button>
+                <button
+                  onClick={() => setAterrizadaCabudareOn((v) => !v)}
+                  title="Activación acumulada de Cabudare contra su cartera de hoy completa desde el día 1"
+                  className={`px-3 py-1.5 rounded-lg border text-xs font-medium transition-colors ${
+                    aterrizadaCabudareOn
+                      ? "border-violet-900 bg-violet-900 text-white"
+                      : "border-slate-200 bg-white text-slate-500 hover:bg-slate-50"
+                  }`}
+                >
+                  Cabudare aterrizado
+                </button>
+                {/* Total aterrizado: la acumulada de siempre contra la cartera de hoy completa
+                    desde el día 1 (denominador fijo, sin saltos por ampliación). */}
                 <button
                   onClick={() => setAterrizadaTotalOn((v) => !v)}
-                  title="Activación acumulada por FACTURADO contra la cartera de hoy completa desde el día 1: mismo denominador en todas las fechas y cuenta también lo facturado antes de la incorporación de cada cliente"
+                  title="La activación acumulada de siempre, pero contra la cartera de hoy completa desde el día 1: mismo denominador en todas las fechas, sin saltos por ampliación de cartera"
                   className={`px-3 py-1.5 rounded-lg border text-xs font-medium transition-colors ${
                     aterrizadaTotalOn
                       ? "border-violet-700 bg-violet-700 text-white"
@@ -1639,6 +1671,8 @@ export function DiennDashboardClient({
               showEscalaCabudare={escalaCabudareOn}
               showEscalaTotal={escalaTotalOn}
               showAterrizadaTotal={aterrizadaTotalOn}
+              showAterrizadaCumana={aterrizadaCumanaOn}
+              showAterrizadaCabudare={aterrizadaCabudareOn}
             />
           </CardContent>
         </Card>
