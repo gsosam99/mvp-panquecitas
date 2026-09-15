@@ -1294,47 +1294,60 @@ export async function getRendimiento3M(
   };
 }
 
-// ── 4e. Rendimiento diario vs. promedio 3M — clientes foco con recompra ─
-// Gráfico ADICIONAL al de 4d (DIENN, 14-09-2026); getRendimiento3M no cambia.
-// Compara a los clientes foco ACTIVADOS CON RECOMPRA de Panquecitas contra el
+// ── 4e. Rendimiento diario vs. promedio 3M — clientes con recompra ──
+// Único gráfico de ratio vs. promedio 3M de Harina PAN del dashboard (DIENN,
+// 15-09-2026: el de 4d se quitó; getRendimiento3M sigue alimentando la tarjeta
+// de volumen y "Ventas Últimos 3 Meses").
+// Compara a los clientes ACTIVADOS CON RECOMPRA de Panquecitas contra el
 // promedio de Harina PAN de ESOS MISMOS clientes:
-//   - Clientes: cartera vigente hoy, segmentos foco (fuera los de
-//     SEGMENTOS_SIN_ALIMENTOS; los "Sin segmento" quedan dentro) y con
-//     Panquecitas en ≥2 fechas distintas con kg > 0. Con "Cartera piloto",
-//     además solo la cohorte "Piloto original" (los 358).
-//   - Panquecitas: TODA la venta diaria de esos mismos clientes (sin descartar
-//     la primera compra: la recompra solo define quiénes entran), desde
-//     RENDIMIENTO_DIARIO_DESDE y con el fin de semana sumado al lunes, igual que 4d.
-//   - Promedio de PAN: el Harina PAN de esos clientes leído EXACTAMENTE igual
-//     que 4d —radar_3m_records, último corte de cada mes—, sin descartar nada,
-//     ÷ DIAS_HABILES_3M. Los dos gráficos tienen que leer el documento igual:
-//     una versión que sumaba las filas diarias daba un promedio ~1,7x mayor.
+//   - Clientes: cartera vigente hoy con Panquecitas en ≥2 fechas distintas con
+//     kg > 0. Dos cortes por segmento: "foco" (fuera los de
+//     SEGMENTOS_SIN_ALIMENTOS; los "Sin segmento" quedan dentro) o "todos". Con
+//     "Cartera piloto", además solo la cohorte "Piloto original" (los 358).
+//   - Panquecitas: TODA la venta diaria de esos clientes, desde
+//     RENDIMIENTO_DIARIO_DESDE y con el fin de semana sumado al lunes.
+//   - Promedio de PAN: la SUMA de todas las filas diarias del reporte "Radar
+//     últimos 3 Meses" de esos clientes (radar_3m_ventas_dia, migration 024)
+//     ÷ DIAS_HABILES_3M (DIENN, 15-09-2026) — no el último corte del mes que
+//     guarda radar_3m_records.
 
 /**
- * Qué cartera entra en el gráfico de foco y recompra: la vigente completa, o
- * solo la tanda "Piloto original" (los 358 del arranque), mismo recorte por
- * `cohorte` que la tabla de combinaciones del piloto inicial.
+ * Qué cartera entra en el gráfico: la vigente completa, o solo la tanda
+ * "Piloto original" (los 358 del arranque), mismo recorte por `cohorte` que la
+ * tabla de combinaciones del piloto inicial.
  */
 export type AlcanceCartera = "completa" | "piloto";
 
+/** Corte por segmento: "foco" = solo segmentos foco; "todos" = cualquier segmento. */
+export type SegmentoRecompra = "foco" | "todos";
+
 export async function getRendimiento3MFocoRecompra(
   sector?: Sector
-): Promise<Record<AlcanceCartera, Rendimiento3MResult>> {
-  const vacio = { completa: RENDIMIENTO_3M_VACIO, piloto: RENDIMIENTO_3M_VACIO };
+): Promise<Record<AlcanceCartera, Record<SegmentoRecompra, Rendimiento3MResult>>> {
+  const vacioSegmento = { foco: RENDIMIENTO_3M_VACIO, todos: RENDIMIENTO_3M_VACIO };
+  const vacio = { completa: vacioSegmento, piloto: vacioSegmento };
   const universoTotal = await getUniverseLocations();
   const delSector = sector ? universoTotal.filter((l) => sectorGroup(l.oficina_venta) === sector) : universoTotal;
-  const focoCompleta = vigentesAl(delSector, todayISO()).filter((l) => !esSegmentoSinAlimentos(l.segmento_cliente));
-  if (focoCompleta.length === 0) return vacio;
+  const vigentes = vigentesAl(delSector, todayISO());
+  if (vigentes.length === 0) return vacio;
 
   const supabase = createSupabaseServiceClient();
 
-  // Harina PAN de 3 meses: la MISMA lectura que getRendimiento3M.
-  const pan3m = await fetchAllRows<{ sap_code: string; quantity_kg: number; date_of_sale: string }>(() =>
-    supabase
-      .from("radar_3m_records")
-      .select("sap_code, quantity_kg, date_of_sale")
-      .eq("product_id", PRODUCT_IDS.HARINA_PAN)
-  );
+  // Todas las filas diarias del reporte de 3 meses. Si la tabla no existe o la
+  // lectura falla, el gráfico queda vacío en vez de romper la página; vacía =
+  // falta volver a subir el reporte.
+  let pan3m: { sap_code: string; quantity_kg: number; date_of_sale: string }[];
+  try {
+    pan3m = await fetchAllRows<{ sap_code: string; quantity_kg: number; date_of_sale: string }>(() =>
+      supabase
+        .from("radar_3m_ventas_dia")
+        .select("sap_code, quantity_kg, date_of_sale")
+        .eq("product_id", PRODUCT_IDS.HARINA_PAN)
+    );
+  } catch (error) {
+    console.error("[getRendimiento3MFocoRecompra] radar_3m_ventas_dia no disponible:", error);
+    return vacio;
+  }
   if (pan3m.length === 0) return vacio;
 
   const panqData = await fetchAllRows<{ location_id: string; quantity_kg: number; date_of_sale: string }>(() =>
@@ -1354,10 +1367,10 @@ export async function getRendimiento3MFocoRecompra(
     fechasCompra.set(r.location_id, fechas);
   }
 
-  const conRecompra = focoCompleta.filter((l) => (fechasCompra.get(l.id)?.size ?? 0) >= 2);
-  const conRecompraPiloto = conRecompra.filter(
-    (l) => (l.cohorte ?? "").trim() === COHORTE_PILOTO_ORIGINAL.nombre
-  );
+  type Cliente = (typeof vigentes)[number];
+  const conRecompra = vigentes.filter((l) => (fechasCompra.get(l.id)?.size ?? 0) >= 2);
+  const esFoco = (l: Cliente) => !esSegmentoSinAlimentos(l.segmento_cliente);
+  const esPiloto = (l: Cliente) => (l.cohorte ?? "").trim() === COHORTE_PILOTO_ORIGINAL.nombre;
 
   // PAN resuelto por SAP_CODE contra la cartera de hoy, igual que en 4d.
   const locIdBySapCode = new Map(universoTotal.map((l) => [l.sap_code.trim(), l.id]));
@@ -1370,7 +1383,7 @@ export async function getRendimiento3MFocoRecompra(
     .filter((r): r is { locId: string; fecha: string; kg: number } => r.locId !== undefined);
 
   // Mismo cierre de rango que 4d, leído de TODO el piloto, para que las dos
-  // ciudades y los dos gráficos compartan los mismos días.
+  // ciudades compartan los mismos días.
   let ultimoDiaReportado = "";
   for (const r of panqData) {
     const fecha = r.date_of_sale.slice(0, 10);
@@ -1379,7 +1392,7 @@ export async function getRendimiento3MFocoRecompra(
     if (dia > ultimoDiaReportado) ultimoDiaReportado = dia;
   }
 
-  const armar = (clientes: typeof focoCompleta): Rendimiento3MResult => {
+  const armar = (clientes: Cliente[]): Rendimiento3MResult => {
     if (clientes.length === 0) return RENDIMIENTO_3M_VACIO;
     const ids = new Set(clientes.map((l) => l.id));
 
@@ -1420,13 +1433,19 @@ export async function getRendimiento3MFocoRecompra(
       // De los clientes con recompra, cuántos tienen PAN en el reporte.
       clientesPan: new Set(filasPan.map((r) => r.locId)).size,
       clientesPoblacion: ids.size,
-      // Fuera de cartera no tiene segmento: acá no entra.
+      // Fuera de cartera no es población: acá no entra.
       panquecitasFueraKg: 0,
       puntos,
     };
   };
 
-  return { completa: armar(conRecompra), piloto: armar(conRecompraPiloto) };
+  return {
+    completa: { foco: armar(conRecompra.filter(esFoco)), todos: armar(conRecompra) },
+    piloto: {
+      foco: armar(conRecompra.filter((l) => esPiloto(l) && esFoco(l))),
+      todos: armar(conRecompra.filter(esPiloto)),
+    },
+  };
 }
 // ── 5. Cobertura y Comunicación por sector (semanal) ───────────────
 // Ver decisión #11: no hay datos reales de campañas de comunicación ni
