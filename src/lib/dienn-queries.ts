@@ -2432,6 +2432,12 @@ export interface CarteraTotalDiaPunto {
    * (DIENN, 15-09-2026).
    */
   efectividadActivosAcumAterrizada: number;
+  /**
+   * La aterrizada "a escala": mismo numerador, contra la cartera de hoy SIN los
+   * PDV de segmentos no vendibles que hoy siguen sin comprar. Fija en todos los
+   * buckets; termina en la `efectividadActivosAcumVendible` de hoy.
+   */
+  efectividadActivosAcumAterrizadaVendible: number;
 }
 
 export interface CarteraSegmentoResult {
@@ -2657,6 +2663,10 @@ export async function getCarteraPorSegmento(): Promise<CarteraSegmentoResult> {
     // Activación aterrizada: la cartera vigente HOY es el denominador fijo de
     // todos los buckets; el numerador es el mismo de la acumulada normal.
     const carteraHoy = vigentesAl(clientesScope, todayISO());
+    // Aterrizada "a escala": la misma cartera de hoy sin los PDV de segmentos no
+    // vendibles que, con todo el Radar cargado, siguen sin comprar.
+    const activosAlFinal = new Set(radarScope.filter((r) => r.quantity_kg > 0).map((r) => r.location_id));
+    const carteraHoyVendible = carteraHoy.filter((c) => !c.noVendible || activosAlFinal.has(c.locId)).length;
 
     const radarByBucket = new Map<string, { locId: string; kg: number }[]>();
     for (const r of radarScope) {
@@ -2789,6 +2799,7 @@ export async function getCarteraPorSegmento(): Promise<CarteraSegmentoResult> {
         descartadosVigentes,
         // Aterrizada: mismo numerador, contra la cartera de hoy completa en todos los buckets.
         efectividadActivosAcumAterrizada: pct(activosAcum, carteraHoy.length),
+        efectividadActivosAcumAterrizadaVendible: pct(activosAcum, carteraHoyVendible),
       };
     });
   }

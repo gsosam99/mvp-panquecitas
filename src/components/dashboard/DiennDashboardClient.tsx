@@ -183,6 +183,7 @@ const TOTAL_ACUM_COLUMNS: ExcelColumn<CarteraTotalDiaPunto>[] = [
   { header: "Radar Directo (kg)", value: (r) => r.radarKgDiaDirecto, width: 18 },
   { header: "Radar Indirecto (kg)", value: (r) => r.radarKgDiaIndirecto, width: 20 },
   { header: "% Acum. aterrizado (cartera de hoy)", value: (r) => r.efectividadActivosAcumAterrizada, width: 30 },
+  { header: "% Acum. aterrizado a escala (sin no vendibles)", value: (r) => r.efectividadActivosAcumAterrizadaVendible, width: 34 },
 ];
 const TOTAL_ACUM_CHART: ExcelChartConfig = {
   categoryCol: 0,
@@ -326,6 +327,9 @@ export function DiennDashboardClient({
   const [aterrizadaTotalOn, setAterrizadaTotalOn] = useState(false);
   const [aterrizadaCumanaOn, setAterrizadaCumanaOn] = useState(false);
   const [aterrizadaCabudareOn, setAterrizadaCabudareOn] = useState(false);
+  // Las aterrizadas con todos los segmentos o "a escala" (sin los inactivos de
+  // segmentos no vendibles, como las líneas "a escala").
+  const [aterrizadaEscala, setAterrizadaEscala] = useState(false);
 
   const [sellOutClienteOpen, setSellOutClienteOpen] = useState(false);
   // Posición del producto en PDV: una sola tarjeta, se ve por conteo de clientes
@@ -498,8 +502,14 @@ export function DiennDashboardClient({
       if (b) bAcum = metricAcum(b);
       if (c) cEscala = c.efectividadActivosAcumVendible;
       if (b) bEscala = b.efectividadActivosAcumVendible;
-      if (c) cAterrizada = c.efectividadActivosAcumAterrizada;
-      if (b) bAterrizada = b.efectividadActivosAcumAterrizada;
+      if (c)
+        cAterrizada = aterrizadaEscala
+          ? c.efectividadActivosAcumAterrizadaVendible
+          : c.efectividadActivosAcumAterrizada;
+      if (b)
+        bAterrizada = aterrizadaEscala
+          ? b.efectividadActivosAcumAterrizadaVendible
+          : b.efectividadActivosAcumAterrizada;
       return {
         ...mapTotalPoint(p),
         // Volumen Radar del bucket partido por ciudad (para las barras por ciudad).
@@ -521,14 +531,16 @@ export function DiennDashboardClient({
         // tiene todos los buckets.
         efectTotalEscala: p.efectividadActivosAcumVendible,
         // Total aterrizado: la cartera de hoy como denominador fijo desde el día 1.
-        efectTotalAterrizada: p.efectividadActivosAcumAterrizada,
+        efectTotalAterrizada: aterrizadaEscala
+          ? p.efectividadActivosAcumAterrizadaVendible
+          : p.efectividadActivosAcumAterrizada,
         // Aterrizada por ciudad: se arrastra el último valor, igual que la "a escala".
         efectCumanaAterrizada: cAterrizada,
         efectCabudareAterrizada: bAterrizada,
       };
     });
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [carteraPorSegmento, totalGranularity, carteraMetrica, efectividadAcum, modeloAcum]);
+  }, [carteraPorSegmento, totalGranularity, carteraMetrica, efectividadAcum, modeloAcum, aterrizadaEscala]);
   const carteraTotalPorSectorData = useMemo(
     () =>
       pilotSectors.map((s) => ({
@@ -1391,7 +1403,9 @@ export function DiennDashboardClient({
                 sus líneas de activación), y la línea de efectividad total se apaga con{" "}
                 <span className="font-medium">Línea total</span>. <span className="font-medium">Total aterrizado</span>{" "}
                 muestra la activación acumulada contra la cartera de hoy completa desde el día 1 (mismo denominador en todas
-                las fechas, sin los saltos por ampliación de cartera); también por ciudad. El resto aplica también a los gráficos comparativos
+                las fechas, sin los saltos por ampliación de cartera); también por ciudad, y con{" "}
+                <span className="font-medium">Aterrizado: A escala</span> sin los PDV inactivos de segmentos no vendibles.
+                El resto aplica también a los gráficos comparativos
                 (Cumaná / Cabudare).
               </p>
             </div>
@@ -1632,6 +1646,19 @@ export function DiennDashboardClient({
                   }`}
                 >
                   Total aterrizado
+                </button>
+                {/* Las tres aterrizadas con todos los segmentos o "a escala" (sin los
+                    PDV inactivos de segmentos no vendibles). */}
+                <button
+                  onClick={() => setAterrizadaEscala((v) => !v)}
+                  title="Cambia las líneas aterrizadas entre la cartera de hoy completa y la cartera de hoy sin los PDV inactivos de segmentos no vendibles (a escala)"
+                  className={`px-3 py-1.5 rounded-lg border text-xs font-medium transition-colors ${
+                    aterrizadaEscala
+                      ? "border-violet-700 bg-violet-100 text-violet-900"
+                      : "border-slate-200 bg-white text-slate-500 hover:bg-slate-50"
+                  }`}
+                >
+                  Aterrizado: {aterrizadaEscala ? "A escala" : "Todos los segmentos"}
                 </button>
                 {/* Cuál ciudad se superpone (aplica a ambas capas de ciudad). */}
                 <select
