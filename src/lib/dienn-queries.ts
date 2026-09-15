@@ -1327,10 +1327,18 @@ export type SegmentoRecompra = "foco" | "todos";
 /** Corte por compra: "recompra" = ≥2 fechas con Panquecitas; "cartera" = toda la cartera, haya comprado o no. */
 export type FiltroCompra = "recompra" | "cartera";
 
+/**
+ * De quién sale el promedio de PAN: "grupo" = los mismos clientes de la serie de
+ * Panquecitas; "recompra" = solo los del grupo que además tienen recompra de
+ * Panquecitas (DIENN, 15-09-2026). Con el corte de compra "recompra" coinciden.
+ */
+export type BasePan = "grupo" | "recompra";
+
 export async function getRendimiento3MFocoRecompra(
   sector?: Sector
-): Promise<Record<AlcanceCartera, Record<SegmentoRecompra, Record<FiltroCompra, Rendimiento3MResult>>>> {
-  const vacioCompra = { recompra: RENDIMIENTO_3M_VACIO, cartera: RENDIMIENTO_3M_VACIO };
+): Promise<Record<AlcanceCartera, Record<SegmentoRecompra, Record<FiltroCompra, Record<BasePan, Rendimiento3MResult>>>>> {
+  const vacioBase = { grupo: RENDIMIENTO_3M_VACIO, recompra: RENDIMIENTO_3M_VACIO };
+  const vacioCompra = { recompra: vacioBase, cartera: vacioBase };
   const vacioSegmento = { foco: vacioCompra, todos: vacioCompra };
   const vacio = { completa: vacioSegmento, piloto: vacioSegmento };
   const universoTotal = await getUniverseLocations();
@@ -1393,11 +1401,14 @@ export async function getRendimiento3MFocoRecompra(
     if (dia > ultimoDiaReportado) ultimoDiaReportado = dia;
   }
 
-  const armar = (clientes: Cliente[]): Rendimiento3MResult => {
-    if (clientes.length === 0) return RENDIMIENTO_3M_VACIO;
+  // `clientes` define la serie de Panquecitas; `clientesPan`, de quién sale el
+  // promedio de PAN (por defecto, los mismos).
+  const armar = (clientes: Cliente[], clientesPan: Cliente[] = clientes): Rendimiento3MResult => {
+    if (clientes.length === 0 || clientesPan.length === 0) return RENDIMIENTO_3M_VACIO;
     const ids = new Set(clientes.map((l) => l.id));
+    const idsPan = new Set(clientesPan.map((l) => l.id));
 
-    const filasPan = panPorCliente.filter((r) => ids.has(r.locId));
+    const filasPan = panPorCliente.filter((r) => idsPan.has(r.locId));
     if (filasPan.length === 0) return RENDIMIENTO_3M_VACIO;
     const totalPanKg = filasPan.reduce((s, r) => s + r.kg, 0);
     const promedio3M = totalPanKg / DIAS_HABILES_3M;
@@ -1431,21 +1442,27 @@ export async function getRendimiento3MFocoRecompra(
       desde: `${fechasPan[0].slice(0, 7)}-01`,
       hasta: ultimoDiaDelMes(fechasPan[fechasPan.length - 1].slice(0, 7)),
       totalPanKg: Math.round(totalPanKg * 10) / 10,
-      // De los clientes del corte, cuántos tienen PAN en el reporte.
+      // De los clientes de la base de PAN, cuántos tienen PAN en el reporte.
       clientesPan: new Set(filasPan.map((r) => r.locId)).size,
-      clientesPoblacion: ids.size,
+      clientesPoblacion: idsPan.size,
       // Fuera de cartera no es población: acá no entra.
       panquecitasFueraKg: 0,
       puntos,
     };
   };
 
-  // Los 8 cortes: cartera × segmento × compra.
-  const porCompra = (clientes: Cliente[]): Record<FiltroCompra, Rendimiento3MResult> => ({
-    recompra: armar(clientes.filter((l) => compras(l) >= 2)),
-    cartera: armar(clientes),
-  });
-  const porSegmento = (clientes: Cliente[]): Record<SegmentoRecompra, Record<FiltroCompra, Rendimiento3MResult>> => ({
+  // Los cortes: cartera × segmento × compra × base del promedio de PAN.
+  const porCompra = (clientes: Cliente[]): Record<FiltroCompra, Record<BasePan, Rendimiento3MResult>> => {
+    const conRecompra = clientes.filter((l) => compras(l) >= 2);
+    const soloRecompra = armar(conRecompra);
+    return {
+      recompra: { grupo: soloRecompra, recompra: soloRecompra },
+      cartera: { grupo: armar(clientes), recompra: armar(clientes, conRecompra) },
+    };
+  };
+  const porSegmento = (
+    clientes: Cliente[]
+  ): Record<SegmentoRecompra, Record<FiltroCompra, Record<BasePan, Rendimiento3MResult>>> => ({
     foco: porCompra(clientes.filter(esFoco)),
     todos: porCompra(clientes),
   });
