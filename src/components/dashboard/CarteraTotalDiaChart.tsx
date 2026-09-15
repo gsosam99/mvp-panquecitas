@@ -28,6 +28,11 @@ export interface CarteraTotalDiaChartPoint {
   efectCabudareEscala?: number | null;
   /** Misma activación "a escala" pero del total del piloto (las dos ciudades). */
   efectTotalEscala?: number | null;
+  /**
+   * Activación "aterrizada" del total, por FACTURADO: la cartera de hoy como si existiera desde
+   * el día 1 (denominador fijo, sin recorte por fecha de incorporación).
+   */
+  efectTotalAterrizada?: number | null;
 }
 
 function formatKg(value: number): string {
@@ -55,6 +60,7 @@ const Inner = dynamic(
       showEscalaCumana,
       showEscalaCabudare,
       showEscalaTotal,
+      showAterrizadaTotal,
       showCabudare,
     }: {
       data: CarteraTotalDiaChartPoint[];
@@ -72,6 +78,7 @@ const Inner = dynamic(
       showEscalaCumana: boolean;
       showEscalaCabudare: boolean;
       showEscalaTotal: boolean;
+      showAterrizadaTotal: boolean;
       showCabudare: boolean;
     }) {
       // Con cualquier desglose de barras prendido (modelo o ciudad) se oculta la
@@ -121,6 +128,7 @@ const Inner = dynamic(
         if (showEscalaCumana && punto.efectCumanaEscala != null) ratios.push(punto.efectCumanaEscala);
         if (showEscalaCabudare && punto.efectCabudareEscala != null) ratios.push(punto.efectCabudareEscala);
         if (showEscalaTotal && punto.efectTotalEscala != null) ratios.push(punto.efectTotalEscala);
+        if (showAterrizadaTotal && punto.efectTotalAterrizada != null) ratios.push(punto.efectTotalAterrizada);
 
         const yArriba = y + 12;
         const yAbajo = base - 6;
@@ -174,6 +182,8 @@ const Inner = dynamic(
                   return [`${Number(value ?? 0)}%`, "Cabudare a escala (sin no vendibles)"];
                 if (name === "efectTotalEscala")
                   return [`${Number(value ?? 0)}%`, "Activación total a escala (segmentos foco)"];
+                if (name === "efectTotalAterrizada")
+                  return [`${Number(value ?? 0)}%`, "Activación total aterrizada — facturado (cartera de hoy desde el día 1)"];
                 return [String(value ?? ""), String(name ?? "")];
               }}
             />
@@ -209,6 +219,8 @@ const Inner = dynamic(
                   ? "Cabudare a escala"
                   : value === "efectTotalEscala"
                   ? "Total a escala"
+                  : value === "efectTotalAterrizada"
+                  ? "Total aterrizado (facturado)"
                   : value
               }
               wrapperStyle={{ fontSize: 12 }}
@@ -563,6 +575,34 @@ const Inner = dynamic(
                 />
               </Line>
             )}
+            {/* Activación ATERRIZADA del total: la cartera de hoy como si existiera
+                desde el día 1. Violeta y punteada para distinguirla de la acumulada
+                normal y de la "a escala"; etiqueta arriba con offset largo. */}
+            {showAterrizadaTotal && (
+              <Line
+                yAxisId="pct"
+                dataKey="efectTotalAterrizada"
+                stroke="#6d28d9"
+                strokeWidth={3}
+                strokeDasharray="6 3"
+                dot={{ r: 3, fill: "#6d28d9" }}
+                connectNulls
+                isAnimationActive={false}
+              >
+                <LabelList
+                  dataKey="efectTotalAterrizada"
+                  position="top"
+                  offset={70}
+                  fill="#6d28d9"
+                  fontSize={10}
+                  fontWeight={700}
+                  stroke="#ffffff"
+                  strokeWidth={3}
+                  paintOrder="stroke"
+                  formatter={(v) => (v == null ? "" : `${Number(v)}%`)}
+                />
+              </Line>
+            )}
           </ComposedChart>
         </ResponsiveContainer>
       );
@@ -592,6 +632,7 @@ export function CarteraTotalDiaChart({
   showEscalaCumana = false,
   showEscalaCabudare = false,
   showEscalaTotal = false,
+  showAterrizadaTotal = false,
   showCabudare = true,
 }: {
   data: CarteraTotalDiaChartPoint[];
@@ -609,6 +650,7 @@ export function CarteraTotalDiaChart({
   showEscalaCumana?: boolean;
   showEscalaCabudare?: boolean;
   showEscalaTotal?: boolean;
+  showAterrizadaTotal?: boolean;
   showCabudare?: boolean;
 }) {
   return (
@@ -628,6 +670,7 @@ export function CarteraTotalDiaChart({
       showEscalaCumana={showEscalaCumana}
       showEscalaCabudare={showEscalaCabudare}
       showEscalaTotal={showEscalaTotal}
+      showAterrizadaTotal={showAterrizadaTotal}
       showCabudare={showCabudare}
     />
   );

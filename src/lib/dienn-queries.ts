@@ -2424,6 +2424,13 @@ export interface CarteraTotalDiaPunto {
   carteraVendible: number;
   /** PDV descartados vigentes a esa fecha (cartera − carteraVendible). */
   descartadosVigentes: number;
+  /**
+   * Activación "aterrizada": clientes de la cartera de HOY con Facturado > 0 hasta el
+   * cierre del bucket ÷ esa misma cartera, como si toda la cartera de hoy
+   * existiera desde el día 1. No recorta por fecha de incorporación ni el
+   * numerador ni el denominador (DIENN, 15-09-2026).
+   */
+  efectividadActivosAcumAterrizada: number;
 }
 
 export interface CarteraSegmentoResult {
@@ -2526,6 +2533,13 @@ export async function getCarteraPorSegmento(): Promise<CarteraSegmentoResult> {
 
   const radar = ((radarData ?? []) as { location_id: string; quantity_kg: number; date_of_sale: string }[]).filter(
     (r) => yaEraCartera(r.location_id, r.date_of_sale)
+  );
+
+  // Activación "aterrizada": lo FACTURADO a la cartera SIN el recorte por fecha
+  // de incorporación (ver buildTotalAcumulado). Se mide por facturado, no por
+  // Radar (DIENN, 15-09-2026).
+  const factCarteraCompleta = ((factData ?? []) as { location_id: string; fecha: string }[]).filter((r) =>
+    locSet.has(r.location_id)
   );
 
   // PDV fuera de cartera: su volumen suma en el TOTAL del gráfico —para que
@@ -2646,6 +2660,17 @@ export async function getCarteraPorSegmento(): Promise<CarteraSegmentoResult> {
     const radarScope = sector ? radar.filter((r) => locScope.has(r.location_id)) : radar;
     const factScope = sector ? fact.filter((r) => locScope.has(r.location_id)) : fact;
     const pedidoScope = sector ? pedido.filter((r) => locScope.has(r.location_id)) : pedido;
+    // Activación aterrizada: la cartera vigente HOY es el denominador fijo en
+    // todos los buckets, y todo lo que se le facturó —también antes de la
+    // incorporación— alimenta el numerador acumulado.
+    const carteraHoy = vigentesAl(clientesScope, todayISO());
+    const idsCarteraHoy = new Set(carteraHoy.map((c) => c.locId));
+    const factAterrizado = factCarteraCompleta
+      .filter((r) => idsCarteraHoy.has(r.location_id))
+      .map((r) => ({ locId: r.location_id, bucket: bucketKeyFor(r.fecha.slice(0, 10), granularity) }))
+      .sort((x, y) => x.bucket.localeCompare(y.bucket));
+    const activadosAterrizados = new Set<string>();
+    let idxAterrizado = 0;
 
     const radarByBucket = new Map<string, { locId: string; kg: number }[]>();
     for (const r of radarScope) {
@@ -2750,6 +2775,12 @@ export async function getCarteraPorSegmento(): Promise<CarteraSegmentoResult> {
       const pedidosAcum = scopeVigente.filter((c) => pedidoCum.has(c.locId)).length;
       const activosDirAcum = vigentesAl(clientesScopeDir, cierre).filter((c) => radarCum.has(c.locId)).length;
       const activosIndAcum = vigentesAl(clientesScopeInd, cierre).filter((c) => radarCum.has(c.locId)).length;
+      // Toda compra hasta el cierre de este bucket, aunque haya caído en un bucket
+      // sin otro movimiento (por eso se recorre la lista ordenada y no el mapa).
+      while (idxAterrizado < factAterrizado.length && factAterrizado[idxAterrizado].bucket <= b) {
+        activadosAterrizados.add(factAterrizado[idxAterrizado].locId);
+        idxAterrizado++;
+      }
       return {
         dia: b,
         label: bucketLabelFor(b, granularity),
@@ -2776,6 +2807,8 @@ export async function getCarteraPorSegmento(): Promise<CarteraSegmentoResult> {
         efectividadActivosAcumVendible: pct(activosAcum, carteraVendible),
         carteraVendible,
         descartadosVigentes,
+        // Activación aterrizada: la cartera de hoy desde el día 1.
+        efectividadActivosAcumAterrizada: pct(activadosAterrizados.size, carteraHoy.length),
       };
     });
   }

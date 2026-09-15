@@ -182,6 +182,7 @@ const TOTAL_ACUM_COLUMNS: ExcelColumn<CarteraTotalDiaPunto>[] = [
   { header: "% Acum. Indirecto", value: (r) => r.efectividadIndirectoAcum, width: 18 },
   { header: "Radar Directo (kg)", value: (r) => r.radarKgDiaDirecto, width: 18 },
   { header: "Radar Indirecto (kg)", value: (r) => r.radarKgDiaIndirecto, width: 20 },
+  { header: "% Acum. aterrizado facturado (cartera de hoy)", value: (r) => r.efectividadActivosAcumAterrizada, width: 30 },
 ];
 const TOTAL_ACUM_CHART: ExcelChartConfig = {
   categoryCol: 0,
@@ -320,6 +321,9 @@ export function DiennDashboardClient({
   // Lo mismo para el TOTAL del piloto: activación acumulada contra la cartera
   // de segmentos foco (DIENN, 14-09-2026).
   const [escalaTotalOn, setEscalaTotalOn] = useState(false);
+  // Activación "aterrizada" por facturado: como si la cartera de hoy existiera desde el día 1
+  // (denominador fijo, sin recorte por fecha de incorporación).
+  const [aterrizadaTotalOn, setAterrizadaTotalOn] = useState(false);
 
   const [sellOutClienteOpen, setSellOutClienteOpen] = useState(false);
   // Posición del producto en PDV: una sola tarjeta, se ve por conteo de clientes
@@ -510,6 +514,8 @@ export function DiennDashboardClient({
         // en cada bucket. No hace falta arrastrar valor: la serie del total
         // tiene todos los buckets.
         efectTotalEscala: p.efectividadActivosAcumVendible,
+        // Total aterrizado: la cartera de hoy como denominador fijo desde el día 1.
+        efectTotalAterrizada: p.efectividadActivosAcumAterrizada,
       };
     });
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -1374,7 +1380,9 @@ export function DiennDashboardClient({
                 por modelo (<span className="font-medium">Ventas Directo / Indirecto</span>) o por ciudad (
                 <span className="font-medium">Ventas Cumaná / Cabudare</span>, en dos tonos de azul que se repiten en
                 sus líneas de activación), y la línea de efectividad total se apaga con{" "}
-                <span className="font-medium">Línea total</span>. Todo aplica también a los gráficos comparativos
+                <span className="font-medium">Línea total</span>. <span className="font-medium">Total aterrizado</span>{" "}
+                muestra la activación por facturado como si la cartera de hoy existiera desde el día 1 (mismo denominador en todas las
+                fechas y cuenta también lo facturado antes de la incorporación). El resto aplica también a los gráficos comparativos
                 (Cumaná / Cabudare).
               </p>
             </div>
@@ -1580,6 +1588,19 @@ export function DiennDashboardClient({
                 >
                   Total a escala
                 </button>
+                {/* Activación aterrizada: la cartera de hoy como si existiera desde el
+                    día 1 — denominador fijo y sin recorte por fecha de incorporación. */}
+                <button
+                  onClick={() => setAterrizadaTotalOn((v) => !v)}
+                  title="Activación acumulada por FACTURADO contra la cartera de hoy completa desde el día 1: mismo denominador en todas las fechas y cuenta también lo facturado antes de la incorporación de cada cliente"
+                  className={`px-3 py-1.5 rounded-lg border text-xs font-medium transition-colors ${
+                    aterrizadaTotalOn
+                      ? "border-violet-700 bg-violet-700 text-white"
+                      : "border-slate-200 bg-white text-slate-500 hover:bg-slate-50"
+                  }`}
+                >
+                  Total aterrizado
+                </button>
                 {/* Cuál ciudad se superpone (aplica a ambas capas de ciudad). */}
                 <select
                   value={ciudadSel}
@@ -1617,6 +1638,7 @@ export function DiennDashboardClient({
               showEscalaCumana={escalaCumanaOn}
               showEscalaCabudare={escalaCabudareOn}
               showEscalaTotal={escalaTotalOn}
+              showAterrizadaTotal={aterrizadaTotalOn}
             />
           </CardContent>
         </Card>
