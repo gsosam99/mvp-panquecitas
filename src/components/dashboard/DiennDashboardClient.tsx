@@ -382,9 +382,10 @@ export function DiennDashboardClient({
   const [segTodos, setSegTodos] = useState(false);
   const [segPanquecitas, setSegPanquecitas] = useState(false);
   // Corte del ratio "Panquecitas vs categoría" bajo las barras (Harina PAN):
-  // clientes con recompra de segmentos foco o de cualquier segmento, igual que
-  // el botón del gráfico de rendimiento diario (cartera completa).
-  const [ventas3MesesSegmento, setVentas3MesesSegmento] = useState<SegmentoRecompra>("foco");
+  // clientes con recompra de segmentos foco o de cualquier segmento (gráfico de
+  // rendimiento diario), o "cartera": el cálculo original, toda la cartera sin
+  // filtro de recompra (PAN Universo de getRendimiento3M).
+  const [ventas3MesesSegmento, setVentas3MesesSegmento] = useState<SegmentoRecompra | "cartera">("foco");
   // Ranking por segmento: volumen en kg o como % del total.
   const [rankingComoPct, setRankingComoPct] = useState(false);
   const [panGranularity, setPanGranularity] = useState<PanComparisonGranularity>("month");
@@ -772,9 +773,14 @@ export function DiennDashboardClient({
     for (const s of pilotSectors) {
       salida[`Margarina|${s}`] = promedio(bundles[s].rendimientoVsMavesa.margarina.puntos);
       salida[`Mayonesa|${s}`] = promedio(bundles[s].rendimientoVsMavesa.mayonesa.puntos);
-      // Harina PAN: el ratio acumulado del gráfico con PAN de recompra de Panquecitas
-      // (cartera completa), con el corte foco / todos del botón de esta tarjeta.
-      salida[`Harina PAN|${s}`] = promedio(bundles[s].rendimiento3MFocoRecompra.completa[ventas3MesesSegmento].recompraPanquecitas.recompra.puntos);
+      // Harina PAN: con "cartera", el cálculo original (toda la cartera, sin
+      // recompra); si no, el ratio acumulado del gráfico con PAN de recompra de
+      // Panquecitas (cartera completa), con el corte foco / todos de esta tarjeta.
+      salida[`Harina PAN|${s}`] = promedio(
+        ventas3MesesSegmento === "cartera"
+          ? bundles[s].rendimiento3M.universo.puntos
+          : bundles[s].rendimiento3MFocoRecompra.completa[ventas3MesesSegmento].recompraPanquecitas.recompra.puntos
+      );
     }
     return salida;
   }, [bundles, pilotSectors, ventas3MesesSegmento]);
@@ -2547,7 +2553,9 @@ export function DiennDashboardClient({
               como base y muestra cuánto representa Cabudare frente a él, categoría por categoría (siempre en kg,
               aunque las barras estén en % del total). Los porcentajes debajo de las barras están explicados al pie
               del gráfico. El ratio vs. <span className="font-medium">Harina PAN</span> sigue el botón{" "}
-              <span className="font-medium">Foco con recompra / Con recompra</span> (clientes con recompra de segmentos foco o de cualquier segmento, igual que el gráfico de rendimiento diario).
+              <span className="font-medium">Foco con recompra / Con recompra / Cartera completa</span>: clientes con recompra de
+              segmentos foco o de cualquier segmento (igual que el gráfico de rendimiento diario), o toda la cartera sin
+              filtro de recompra, como se veía originalmente.
             </p>
           </div>
           <div className="flex flex-wrap items-center gap-2 print:hidden">
@@ -2556,6 +2564,7 @@ export function DiennDashboardClient({
                 [
                   ["foco", "Foco con recompra"],
                   ["todos", "Con recompra"],
+                  ["cartera", "Cartera completa"],
                 ] as const
               ).map(([key, label]) => (
                 <button
@@ -2564,7 +2573,9 @@ export function DiennDashboardClient({
                   title={
                     key === "foco"
                       ? "Ratio Harina PAN con el promedio de los clientes con recompra de segmentos foco"
-                      : "Ratio Harina PAN con el promedio de los clientes con recompra de cualquier segmento"
+                      : key === "todos"
+                      ? "Ratio Harina PAN con el promedio de los clientes con recompra de cualquier segmento"
+                      : "Ratio Harina PAN como originalmente: toda la cartera, sin filtro de recompra"
                   }
                   className={`px-3 py-1.5 transition-colors ${
                     ventas3MesesSegmento === key
@@ -2624,10 +2635,14 @@ export function DiennDashboardClient({
               categoría</span>, debajo de las barras, se lee así: por cada 100 kg de Margarina, Mayonesa o Harina PAN
               que vende la ciudad, cuántos kg de Panquecitas vende. No son parte de la barra —la barra son los kg de
               la categoría en mayo-julio— y cada número va en el color de su ciudad. Es el mismo número del cuadro{" "}
-              <span className="font-medium">Ratio acumulado</span> de los gráficos de rendimiento diario (en Harina PAN, el del gráfico de clientes con recompra; promedio de
+              <span className="font-medium">Ratio acumulado</span> de los gráficos de rendimiento diario (en Harina PAN, el del gráfico de clientes con recompra o, con Cartera completa, el cálculo original; promedio de
               los ratios diarios del período). En <span className="font-medium">Harina PAN</span> el denominador sigue
               el botón de arriba (
-              {ventas3MesesSegmento === "foco" ? "Foco con recompra" : "Con recompra"}
+              {ventas3MesesSegmento === "foco"
+                ? "Foco con recompra"
+                : ventas3MesesSegmento === "todos"
+                ? "Con recompra"
+                : "Cartera completa"}
               ); Margarina y Mayonesa no distinguen esos cortes.
             </p>
             </>

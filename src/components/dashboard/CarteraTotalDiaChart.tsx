@@ -102,6 +102,10 @@ const Inner = dynamic(
       // ratio en píxeles (ver etiquetaKgEnExtremoLibre).
       const MARGEN_TOP = 32;
 
+      // Distancia (px) del centro de las etiquetas de Directo / Indirecto
+      // aterrizado a su línea: van pegadas, Directo arriba e Indirecto abajo.
+      const ETIQUETA_MODELO_PX = 14;
+
       /**
        * Dibuja los kg de una barra en el extremo — arriba o abajo — que quede
        * más lejos de los ratios de ese día.
@@ -146,12 +150,21 @@ const Inner = dynamic(
         if (showAterrizadaCabudare && punto.efectCabudareAterrizada != null) ratios.push(punto.efectCabudareAterrizada);
         if (showAterrizadaDirecto && punto.efectDirectoAterrizada != null) ratios.push(punto.efectDirectoAterrizada);
         if (showAterrizadaIndirecto && punto.efectIndirectoAterrizada != null) ratios.push(punto.efectIndirectoAterrizada);
+        // Las etiquetas de las aterrizadas por modelo van pegadas a su línea
+        // (Directo arriba, Indirecto abajo): su texto también ocupa lugar.
+        const etiquetasPx: number[] = [];
+        if (showAterrizadaDirecto && punto.efectDirectoAterrizada != null)
+          etiquetasPx.push(pixelDeRatio(punto.efectDirectoAterrizada) - ETIQUETA_MODELO_PX);
+        if (showAterrizadaIndirecto && punto.efectIndirectoAterrizada != null)
+          etiquetasPx.push(pixelDeRatio(punto.efectIndirectoAterrizada) + ETIQUETA_MODELO_PX);
 
         const yArriba = y + 12;
         const yAbajo = base - 6;
-        // Sin ratios visibles no hay nada que esquivar: se deja arriba.
+        // Sin nada visible que esquivar se deja arriba. Se esquivan las líneas y
+        // también las etiquetas pegadas a su línea (aterrizadas por modelo).
+        const ocupados = [...ratios.map((r) => pixelDeRatio(r)), ...etiquetasPx];
         const holgura = (yTexto: number) =>
-          ratios.length === 0 ? Infinity : Math.min(...ratios.map((r) => Math.abs(pixelDeRatio(r) - yTexto)));
+          ocupados.length === 0 ? Infinity : Math.min(...ocupados.map((p) => Math.abs(p - yTexto)));
         const yTexto = holgura(yArriba) >= holgura(yAbajo) ? yArriba : yAbajo;
 
         return (
@@ -690,7 +703,8 @@ const Inner = dynamic(
               </Line>
             )}
             {/* Activación ATERRIZADA por modelo: los colores de Directo e Indirecto,
-                con trazo punteado corto para distinguirlas de sus líneas normales. */}
+                con trazo punteado corto. Etiquetas pegadas a su línea (Directo
+                arriba, Indirecto abajo) para que se lea a cuál corresponde cada %. */}
             {showAterrizadaDirecto && (
               <Line
                 yAxisId="pct"
@@ -705,7 +719,7 @@ const Inner = dynamic(
                 <LabelList
                   dataKey="efectDirectoAterrizada"
                   position="top"
-                  offset={98}
+                  offset={6}
                   fill="#4f7a5c"
                   fontSize={10}
                   fontWeight={700}
@@ -730,7 +744,7 @@ const Inner = dynamic(
                 <LabelList
                   dataKey="efectIndirectoAterrizada"
                   position="bottom"
-                  offset={80}
+                  offset={6}
                   fill="#8a6d3b"
                   fontSize={10}
                   fontWeight={700}
