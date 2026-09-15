@@ -1294,25 +1294,25 @@ export async function getRendimiento3M(
   };
 }
 
-// ── 4e. Rendimiento diario vs. promedio 3M — clientes con recompra ──
+// ── 4e. Rendimiento diario vs. promedio 3M — recompra de Panquecitas ──
 // Único gráfico de ratio vs. promedio 3M de Harina PAN del dashboard (DIENN,
 // 15-09-2026: el de 4d se quitó; getRendimiento3M solo queda para
 // mavesa-queries).
-// Compara la venta de Panquecitas de un grupo de clientes contra el promedio
-// de Harina PAN de ESOS MISMOS clientes:
-//   - Clientes: cartera vigente hoy, con dos cortes combinables:
-//       · compra: "recompra" = Panquecitas en ≥2 fechas distintas con kg > 0;
-//         "cartera" = toda la cartera, haya comprado o no (como el PAN Universo de 4d).
-//       · segmento: "foco" (fuera los de SEGMENTOS_SIN_ALIMENTOS; los "Sin
-//         segmento" quedan dentro) o "todos".
-//     Con "Cartera piloto", además solo la cohorte "Piloto original" (los 358).
-//   - Panquecitas: TODA la venta diaria de esos clientes, desde
-//     RENDIMIENTO_DIARIO_DESDE y con el fin de semana sumado al lunes.
-//   - Promedio de PAN: el criterio ORIGINAL de 4d —radar_3m_records, último
-//     corte de cada mes por cliente+material— ÷ DIAS_HABILES_3M. DIENN lo
-//     verificó a mano (15-09-2026): sumar todas las filas diarias
-//     (radar_3m_ventas_dia) daba un promedio ~1,9x mayor y no es la magnitud
-//     correcta.
+//   - Clientes: cartera vigente hoy, con dos cortes: segmento "foco" (fuera
+//     los de SEGMENTOS_SIN_ALIMENTOS; los "Sin segmento" quedan dentro) o
+//     "todos", y cartera "completa" o "piloto" (cohorte "Piloto original").
+//   - Panquecitas: venta de RECOMPRA de esos clientes: de cada cliente se
+//     excluye su PRIMERA compra (su primera fecha con kg > 0 en todo su
+//     histórico) y se cuenta desde la segunda. Desde RENDIMIENTO_DIARIO_DESDE y
+//     con el fin de semana sumado al lunes.
+//   - Promedio de PAN: criterio ORIGINAL de 4d —radar_3m_records, último corte
+//     de cada mes— ÷ DIAS_HABILES_3M (DIENN lo verificó a mano: sumar las filas
+//     diarias daba una magnitud ~1,9x mayor). Tres bases (BasePan):
+//       · "cartera": el PAN de todos los clientes del corte, como siempre.
+//       · "recompraPan": solo los clientes con Harina PAN en ≥2 fechas
+//         distintas del reporte de 3 meses (fechas de radar_3m_ventas_dia).
+//       · "recompraPanquecitas": solo los clientes con Panquecitas en ≥2
+//         fechas; entre ellos aportan los que venden Harina PAN.
 
 /**
  * Qué cartera entra en el gráfico: la vigente completa, o solo la tanda
@@ -1324,22 +1324,18 @@ export type AlcanceCartera = "completa" | "piloto";
 /** Corte por segmento: "foco" = solo segmentos foco; "todos" = cualquier segmento. */
 export type SegmentoRecompra = "foco" | "todos";
 
-/** Corte por compra: "recompra" = ≥2 fechas con Panquecitas; "cartera" = toda la cartera, haya comprado o no. */
-export type FiltroCompra = "recompra" | "cartera";
-
-/**
- * De quién sale el promedio de PAN: "grupo" = los mismos clientes de la serie de
- * Panquecitas; "recompra" = solo los del grupo que además tienen recompra de
- * Panquecitas (DIENN, 15-09-2026). Con el corte de compra "recompra" coinciden.
- */
-export type BasePan = "grupo" | "recompra";
+/** De qué clientes sale el promedio de PAN. Ver el encabezado de la sección. */
+export type BasePan = "cartera" | "recompraPan" | "recompraPanquecitas";
 
 export async function getRendimiento3MFocoRecompra(
   sector?: Sector
-): Promise<Record<AlcanceCartera, Record<SegmentoRecompra, Record<FiltroCompra, Record<BasePan, Rendimiento3MResult>>>>> {
-  const vacioBase = { grupo: RENDIMIENTO_3M_VACIO, recompra: RENDIMIENTO_3M_VACIO };
-  const vacioCompra = { recompra: vacioBase, cartera: vacioBase };
-  const vacioSegmento = { foco: vacioCompra, todos: vacioCompra };
+): Promise<Record<AlcanceCartera, Record<SegmentoRecompra, Record<BasePan, Rendimiento3MResult>>>> {
+  const vacioBase = {
+    cartera: RENDIMIENTO_3M_VACIO,
+    recompraPan: RENDIMIENTO_3M_VACIO,
+    recompraPanquecitas: RENDIMIENTO_3M_VACIO,
+  };
+  const vacioSegmento = { foco: vacioBase, todos: vacioBase };
   const vacio = { completa: vacioSegmento, piloto: vacioSegmento };
   const universoTotal = await getUniverseLocations();
   const delSector = sector ? universoTotal.filter((l) => sectorGroup(l.oficina_venta) === sector) : universoTotal;
@@ -1358,6 +1354,21 @@ export async function getRendimiento3MFocoRecompra(
   );
   if (pan3m.length === 0) return vacio;
 
+  // Fechas de compra de Harina PAN por día, SOLO para saber quién recompró PAN
+  // (los kg siguen saliendo de radar_3m_records). Si la tabla no está, la base
+  // "recompraPan" queda vacía en vez de romper la página.
+  let panDias: { sap_code: string; quantity_kg: number; date_of_sale: string }[] = [];
+  try {
+    panDias = await fetchAllRows<{ sap_code: string; quantity_kg: number; date_of_sale: string }>(() =>
+      supabase
+        .from("radar_3m_ventas_dia")
+        .select("sap_code, quantity_kg, date_of_sale")
+        .eq("product_id", PRODUCT_IDS.HARINA_PAN)
+    );
+  } catch (error) {
+    console.error("[getRendimiento3MFocoRecompra] radar_3m_ventas_dia no disponible:", error);
+  }
+
   const panqData = await fetchAllRows<{ location_id: string; quantity_kg: number; date_of_sale: string }>(() =>
     supabase
       .from("sap_sell_in_records")
@@ -1366,23 +1377,37 @@ export async function getRendimiento3MFocoRecompra(
   );
 
   // Fechas distintas con compra de Panquecitas (kg > 0) por cliente, sobre todo
-  // su histórico: ≥2 = con recompra. Una devolución no es una
-  // compra.
-  const fechasCompra = new Map<string, Set<string>>();
+  // su histórico: la más temprana es la primera compra (se excluye de la serie)
+  // y ≥2 = con recompra. Una devolución no es una compra.
+  const fechasCompraPanq = new Map<string, Set<string>>();
   for (const r of panqData) {
     if (Number(r.quantity_kg) <= 0) continue;
-    const fechas = fechasCompra.get(r.location_id) ?? new Set<string>();
+    const fechas = fechasCompraPanq.get(r.location_id) ?? new Set<string>();
     fechas.add(r.date_of_sale.slice(0, 10));
-    fechasCompra.set(r.location_id, fechas);
+    fechasCompraPanq.set(r.location_id, fechas);
   }
-
-  type Cliente = (typeof vigentes)[number];
-  const compras = (l: Cliente) => fechasCompra.get(l.id)?.size ?? 0;
-  const esFoco = (l: Cliente) => !esSegmentoSinAlimentos(l.segmento_cliente);
-  const esPiloto = (l: Cliente) => (l.cohorte ?? "").trim() === COHORTE_PILOTO_ORIGINAL.nombre;
+  const primeraCompraPanq = new Map<string, string>();
+  for (const [id, fechas] of fechasCompraPanq) primeraCompraPanq.set(id, [...fechas].sort()[0]);
 
   // PAN resuelto por SAP_CODE contra la cartera de hoy, igual que en 4d.
   const locIdBySapCode = new Map(universoTotal.map((l) => [l.sap_code.trim(), l.id]));
+
+  const fechasCompraPan = new Map<string, Set<string>>();
+  for (const r of panDias) {
+    if (Number(r.quantity_kg) <= 0) continue;
+    const locId = locIdBySapCode.get(r.sap_code.trim());
+    if (!locId) continue;
+    const fechas = fechasCompraPan.get(locId) ?? new Set<string>();
+    fechas.add(r.date_of_sale.slice(0, 10));
+    fechasCompraPan.set(locId, fechas);
+  }
+
+  type Cliente = (typeof vigentes)[number];
+  const esFoco = (l: Cliente) => !esSegmentoSinAlimentos(l.segmento_cliente);
+  const esPiloto = (l: Cliente) => (l.cohorte ?? "").trim() === COHORTE_PILOTO_ORIGINAL.nombre;
+  const recompraPanquecitas = (l: Cliente) => (fechasCompraPanq.get(l.id)?.size ?? 0) >= 2;
+  const recompraPan = (l: Cliente) => (fechasCompraPan.get(l.id)?.size ?? 0) >= 2;
+
   const panPorCliente = pan3m
     .map((r) => ({
       locId: locIdBySapCode.get(r.sap_code.trim()),
@@ -1402,8 +1427,8 @@ export async function getRendimiento3MFocoRecompra(
   }
 
   // `clientes` define la serie de Panquecitas; `clientesPan`, de quién sale el
-  // promedio de PAN (por defecto, los mismos).
-  const armar = (clientes: Cliente[], clientesPan: Cliente[] = clientes): Rendimiento3MResult => {
+  // promedio de PAN.
+  const armar = (clientes: Cliente[], clientesPan: Cliente[]): Rendimiento3MResult => {
     if (clientes.length === 0 || clientesPan.length === 0) return RENDIMIENTO_3M_VACIO;
     const ids = new Set(clientes.map((l) => l.id));
     const idsPan = new Set(clientesPan.map((l) => l.id));
@@ -1414,12 +1439,13 @@ export async function getRendimiento3MFocoRecompra(
     const promedio3M = totalPanKg / DIAS_HABILES_3M;
     if (promedio3M <= 0) return RENDIMIENTO_3M_VACIO;
 
-    // Todas las Panquecitas de esos mismos clientes.
+    // Panquecitas de recompra: todo menos la primera compra de cada cliente.
     const kgPorDia = new Map<string, number>();
     for (const r of panqData) {
       if (!ids.has(r.location_id)) continue;
       const fecha = r.date_of_sale.slice(0, 10);
       if (fecha < RENDIMIENTO_DIARIO_DESDE) continue;
+      if (fecha === primeraCompraPanq.get(r.location_id)) continue;
       const dia = siguienteDiaHabil(fecha);
       kgPorDia.set(dia, (kgPorDia.get(dia) ?? 0) + Number(r.quantity_kg));
     }
@@ -1451,20 +1477,15 @@ export async function getRendimiento3MFocoRecompra(
     };
   };
 
-  // Los cortes: cartera × segmento × compra × base del promedio de PAN.
-  const porCompra = (clientes: Cliente[]): Record<FiltroCompra, Record<BasePan, Rendimiento3MResult>> => {
-    const conRecompra = clientes.filter((l) => compras(l) >= 2);
-    const soloRecompra = armar(conRecompra);
-    return {
-      recompra: { grupo: soloRecompra, recompra: soloRecompra },
-      cartera: { grupo: armar(clientes), recompra: armar(clientes, conRecompra) },
-    };
-  };
-  const porSegmento = (
-    clientes: Cliente[]
-  ): Record<SegmentoRecompra, Record<FiltroCompra, Record<BasePan, Rendimiento3MResult>>> => ({
-    foco: porCompra(clientes.filter(esFoco)),
-    todos: porCompra(clientes),
+  // Los cortes: cartera × segmento × base del promedio de PAN.
+  const porBase = (clientes: Cliente[]): Record<BasePan, Rendimiento3MResult> => ({
+    cartera: armar(clientes, clientes),
+    recompraPan: armar(clientes, clientes.filter(recompraPan)),
+    recompraPanquecitas: armar(clientes, clientes.filter(recompraPanquecitas)),
+  });
+  const porSegmento = (clientes: Cliente[]): Record<SegmentoRecompra, Record<BasePan, Rendimiento3MResult>> => ({
+    foco: porBase(clientes.filter(esFoco)),
+    todos: porBase(clientes),
   });
 
   return { completa: porSegmento(vigentes), piloto: porSegmento(vigentes.filter(esPiloto)) };
