@@ -184,6 +184,10 @@ const TOTAL_ACUM_COLUMNS: ExcelColumn<CarteraTotalDiaPunto>[] = [
   { header: "Radar Indirecto (kg)", value: (r) => r.radarKgDiaIndirecto, width: 20 },
   { header: "% Acum. aterrizado (cartera de hoy)", value: (r) => r.efectividadActivosAcumAterrizada, width: 30 },
   { header: "% Acum. aterrizado a escala (sin no vendibles)", value: (r) => r.efectividadActivosAcumAterrizadaVendible, width: 34 },
+  { header: "% Acum. Directo aterrizado", value: (r) => r.efectividadDirectoAcumAterrizada, width: 24 },
+  { header: "% Acum. Indirecto aterrizado", value: (r) => r.efectividadIndirectoAcumAterrizada, width: 26 },
+  { header: "% Acum. Directo aterrizado a escala", value: (r) => r.efectividadDirectoAcumAterrizadaVendible, width: 32 },
+  { header: "% Acum. Indirecto aterrizado a escala", value: (r) => r.efectividadIndirectoAcumAterrizadaVendible, width: 34 },
 ];
 const TOTAL_ACUM_CHART: ExcelChartConfig = {
   categoryCol: 0,
@@ -330,6 +334,9 @@ export function DiennDashboardClient({
   // Las aterrizadas con todos los segmentos o "a escala" (sin los inactivos de
   // segmentos no vendibles, como las líneas "a escala").
   const [aterrizadaEscala, setAterrizadaEscala] = useState(false);
+  // Aterrizada por modelo (Directo / Indirecto), con el mismo botón de escala.
+  const [aterrizadaDirectoOn, setAterrizadaDirectoOn] = useState(false);
+  const [aterrizadaIndirectoOn, setAterrizadaIndirectoOn] = useState(false);
 
   const [sellOutClienteOpen, setSellOutClienteOpen] = useState(false);
   // Posición del producto en PDV: una sola tarjeta, se ve por conteo de clientes
@@ -537,6 +544,13 @@ export function DiennDashboardClient({
         // Aterrizada por ciudad: se arrastra el último valor, igual que la "a escala".
         efectCumanaAterrizada: cAterrizada,
         efectCabudareAterrizada: bAterrizada,
+        // Aterrizada por modelo: sale directo del punto del total, con el mismo botón de escala.
+        efectDirectoAterrizada: aterrizadaEscala
+          ? p.efectividadDirectoAcumAterrizadaVendible
+          : p.efectividadDirectoAcumAterrizada,
+        efectIndirectoAterrizada: aterrizadaEscala
+          ? p.efectividadIndirectoAcumAterrizadaVendible
+          : p.efectividadIndirectoAcumAterrizada,
       };
     });
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -1405,6 +1419,7 @@ export function DiennDashboardClient({
                 muestra la activación acumulada contra la cartera de hoy completa desde el día 1 (mismo denominador en todas
                 las fechas, sin los saltos por ampliación de cartera); también por ciudad, y con{" "}
                 <span className="font-medium">Aterrizado: A escala</span> sin los PDV inactivos de segmentos no vendibles.
+                También hay aterrizada por modelo (<span className="font-medium">Directo / Indirecto aterrizado</span>).
                 El resto aplica también a los gráficos comparativos
                 (Cumaná / Cabudare).
               </p>
@@ -1634,6 +1649,30 @@ export function DiennDashboardClient({
                 >
                   Cabudare aterrizado
                 </button>
+                {/* Aterrizada por modelo: la acumulada de Directo / Indirecto contra la
+                    cartera de hoy de cada modelo (con el botón de escala de abajo). */}
+                <button
+                  onClick={() => setAterrizadaDirectoOn((v) => !v)}
+                  title="Activación acumulada del modelo Directo contra su cartera de hoy completa desde el día 1"
+                  className={`px-3 py-1.5 rounded-lg border text-xs font-medium transition-colors ${
+                    aterrizadaDirectoOn
+                      ? "border-[#4f7a5c] bg-[#4f7a5c] text-white"
+                      : "border-slate-200 bg-white text-slate-500 hover:bg-slate-50"
+                  }`}
+                >
+                  Directo aterrizado
+                </button>
+                <button
+                  onClick={() => setAterrizadaIndirectoOn((v) => !v)}
+                  title="Activación acumulada del modelo Indirecto contra su cartera de hoy completa desde el día 1"
+                  className={`px-3 py-1.5 rounded-lg border text-xs font-medium transition-colors ${
+                    aterrizadaIndirectoOn
+                      ? "border-[#8a6d3b] bg-[#8a6d3b] text-white"
+                      : "border-slate-200 bg-white text-slate-500 hover:bg-slate-50"
+                  }`}
+                >
+                  Indirecto aterrizado
+                </button>
                 {/* Total aterrizado: la acumulada de siempre contra la cartera de hoy completa
                     desde el día 1 (denominador fijo, sin saltos por ampliación). */}
                 <button
@@ -1700,6 +1739,8 @@ export function DiennDashboardClient({
               showAterrizadaTotal={aterrizadaTotalOn}
               showAterrizadaCumana={aterrizadaCumanaOn}
               showAterrizadaCabudare={aterrizadaCabudareOn}
+              showAterrizadaDirecto={aterrizadaDirectoOn}
+              showAterrizadaIndirecto={aterrizadaIndirectoOn}
             />
           </CardContent>
         </Card>

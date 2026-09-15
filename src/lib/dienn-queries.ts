@@ -2438,6 +2438,12 @@ export interface CarteraTotalDiaPunto {
    * buckets; termina en la `efectividadActivosAcumVendible` de hoy.
    */
   efectividadActivosAcumAterrizadaVendible: number;
+  /** Aterrizada por modelo: activos acumulados del modelo ÷ la cartera de hoy de ese modelo. */
+  efectividadDirectoAcumAterrizada: number;
+  efectividadIndirectoAcumAterrizada: number;
+  /** Lo mismo "a escala": la cartera de hoy del modelo sin los inactivos de segmentos no vendibles. */
+  efectividadDirectoAcumAterrizadaVendible: number;
+  efectividadIndirectoAcumAterrizadaVendible: number;
 }
 
 export interface CarteraSegmentoResult {
@@ -2713,6 +2719,13 @@ export async function getCarteraPorSegmento(): Promise<CarteraSegmentoResult> {
     // puntos de las semanas en que la cartera era más chica.
     const clientesScopeDir = clientesScope.filter((c) => c.segKey.endsWith("|Directo"));
     const clientesScopeInd = clientesScope.filter((c) => c.segKey.endsWith("|Indirecto"));
+    // Aterrizada por modelo: la cartera de hoy de cada modelo como denominador
+    // fijo, completa o "a escala" (sin los inactivos de segmentos no vendibles).
+    const carteraHoyDir = carteraHoy.filter((c) => c.segKey.endsWith("|Directo"));
+    const carteraHoyInd = carteraHoy.filter((c) => c.segKey.endsWith("|Indirecto"));
+    const vendibleHoy = (clis: Cli[]) => clis.filter((c) => !c.noVendible || activosAlFinal.has(c.locId)).length;
+    const carteraHoyDirVendible = vendibleHoy(carteraHoyDir);
+    const carteraHoyIndVendible = vendibleHoy(carteraHoyInd);
     // Modelo por cliente del scope, para separar el volumen Radar del período.
     const esDirectoLoc = new Map(clientesScope.map((c) => [c.locId, c.segKey.endsWith("|Directo")]));
     const radarCum = new Set<string>();
@@ -2800,6 +2813,11 @@ export async function getCarteraPorSegmento(): Promise<CarteraSegmentoResult> {
         // Aterrizada: mismo numerador, contra la cartera de hoy completa en todos los buckets.
         efectividadActivosAcumAterrizada: pct(activosAcum, carteraHoy.length),
         efectividadActivosAcumAterrizadaVendible: pct(activosAcum, carteraHoyVendible),
+        // Aterrizada por modelo: mismos activos acumulados del modelo, contra su cartera de hoy.
+        efectividadDirectoAcumAterrizada: pct(activosDirAcum, carteraHoyDir.length),
+        efectividadIndirectoAcumAterrizada: pct(activosIndAcum, carteraHoyInd.length),
+        efectividadDirectoAcumAterrizadaVendible: pct(activosDirAcum, carteraHoyDirVendible),
+        efectividadIndirectoAcumAterrizadaVendible: pct(activosIndAcum, carteraHoyIndVendible),
       };
     });
   }

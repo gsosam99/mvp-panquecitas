@@ -35,6 +35,9 @@ export interface CarteraTotalDiaChartPoint {
   efectTotalAterrizada?: number | null;
   efectCumanaAterrizada?: number | null;
   efectCabudareAterrizada?: number | null;
+  /** Aterrizada por modelo (Directo / Indirecto), contra la cartera de hoy de cada modelo. */
+  efectDirectoAterrizada?: number | null;
+  efectIndirectoAterrizada?: number | null;
 }
 
 function formatKg(value: number): string {
@@ -65,6 +68,8 @@ const Inner = dynamic(
       showAterrizadaTotal,
       showAterrizadaCumana,
       showAterrizadaCabudare,
+      showAterrizadaDirecto,
+      showAterrizadaIndirecto,
       showCabudare,
     }: {
       data: CarteraTotalDiaChartPoint[];
@@ -85,6 +90,8 @@ const Inner = dynamic(
       showAterrizadaTotal: boolean;
       showAterrizadaCumana: boolean;
       showAterrizadaCabudare: boolean;
+      showAterrizadaDirecto: boolean;
+      showAterrizadaIndirecto: boolean;
       showCabudare: boolean;
     }) {
       // Con cualquier desglose de barras prendido (modelo o ciudad) se oculta la
@@ -137,6 +144,8 @@ const Inner = dynamic(
         if (showAterrizadaTotal && punto.efectTotalAterrizada != null) ratios.push(punto.efectTotalAterrizada);
         if (showAterrizadaCumana && punto.efectCumanaAterrizada != null) ratios.push(punto.efectCumanaAterrizada);
         if (showAterrizadaCabudare && punto.efectCabudareAterrizada != null) ratios.push(punto.efectCabudareAterrizada);
+        if (showAterrizadaDirecto && punto.efectDirectoAterrizada != null) ratios.push(punto.efectDirectoAterrizada);
+        if (showAterrizadaIndirecto && punto.efectIndirectoAterrizada != null) ratios.push(punto.efectIndirectoAterrizada);
 
         const yArriba = y + 12;
         const yAbajo = base - 6;
@@ -196,6 +205,10 @@ const Inner = dynamic(
                   return [`${Number(value ?? 0)}%`, "Cumaná aterrizada (cartera de hoy desde el día 1)"];
                 if (name === "efectCabudareAterrizada")
                   return [`${Number(value ?? 0)}%`, "Cabudare aterrizada (cartera de hoy desde el día 1)"];
+                if (name === "efectDirectoAterrizada")
+                  return [`${Number(value ?? 0)}%`, "Directo aterrizada (cartera de hoy desde el día 1)"];
+                if (name === "efectIndirectoAterrizada")
+                  return [`${Number(value ?? 0)}%`, "Indirecto aterrizada (cartera de hoy desde el día 1)"];
                 return [String(value ?? ""), String(name ?? "")];
               }}
             />
@@ -237,6 +250,10 @@ const Inner = dynamic(
                   ? "Cumaná aterrizado"
                   : value === "efectCabudareAterrizada"
                   ? "Cabudare aterrizado"
+                  : value === "efectDirectoAterrizada"
+                  ? "Directo aterrizado"
+                  : value === "efectIndirectoAterrizada"
+                  ? "Indirecto aterrizado"
                   : value
               }
               wrapperStyle={{ fontSize: 12 }}
@@ -672,6 +689,58 @@ const Inner = dynamic(
                 />
               </Line>
             )}
+            {/* Activación ATERRIZADA por modelo: los colores de Directo e Indirecto,
+                con trazo punteado corto para distinguirlas de sus líneas normales. */}
+            {showAterrizadaDirecto && (
+              <Line
+                yAxisId="pct"
+                dataKey="efectDirectoAterrizada"
+                stroke="#4f7a5c"
+                strokeWidth={2.5}
+                strokeDasharray="2 3"
+                dot={{ r: 2.5, fill: "#4f7a5c" }}
+                connectNulls
+                isAnimationActive={false}
+              >
+                <LabelList
+                  dataKey="efectDirectoAterrizada"
+                  position="top"
+                  offset={98}
+                  fill="#4f7a5c"
+                  fontSize={10}
+                  fontWeight={700}
+                  stroke="#ffffff"
+                  strokeWidth={3}
+                  paintOrder="stroke"
+                  formatter={(v) => (v == null ? "" : `${Number(v)}%`)}
+                />
+              </Line>
+            )}
+            {showAterrizadaIndirecto && (
+              <Line
+                yAxisId="pct"
+                dataKey="efectIndirectoAterrizada"
+                stroke="#8a6d3b"
+                strokeWidth={2.5}
+                strokeDasharray="2 3"
+                dot={{ r: 2.5, fill: "#8a6d3b" }}
+                connectNulls
+                isAnimationActive={false}
+              >
+                <LabelList
+                  dataKey="efectIndirectoAterrizada"
+                  position="bottom"
+                  offset={80}
+                  fill="#8a6d3b"
+                  fontSize={10}
+                  fontWeight={700}
+                  stroke="#ffffff"
+                  strokeWidth={3}
+                  paintOrder="stroke"
+                  formatter={(v) => (v == null ? "" : `${Number(v)}%`)}
+                />
+              </Line>
+            )}
           </ComposedChart>
         </ResponsiveContainer>
       );
@@ -704,6 +773,8 @@ export function CarteraTotalDiaChart({
   showAterrizadaTotal = false,
   showAterrizadaCumana = false,
   showAterrizadaCabudare = false,
+  showAterrizadaDirecto = false,
+  showAterrizadaIndirecto = false,
   showCabudare = true,
 }: {
   data: CarteraTotalDiaChartPoint[];
@@ -724,6 +795,8 @@ export function CarteraTotalDiaChart({
   showAterrizadaTotal?: boolean;
   showAterrizadaCumana?: boolean;
   showAterrizadaCabudare?: boolean;
+  showAterrizadaDirecto?: boolean;
+  showAterrizadaIndirecto?: boolean;
   showCabudare?: boolean;
 }) {
   return (
@@ -746,6 +819,8 @@ export function CarteraTotalDiaChart({
       showAterrizadaTotal={showAterrizadaTotal}
       showAterrizadaCumana={showAterrizadaCumana}
       showAterrizadaCabudare={showAterrizadaCabudare}
+      showAterrizadaDirecto={showAterrizadaDirecto}
+      showAterrizadaIndirecto={showAterrizadaIndirecto}
       showCabudare={showCabudare}
     />
   );
