@@ -1301,7 +1301,8 @@ export async function getRendimiento3M(
 //   - Clientes: cartera vigente hoy, con dos cortes: segmento "foco" (fuera
 //     los de SEGMENTOS_SIN_ALIMENTOS; los "Sin segmento" quedan dentro) o
 //     "todos", y cartera "completa" o "piloto" (cohorte "Piloto original").
-//   - Panquecitas: venta de RECOMPRA de esos clientes: de cada cliente se
+//   - Panquecitas (SeriePanq): "totales" = toda la venta de esos clientes;
+//     "recompra" = solo la venta de RECOMPRA: de cada cliente se
 //     excluye su PRIMERA compra (su primera fecha con kg > 0 en todo su
 //     histórico) y se cuenta desde la segunda. Desde RENDIMIENTO_DIARIO_DESDE y
 //     con el fin de semana sumado al lunes.
@@ -1327,14 +1328,14 @@ export type SegmentoRecompra = "foco" | "todos";
 /** De qué clientes sale el promedio de PAN. Ver el encabezado de la sección. */
 export type BasePan = "cartera" | "recompraPan" | "recompraPanquecitas";
 
+/** Serie de Panquecitas: "totales" = toda la venta; "recompra" = sin la primera compra de cada cliente. */
+export type SeriePanq = "totales" | "recompra";
+
 export async function getRendimiento3MFocoRecompra(
   sector?: Sector
-): Promise<Record<AlcanceCartera, Record<SegmentoRecompra, Record<BasePan, Rendimiento3MResult>>>> {
-  const vacioBase = {
-    cartera: RENDIMIENTO_3M_VACIO,
-    recompraPan: RENDIMIENTO_3M_VACIO,
-    recompraPanquecitas: RENDIMIENTO_3M_VACIO,
-  };
+): Promise<Record<AlcanceCartera, Record<SegmentoRecompra, Record<BasePan, Record<SeriePanq, Rendimiento3MResult>>>>> {
+  const vacioSerie = { totales: RENDIMIENTO_3M_VACIO, recompra: RENDIMIENTO_3M_VACIO };
+  const vacioBase = { cartera: vacioSerie, recompraPan: vacioSerie, recompraPanquecitas: vacioSerie };
   const vacioSegmento = { foco: vacioBase, todos: vacioBase };
   const vacio = { completa: vacioSegmento, piloto: vacioSegmento };
   const universoTotal = await getUniverseLocations();
@@ -1428,7 +1429,7 @@ export async function getRendimiento3MFocoRecompra(
 
   // `clientes` define la serie de Panquecitas; `clientesPan`, de quién sale el
   // promedio de PAN.
-  const armar = (clientes: Cliente[], clientesPan: Cliente[]): Rendimiento3MResult => {
+  const armar = (clientes: Cliente[], clientesPan: Cliente[], soloRecompra: boolean): Rendimiento3MResult => {
     if (clientes.length === 0 || clientesPan.length === 0) return RENDIMIENTO_3M_VACIO;
     const ids = new Set(clientes.map((l) => l.id));
     const idsPan = new Set(clientesPan.map((l) => l.id));
@@ -1439,13 +1440,13 @@ export async function getRendimiento3MFocoRecompra(
     const promedio3M = totalPanKg / DIAS_HABILES_3M;
     if (promedio3M <= 0) return RENDIMIENTO_3M_VACIO;
 
-    // Panquecitas de recompra: todo menos la primera compra de cada cliente.
+    // Panquecitas: toda la venta, o solo la de recompra (sin la primera compra de cada cliente).
     const kgPorDia = new Map<string, number>();
     for (const r of panqData) {
       if (!ids.has(r.location_id)) continue;
       const fecha = r.date_of_sale.slice(0, 10);
       if (fecha < RENDIMIENTO_DIARIO_DESDE) continue;
-      if (fecha === primeraCompraPanq.get(r.location_id)) continue;
+      if (soloRecompra && fecha === primeraCompraPanq.get(r.location_id)) continue;
       const dia = siguienteDiaHabil(fecha);
       kgPorDia.set(dia, (kgPorDia.get(dia) ?? 0) + Number(r.quantity_kg));
     }
@@ -1477,13 +1478,19 @@ export async function getRendimiento3MFocoRecompra(
     };
   };
 
-  // Los cortes: cartera × segmento × base del promedio de PAN.
-  const porBase = (clientes: Cliente[]): Record<BasePan, Rendimiento3MResult> => ({
-    cartera: armar(clientes, clientes),
-    recompraPan: armar(clientes, clientes.filter(recompraPan)),
-    recompraPanquecitas: armar(clientes, clientes.filter(recompraPanquecitas)),
+  // Los cortes: cartera × segmento × base del promedio de PAN × serie de Panquecitas.
+  const porSerie = (clientes: Cliente[], clientesPan: Cliente[]): Record<SeriePanq, Rendimiento3MResult> => ({
+    totales: armar(clientes, clientesPan, false),
+    recompra: armar(clientes, clientesPan, true),
   });
-  const porSegmento = (clientes: Cliente[]): Record<SegmentoRecompra, Record<BasePan, Rendimiento3MResult>> => ({
+  const porBase = (clientes: Cliente[]): Record<BasePan, Record<SeriePanq, Rendimiento3MResult>> => ({
+    cartera: porSerie(clientes, clientes),
+    recompraPan: porSerie(clientes, clientes.filter(recompraPan)),
+    recompraPanquecitas: porSerie(clientes, clientes.filter(recompraPanquecitas)),
+  });
+  const porSegmento = (
+    clientes: Cliente[]
+  ): Record<SegmentoRecompra, Record<BasePan, Record<SeriePanq, Rendimiento3MResult>>> => ({
     foco: porBase(clientes.filter(esFoco)),
     todos: porBase(clientes),
   });
