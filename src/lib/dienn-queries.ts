@@ -1302,7 +1302,7 @@ export async function getRendimiento3M(
 // de Harina PAN de ESOS MISMOS clientes:
 //   - Clientes: cartera vigente hoy, con dos cortes combinables:
 //       · compra: "recompra" = Panquecitas en ≥2 fechas distintas con kg > 0;
-//         "activados" = al menos una (como el PAN Cliente del gráfico de 4d).
+//         "cartera" = toda la cartera, haya comprado o no (como el PAN Universo de 4d).
 //       · segmento: "foco" (fuera los de SEGMENTOS_SIN_ALIMENTOS; los "Sin
 //         segmento" quedan dentro) o "todos".
 //     Con "Cartera piloto", además solo la cohorte "Piloto original" (los 358).
@@ -1324,13 +1324,13 @@ export type AlcanceCartera = "completa" | "piloto";
 /** Corte por segmento: "foco" = solo segmentos foco; "todos" = cualquier segmento. */
 export type SegmentoRecompra = "foco" | "todos";
 
-/** Corte por compra: "recompra" = ≥2 fechas con Panquecitas; "activados" = al menos una. */
-export type FiltroCompra = "recompra" | "activados";
+/** Corte por compra: "recompra" = ≥2 fechas con Panquecitas; "cartera" = toda la cartera, haya comprado o no. */
+export type FiltroCompra = "recompra" | "cartera";
 
 export async function getRendimiento3MFocoRecompra(
   sector?: Sector
 ): Promise<Record<AlcanceCartera, Record<SegmentoRecompra, Record<FiltroCompra, Rendimiento3MResult>>>> {
-  const vacioCompra = { recompra: RENDIMIENTO_3M_VACIO, activados: RENDIMIENTO_3M_VACIO };
+  const vacioCompra = { recompra: RENDIMIENTO_3M_VACIO, cartera: RENDIMIENTO_3M_VACIO };
   const vacioSegmento = { foco: vacioCompra, todos: vacioCompra };
   const vacio = { completa: vacioSegmento, piloto: vacioSegmento };
   const universoTotal = await getUniverseLocations();
@@ -1358,7 +1358,7 @@ export async function getRendimiento3MFocoRecompra(
   );
 
   // Fechas distintas con compra de Panquecitas (kg > 0) por cliente, sobre todo
-  // su histórico: ≥1 = activado, ≥2 = con recompra. Una devolución no es una
+  // su histórico: ≥2 = con recompra. Una devolución no es una
   // compra.
   const fechasCompra = new Map<string, Set<string>>();
   for (const r of panqData) {
@@ -1443,7 +1443,7 @@ export async function getRendimiento3MFocoRecompra(
   // Los 8 cortes: cartera × segmento × compra.
   const porCompra = (clientes: Cliente[]): Record<FiltroCompra, Rendimiento3MResult> => ({
     recompra: armar(clientes.filter((l) => compras(l) >= 2)),
-    activados: armar(clientes.filter((l) => compras(l) >= 1)),
+    cartera: armar(clientes),
   });
   const porSegmento = (clientes: Cliente[]): Record<SegmentoRecompra, Record<FiltroCompra, Rendimiento3MResult>> => ({
     foco: porCompra(clientes.filter(esFoco)),

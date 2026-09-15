@@ -127,7 +127,7 @@ export interface SectorBundle {
   rankingSegmentos: RankingSegmentoRow[];
   /** Rendimiento diario vs. promedio histórico 3M de Harina PAN, por población. */
   rendimiento3M: Record<Pan3MPoblacion, Rendimiento3MResult>;
-  /** Mismo gráfico que rendimiento3M, pero solo clientes foco activados con recompra: sus Panquecitas vs. su PAN. */
+  /** Rendimiento diario vs. promedio 3M por grupo de clientes (cartera × segmento × compra): sus Panquecitas vs. su PAN. */
   rendimiento3MFocoRecompra: Record<AlcanceCartera, Record<SegmentoRecompra, Record<FiltroCompra, Rendimiento3MResult>>>;
   /** Rendimiento diario de Panquecitas vs. promedio histórico de Margarina/Mayonesa (Mavesa), por categoría. */
   rendimientoVsMavesa: Record<MavesaCategoria, RendimientoVsMavesaResult>;
@@ -337,7 +337,7 @@ export function DiennDashboardClient({
   const [focoRecCartera, setFocoRecCartera] = useState<AlcanceCartera>("completa");
   // Solo segmentos foco, o cualquier segmento.
   const [focoRecSegmento, setFocoRecSegmento] = useState<SegmentoRecompra>("foco");
-  // Solo clientes con recompra, o todos los que compraron al menos una vez (como antes).
+  // Solo clientes con recompra, o toda la cartera (como el PAN Universo de antes).
   const [focoRecCompra, setFocoRecCompra] = useState<FiltroCompra>("recompra");
   const [showPanDiarioFocoRec, setShowPanDiarioFocoRec] = useState(true);
   const [ratioPorCiudadFocoRec, setRatioPorCiudadFocoRec] = useState(false);
@@ -616,9 +616,12 @@ export function DiennDashboardClient({
       : bundles[ciudadFocoRec].rendimiento3MFocoRecompra[focoRecCartera][focoRecSegmento][focoRecCompra];
 
   // Cómo se nombra el grupo elegido en el pie, el tooltip y el Excel.
-  const etiquetaFocoRec = `${focoRecCompra === "recompra" ? "con recompra" : "que compraron"}${
-    focoRecSegmento === "foco" ? " de segmentos foco" : ""
-  }`;
+  const etiquetaFocoRec =
+    focoRecCompra === "recompra"
+      ? `con recompra${focoRecSegmento === "foco" ? " de segmentos foco" : ""}`
+      : focoRecSegmento === "foco"
+      ? "de la cartera de segmentos foco"
+      : "de toda la cartera";
 
   const ratioAcumuladoFocoRec = useMemo(() => {
     const puntos = focoRecData.puntos;
@@ -953,19 +956,19 @@ export function DiennDashboardClient({
               <span className="font-medium">Radar últimos 3 Meses</span>: venta acumulada de los 3 meses (último corte de
               cada mes) ÷ días hábiles. La línea continua es ese promedio y la punteada su 4%; el porcentaje sobre cada
               punto es el ratio del día. <span className="font-medium">Con recompra</span> deja a los clientes con
-              Panquecitas en al menos 2 fechas distintas; <span className="font-medium">Todos los que compraron</span>, a
-              los que compraron al menos una vez (como antes). <span className="font-medium">Solo foco</span> quita los
+              Panquecitas en al menos 2 fechas distintas; <span className="font-medium">Toda la cartera</span>, a
+              todos los clientes de la cartera, hayan comprado o no. <span className="font-medium">Solo foco</span> quita los
               segmentos que no venden alimentos (licorerías, CS, farmacias de barrio, mascotas y animales).{" "}
               <span className="font-medium">Cartera piloto</span> deja solo a los clientes del piloto original (los 358).
             </p>
           </div>
           <div className="flex flex-wrap items-center gap-2 print:hidden">
-            {/* Solo clientes con recompra, o todos los que compraron al menos una vez. */}
+            {/* Solo clientes con recompra, o toda la cartera. */}
             <div className="flex rounded-lg border border-slate-200 overflow-hidden text-xs font-medium">
               {(
                 [
                   ["recompra", "Con recompra"],
-                  ["activados", "Todos los que compraron"],
+                  ["cartera", "Toda la cartera"],
                 ] as const
               ).map(([key, label]) => (
                 <button
@@ -974,7 +977,7 @@ export function DiennDashboardClient({
                   title={
                     key === "recompra"
                       ? "Clientes con Panquecitas en al menos 2 fechas distintas"
-                      : "Clientes con al menos una compra de Panquecitas (como antes)"
+                      : "Todos los clientes de la cartera, hayan comprado Panquecitas o no"
                   }
                   className={`px-3 py-1.5 transition-colors ${
                     focoRecCompra === key ? "bg-violet-700 text-white" : "bg-white text-slate-500 hover:bg-slate-50"
