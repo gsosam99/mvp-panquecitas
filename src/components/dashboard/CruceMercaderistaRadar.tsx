@@ -5,8 +5,8 @@ import dynamic from "next/dynamic";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
-import { ExportExcelButton } from "@/components/dashboard/ExportExcelButton";
-import type { ExcelColumn } from "@/lib/export-excel";
+import { ExportExcelButton, ExportExcelMultiButton } from "@/components/dashboard/ExportExcelButton";
+import type { ExcelColumn, ExcelSheetSpec } from "@/lib/export-excel";
 import type { Sector } from "@/lib/sectors";
 import { SEGMENTO_SIN_DATO } from "@/lib/segmentos";
 import type { CruceInventarioRadarResult, CruceInventarioRadarRow } from "@/lib/cruce-mercaderista-radar";
@@ -50,6 +50,13 @@ const MODELOS: [FiltroModelo, string][] = [
 ];
 
 const TOP_GRAFICO = 15;
+/** PDV por ciudad en el Excel de menor rotación. */
+const TOP_MENOR_ROTACION = 100;
+/** Hojas del Excel de menor rotación, en este orden. */
+const CIUDADES_EXCEL: [Sector, string][] = [
+  ["cumana", "Cumaná"],
+  ["barquisimeto_este", "Cabudare"],
+];
 /** Tope visual de la barra de cobertura; la etiqueta muestra el valor real. */
 const TOPE_GRAFICO_DIAS = 60;
 
@@ -262,6 +269,32 @@ export function CruceMercaderistaRadar({
 
   const baja = resumen.porNivel.BAJA + resumen.porNivel.MUY_BAJA;
 
+  // Excel "Top 100 menor rotación por ciudad": una hoja por ciudad, con TODOS
+  // los PDV medidos de esa ciudad (no sigue los filtros de la tarjeta). Solo
+  // los que están dentro de la escala: un período corto o un dato
+  // inconsistente no tiene rotación que ordenar. Mismo orden que "Menor
+  // rotación".
+  const hojasMenorRotacion = useMemo<ExcelSheetSpec<CruceInventarioRadarRow>[]>(() => {
+    const columnasCiudad: ExcelColumn<CruceInventarioRadarRow>[] = [
+      { header: "Número de cliente", value: (r) => r.sapCode, width: 16 },
+      { header: "Ciudad", value: (r) => (r.sector === "cumana" ? "Cumaná" : "Cabudare"), width: 12 },
+      { header: "Grupo vendedor", value: (r) => r.grupoVendedor ?? "", width: 14 },
+      { header: "Modelo", value: (r) => r.esquema ?? "", width: 12 },
+      { header: "Nombre", value: (r) => r.name, width: 38 },
+      { header: "Segmento", value: (r) => segmentoDe(r), width: 22 },
+      { header: "Tipo de cliente", value: (r) => r.tipoCliente ?? "", width: 20 },
+      { header: "Nivel de rotación", value: (r) => NIVELES_ROTACION[r.nivel].label, width: 18 },
+    ];
+    return CIUDADES_EXCEL.map(([s, nombre]) => ({
+      sheetName: nombre,
+      columns: columnasCiudad,
+      rows: data.filas
+        .filter((r) => r.sector === s && !NIVELES_FUERA_DE_ESCALA.has(r.nivel))
+        .sort((a, b) => claveRotacion(b) - claveRotacion(a) || b.inventarioKg - a.inventarioKg)
+        .slice(0, TOP_MENOR_ROTACION),
+    }));
+  }, [data.filas]);
+
   return (
     <Card className="mb-6 print-avoid-break">
       <CardHeader className="flex flex-col gap-3 lg:flex-row lg:items-start lg:justify-between space-y-0">
@@ -308,6 +341,11 @@ export function CruceMercaderistaRadar({
               </button>
             ))}
           </div>
+          <ExportExcelMultiButton
+            filename="Top 100 menor rotación por ciudad"
+            sheets={hojasMenorRotacion}
+            label={`Top ${TOP_MENOR_ROTACION} menor rotación por ciudad`}
+          />
           <ExportExcelButton
             filename={`Rotación mercaderistas vs Radar — ${filtroTexto}${
               modelo === "TODOS" ? "" : ` — ${modelo === "INDIRECTO" ? "Indirecto" : "Directo y mixto"}`

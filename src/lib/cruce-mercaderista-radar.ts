@@ -82,6 +82,8 @@ export interface CruceInventarioRadarRow {
   asesor: string | null;
   segmento: string | null;
   esquema: string | null;
+  grupoVendedor: string | null;
+  tipoCliente: string | null;
   mercaderista: string;
 
   tipoMedicion: TipoMedicion;
@@ -406,6 +408,8 @@ export async function getCruceInventarioRadar(): Promise<CruceInventarioRadarRes
       asesor: l.asesor_encargado,
       segmento: l.segmento_cliente?.trim() || null,
       esquema: l.esquema_atencion,
+      grupoVendedor: l.grupo_vendedor,
+      tipoCliente: l.tipo_cliente,
       mercaderista: `${ultima.worker_first_name ?? ""} ${ultima.worker_last_name ?? ""}`.trim(),
       tipoMedicion,
       fechaInicio,
