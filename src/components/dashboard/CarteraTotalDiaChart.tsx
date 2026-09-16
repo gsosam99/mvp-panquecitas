@@ -183,13 +183,135 @@ const Inner = dynamic(
         );
       }
 
+      // Tope del eje de kg fijado a mano (redondeado hacia arriba) en vez del
+      // automático de Recharts: así se sabe en qué píxel cae el kg de cada
+      // barra y las etiquetas de las aterrizadas por ciudad pueden esquivarlo.
+      const kgMaxDatos = data.reduce((max, p) => {
+        let m = max;
+        if (!hayDesglose) m = Math.max(m, p.radarKgDia);
+        if (showVentasDirecto || showVentasIndirecto)
+          m = Math.max(
+            m,
+            (showVentasDirecto ? p.radarKgDiaDirecto : 0) + (showVentasIndirecto ? p.radarKgDiaIndirecto : 0)
+          );
+        if (showVentasCumana || showVentasCabudare)
+          m = Math.max(
+            m,
+            (showVentasCumana ? p.radarKgDiaCumana ?? 0 : 0) + (showVentasCabudare ? p.radarKgDiaCabudare ?? 0 : 0)
+          );
+        return m;
+      }, 0);
+      const kgMax = (() => {
+        if (kgMaxDatos <= 0) return 0;
+        const paso = 10 ** Math.floor(Math.log10(kgMaxDatos));
+        const m = [1, 1.2, 1.5, 2, 2.5, 3, 4, 5, 6, 8, 10].find((f) => f * paso >= kgMaxDatos) ?? 10;
+        return m * paso;
+      })();
+
+      /**
+       * Etiqueta de una aterrizada por ciudad pegada a su línea: justo arriba o
+       * justo abajo del punto, del lado que no pise los kg de las barras ni los
+       * puntos de las otras líneas de ese día. Si ninguno de los dos lados cercanos
+       * está libre, prueba un poco más lejos y se queda con el más despejado.
+       */
+      function etiquetaPegadaALinea(propio: "efectCumanaAterrizada" | "efectCabudareAterrizada", color: string) {
+        return function EtiquetaPegada(props: unknown) {
+          const lp = props as {
+            x?: number;
+            y?: number;
+            viewBox?: { x?: number; y?: number };
+            index: number;
+            value: number | null;
+          };
+          const x = lp.x ?? lp.viewBox?.x;
+          const y = lp.y ?? lp.viewBox?.y;
+          const { index, value } = lp;
+          if (value == null || x == null || y == null) return null;
+          const punto = data[index];
+
+          // Píxeles del área de trazado reconstruidos desde este mismo punto
+          // (eje % de 0 a 100 que arranca en MARGEN_TOP).
+          const pct = Number(value);
+          const altoArea = pct < 99 ? (y - MARGEN_TOP) / (1 - pct / 100) : null;
+          const base = altoArea != null ? MARGEN_TOP + altoArea : null;
+
+          // Obstáculos: centro vertical de cada cosa escrita o dibujada en esta
+          // columna, con su media altura (los kg ocupan dos renglones).
+          const obstaculos: { py: number; medio: number }[] = [];
+          if (base != null && altoArea != null) {
+            const pixelKg = (kg: number) => (kgMax > 0 ? base - (kg / kgMax) * altoArea : base);
+            const pixelPct = (p: number) => base - (p / 100) * altoArea;
+            const kgEnCentro = (desde: number, kg: number) => {
+              if (kg > 0) obstaculos.push({ py: pixelKg(desde + kg / 2), medio: 12 });
+            };
+            if (!hayDesglose && punto.radarKgDia > 0) {
+              // Los kg del total van en un extremo u otro: se esquivan ambos.
+              obstaculos.push({ py: pixelKg(punto.radarKgDia) + 12, medio: 7 });
+              obstaculos.push({ py: base - 6, medio: 7 });
+            }
+            const dir = showVentasDirecto ? punto.radarKgDiaDirecto : 0;
+            if (showVentasDirecto) kgEnCentro(0, dir);
+            if (showVentasIndirecto) kgEnCentro(dir, punto.radarKgDiaIndirecto);
+            const cum = showVentasCumana ? punto.radarKgDiaCumana ?? 0 : 0;
+            if (showVentasCumana) kgEnCentro(0, cum);
+            if (showVentasCabudare) kgEnCentro(cum, punto.radarKgDiaCabudare ?? 0);
+
+            const otrasLineas: (number | null | undefined)[] = [];
+            if (showEfectividad) otrasLineas.push(punto.efectividad);
+            if (showDirecto) otrasLineas.push(punto.efectividadDirecto);
+            if (showIndirecto) otrasLineas.push(punto.efectividadIndirecto);
+            if (showCiudadAcum && showCumana) otrasLineas.push(punto.efectCumanaAcum);
+            if (showCiudadAcum && showCabudare) otrasLineas.push(punto.efectCabudareAcum);
+            if (showCiudadDia && showCumana) otrasLineas.push(punto.efectCumanaDia);
+            if (showCiudadDia && showCabudare) otrasLineas.push(punto.efectCabudareDia);
+            if (showEscalaCumana) otrasLineas.push(punto.efectCumanaEscala);
+            if (showEscalaCabudare) otrasLineas.push(punto.efectCabudareEscala);
+            if (showEscalaTotal) otrasLineas.push(punto.efectTotalEscala);
+            if (showAterrizadaTotal) otrasLineas.push(punto.efectTotalAterrizada);
+            if (showAterrizadaCumana && propio !== "efectCumanaAterrizada") otrasLineas.push(punto.efectCumanaAterrizada);
+            if (showAterrizadaCabudare && propio !== "efectCabudareAterrizada")
+              otrasLineas.push(punto.efectCabudareAterrizada);
+            if (showAterrizadaDirecto) otrasLineas.push(punto.efectDirectoAterrizada);
+            if (showAterrizadaIndirecto) otrasLineas.push(punto.efectIndirectoAterrizada);
+            for (const p of otrasLineas) if (p != null) obstaculos.push({ py: pixelPct(p), medio: 4 });
+          }
+
+          const MEDIO_TEXTO = 6;
+          const holgura = (py: number) =>
+            obstaculos.length === 0
+              ? Infinity
+              : Math.min(...obstaculos.map((o) => Math.abs(o.py - py) - o.medio - MEDIO_TEXTO));
+          // Centro del texto: arriba / abajo pegado, y luego un poco más lejos.
+          const candidatos = [y - 11, y + 12, y - 24, y + 25];
+          const libre = candidatos.find((c) => holgura(c) >= 1);
+          const yCentro = libre ?? candidatos.reduce((a, b) => (holgura(b) > holgura(a) ? b : a));
+
+          return (
+            <text
+              x={x}
+              y={yCentro}
+              dy="0.35em"
+              textAnchor="middle"
+              fill={color}
+              fontSize={10}
+              fontWeight={700}
+              stroke="#ffffff"
+              strokeWidth={3}
+              paintOrder="stroke"
+            >
+              {`${pct}%`}
+            </text>
+          );
+        };
+      }
+
       return (
         <ResponsiveContainer width="100%" height={400}>
           <ComposedChart data={data} margin={{ top: MARGEN_TOP, right: 12, left: 10, bottom: 5 }}>
             <CartesianGrid strokeDasharray="3 3" stroke="#f1f5f9" vertical={false} />
             <XAxis dataKey="label" tick={{ fontSize: 10, fill: "#94a3b8" }} minTickGap={16} />
             {/* Ejes ocultos: escalan las series pero no muestran números. */}
-            <YAxis yAxisId="kg" hide />
+            <YAxis yAxisId="kg" hide domain={kgMax > 0 ? [0, kgMax] : undefined} />
             <YAxis yAxisId="pct" hide domain={[0, 100]} />
             <Tooltip
               contentStyle={{ fontSize: 12, borderRadius: 8, border: "1px solid #e2e8f0" }}
@@ -665,15 +787,7 @@ const Inner = dynamic(
               >
                 <LabelList
                   dataKey="efectCumanaAterrizada"
-                  position="top"
-                  offset={84}
-                  fill="#8b5cf6"
-                  fontSize={10}
-                  fontWeight={700}
-                  stroke="#ffffff"
-                  strokeWidth={3}
-                  paintOrder="stroke"
-                  formatter={(v) => (v == null ? "" : `${Number(v)}%`)}
+                  content={etiquetaPegadaALinea("efectCumanaAterrizada", "#8b5cf6")}
                 />
               </Line>
             )}
@@ -688,17 +802,10 @@ const Inner = dynamic(
                 connectNulls
                 isAnimationActive={false}
               >
+                {/* Etiqueta pegada a la línea, del lado libre de kg y de otros puntos. */}
                 <LabelList
                   dataKey="efectCabudareAterrizada"
-                  position="bottom"
-                  offset={66}
-                  fill="#4c1d95"
-                  fontSize={10}
-                  fontWeight={700}
-                  stroke="#ffffff"
-                  strokeWidth={3}
-                  paintOrder="stroke"
-                  formatter={(v) => (v == null ? "" : `${Number(v)}%`)}
+                  content={etiquetaPegadaALinea("efectCabudareAterrizada", "#4c1d95")}
                 />
               </Line>
             )}
