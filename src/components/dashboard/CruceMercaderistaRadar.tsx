@@ -8,54 +8,75 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@
 import { ExportExcelButton } from "@/components/dashboard/ExportExcelButton";
 import type { ExcelColumn } from "@/lib/export-excel";
 import type { Sector } from "@/lib/sectors";
-import type {
-  CruceInventarioRadarResult,
-  CruceInventarioRadarRow,
-  NivelApoyo,
-} from "@/lib/cruce-mercaderista-radar";
+import { SEGMENTO_SIN_DATO } from "@/lib/segmentos";
+import type { CruceInventarioRadarResult, CruceInventarioRadarRow } from "@/lib/cruce-mercaderista-radar";
+import {
+  COBERTURA_ALTA_DIAS,
+  COBERTURA_BAJA_DIAS,
+  COBERTURA_MEDIA_DIAS,
+  MUESTRA_MINIMA_SEGMENTO,
+  ORDEN_NIVELES,
+  rangoNivel,
+  resumirRotacion,
+  type NivelRotacion,
+  type ResumenRotacion,
+} from "@/lib/rotacion-utils";
 
-// ¿Dónde necesita más apoyo el producto? Cruza lo que contó el mercaderista
-// en su última visita con lo que el Radar dice que se le vendió a ese PDV.
-// La query y el criterio viven en src/lib/cruce-mercaderista-radar.ts.
+// Rotación de Panquecitas en el PDV: lo que contó el mercaderista contra lo que
+// le llegó por Radar, medido entre visitas (o desde el primer pedido si tiene
+// una sola). La query y el criterio viven en src/lib/cruce-mercaderista-radar.ts
+// y la escala en src/lib/rotacion-utils.ts.
 
-const NIVELES: Record<NivelApoyo, { label: string; color: string; badge: string }> = {
-  ALTO: { label: "Estancado", color: "#dc2626", badge: "border-red-300 text-red-700 bg-red-50" },
-  MEDIO: { label: "Rotación lenta", color: "#f59e0b", badge: "border-amber-300 text-amber-700 bg-amber-50" },
-  ROTANDO: { label: "Rotando", color: "#16a34a", badge: "border-emerald-300 text-emerald-700 bg-emerald-50" },
-  SIN_PRODUCTO: { label: "Sin producto", color: "#64748b", badge: "border-slate-300 text-slate-600 bg-slate-50" },
+const NIVELES_ROTACION: Record<NivelRotacion, { label: string; color: string; badge: string }> = {
+  AGOTADO: { label: "Agotado", color: "#0f766e", badge: "border-teal-300 text-teal-700 bg-teal-50" },
+  ALTA: { label: "Rotación alta", color: "#16a34a", badge: "border-emerald-300 text-emerald-700 bg-emerald-50" },
+  MEDIA: { label: "Rotación media", color: "#84cc16", badge: "border-lime-300 text-lime-700 bg-lime-50" },
+  BAJA: { label: "Rotación baja", color: "#f59e0b", badge: "border-amber-300 text-amber-700 bg-amber-50" },
+  MUY_BAJA: { label: "Rotación muy baja", color: "#dc2626", badge: "border-red-300 text-red-700 bg-red-50" },
+  INCONSISTENTE: { label: "Dato inconsistente", color: "#64748b", badge: "border-slate-300 text-slate-600 bg-slate-50" },
 };
 
-const ORDEN_NIVEL: NivelApoyo[] = ["ALTO", "MEDIO", "ROTANDO", "SIN_PRODUCTO"];
-
-type Orden = "proporcion" | "inventario";
-type FiltroNivel = "TODOS" | NivelApoyo;
+type Orden = "rotacion" | "inventario";
+type FiltroNivel = "TODOS" | NivelRotacion;
 
 const TOP_GRAFICO = 15;
+/** Tope visual de la barra de cobertura; la etiqueta muestra el valor real. */
+const TOPE_GRAFICO_DIAS = 60;
 
 const kg = (v: number) => `${v.toLocaleString("es-VE", { maximumFractionDigits: 1 })} kg`;
 const pct = (v: number | null) =>
   v == null ? "—" : `${v.toLocaleString("es-VE", { maximumFractionDigits: 1 })}%`;
+const dias = (v: number | null) =>
+  v == null ? "sin venta" : `${v.toLocaleString("es-VE", { maximumFractionDigits: 1 })} días`;
+const fecha = (iso: string) => `${iso.slice(8, 10)}-${iso.slice(5, 7)}`;
+const segmentoDe = (r: CruceInventarioRadarRow) => r.segmento ?? SEGMENTO_SIN_DATO;
+
+/** Mayor valor = menor rotación. Agotados e inconsistentes van al final. */
+function claveRotacion(r: CruceInventarioRadarRow): number {
+  if (r.nivel === "INCONSISTENTE") return -2;
+  if (r.nivel === "AGOTADO") return -1;
+  return r.coberturaDias ?? Number.POSITIVE_INFINITY;
+}
 
 interface PuntoGrafico {
   nombre: string;
-  inventarioKg: number;
-  radarKg: number;
+  coberturaVisual: number;
   etiqueta: string;
   color: string;
 }
 
 const Grafico = dynamic(
   async () => {
-    const { ResponsiveContainer, BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, Legend, LabelList, Cell } =
+    const { ResponsiveContainer, BarChart, Bar, XAxis, YAxis, CartesianGrid, ReferenceLine, LabelList, Cell } =
       await import("recharts");
 
     function CruceGraficoInner({ data }: { data: PuntoGrafico[] }) {
-      const height = Math.max(260, data.length * 46 + 60);
+      const height = Math.max(240, data.length * 32 + 60);
       return (
         <ResponsiveContainer width="100%" height={height}>
-          <BarChart data={data} layout="vertical" margin={{ top: 8, right: 110, left: 8, bottom: 8 }} barGap={2}>
+          <BarChart data={data} layout="vertical" margin={{ top: 16, right: 90, left: 8, bottom: 8 }}>
             <CartesianGrid strokeDasharray="3 3" stroke="#f1f5f9" horizontal={false} />
-            <XAxis type="number" tick={{ fontSize: 11, fill: "#94a3b8" }} unit=" kg" />
+            <XAxis type="number" domain={[0, TOPE_GRAFICO_DIAS]} tick={{ fontSize: 11, fill: "#94a3b8" }} unit=" d" />
             <YAxis
               type="category"
               dataKey="nombre"
@@ -65,18 +86,21 @@ const Grafico = dynamic(
               tickLine={false}
               interval={0}
             />
-            <Tooltip
-              contentStyle={{ fontSize: 12, borderRadius: 8, border: "1px solid #e2e8f0" }}
-              formatter={(value, name) => [kg(Number(value ?? 0)), String(name ?? "")]}
-            />
-            <Legend wrapperStyle={{ fontSize: 12 }} />
-            <Bar dataKey="inventarioKg" name="Inventario reportado por el mercaderista" radius={[0, 3, 3, 0]}>
+            {[COBERTURA_ALTA_DIAS, COBERTURA_MEDIA_DIAS, COBERTURA_BAJA_DIAS].map((x) => (
+              <ReferenceLine
+                key={x}
+                x={x}
+                stroke="#94a3b8"
+                strokeDasharray="4 4"
+                label={{ value: `${x} d`, position: "top", fontSize: 10, fill: "#64748b" }}
+              />
+            ))}
+            <Bar dataKey="coberturaVisual" name="Días de cobertura" radius={[0, 3, 3, 0]} minPointSize={2}>
               {data.map((p, i) => (
                 <Cell key={i} fill={p.color} />
               ))}
               <LabelList dataKey="etiqueta" position="right" fontSize={11} fontWeight={700} fill="#334155" />
             </Bar>
-            <Bar dataKey="radarKg" name="Vendido según Radar" fill="#cbd5e1" radius={[0, 3, 3, 0]} />
           </BarChart>
         </ResponsiveContainer>
       );
@@ -86,9 +110,26 @@ const Grafico = dynamic(
   },
   {
     ssr: false,
-    loading: () => <div className="h-[260px] bg-slate-50 rounded-lg animate-pulse" />,
+    loading: () => <div className="h-[240px] bg-slate-50 rounded-lg animate-pulse" />,
   }
 );
+
+function DistribucionNiveles({ porNivel }: { porNivel: ResumenRotacion["porNivel"] }) {
+  return (
+    <div className="flex flex-wrap gap-1">
+      {ORDEN_NIVELES.filter((n) => porNivel[n] > 0).map((n) => (
+        <span
+          key={n}
+          title={NIVELES_ROTACION[n].label}
+          className="inline-flex items-center gap-1 rounded-full border border-slate-200 px-1.5 text-[11px] text-slate-600"
+        >
+          <span className="inline-block w-2 h-2 rounded-full" style={{ background: NIVELES_ROTACION[n].color }} />
+          {porNivel[n]}
+        </span>
+      ))}
+    </div>
+  );
+}
 
 export function CruceMercaderistaRadar({
   data,
@@ -102,45 +143,60 @@ export function CruceMercaderistaRadar({
   filtroTexto: string;
   sectorLabels: Record<Sector, string>;
 }) {
-  const [orden, setOrden] = useState<Orden>("proporcion");
+  const [orden, setOrden] = useState<Orden>("rotacion");
   const [filtroNivel, setFiltroNivel] = useState<FiltroNivel>("TODOS");
+  const [segmento, setSegmento] = useState<string | null>(null);
 
   const delSector = useMemo(
     () => (sector === "TOTAL" ? data.filas : data.filas.filter((r) => r.sector === sector)),
     [data.filas, sector]
   );
 
-  const resumen = useMemo(() => {
-    const inventario = delSector.reduce((s, r) => s + r.inventarioKg, 0);
-    const radar = delSector.reduce((s, r) => s + r.radarKg, 0);
-    const porNivel = new Map<NivelApoyo, number>();
-    for (const r of delSector) porNivel.set(r.nivel, (porNivel.get(r.nivel) ?? 0) + 1);
-    return {
-      inventario,
-      radar,
-      proporcion: radar > 0 ? Math.round((inventario / radar) * 1000) / 10 : null,
-      porNivel,
-    };
+  // Rotación por segmento, con la misma escala que el PDV.
+  const porSegmento = useMemo(() => {
+    const grupos = new Map<string, CruceInventarioRadarRow[]>();
+    for (const r of delSector) {
+      const s = segmentoDe(r);
+      grupos.set(s, [...(grupos.get(s) ?? []), r]);
+    }
+    return Array.from(grupos.entries())
+      .map(([nombre, filas]) => ({ nombre, resumen: resumirRotacion(filas) }))
+      .sort(
+        (a, b) =>
+          (b.resumen.coberturaDias ?? Number.POSITIVE_INFINITY) - (a.resumen.coberturaDias ?? Number.POSITIVE_INFINITY) ||
+          b.resumen.pdv - a.resumen.pdv
+      );
   }, [delSector]);
 
+  // Si cambia la ciudad y el segmento elegido ya no tiene PDV, se ignora.
+  const segmentoActivo = segmento && porSegmento.some((s) => s.nombre === segmento) ? segmento : null;
+
+  const delSegmento = useMemo(
+    () => (segmentoActivo ? delSector.filter((r) => segmentoDe(r) === segmentoActivo) : delSector),
+    [delSector, segmentoActivo]
+  );
+  const resumen = useMemo(() => resumirRotacion(delSegmento), [delSegmento]);
+
   const filas = useMemo(() => {
-    const base = filtroNivel === "TODOS" ? delSector : delSector.filter((r) => r.nivel === filtroNivel);
+    const base = filtroNivel === "TODOS" ? delSegmento : delSegmento.filter((r) => r.nivel === filtroNivel);
     return [...base].sort((a, b) =>
       orden === "inventario"
         ? b.inventarioKg - a.inventarioKg
-        : b.proporcionPct - a.proporcionPct || b.inventarioKg - a.inventarioKg
+        : claveRotacion(b) - claveRotacion(a) || b.inventarioKg - a.inventarioKg
     );
-  }, [delSector, filtroNivel, orden]);
+  }, [delSegmento, filtroNivel, orden]);
 
   const puntos = useMemo<PuntoGrafico[]>(
     () =>
-      filas.slice(0, TOP_GRAFICO).map((r) => ({
-        nombre: r.name.length > 30 ? `${r.name.slice(0, 29)}…` : r.name,
-        inventarioKg: r.inventarioKg,
-        radarKg: r.radarKg,
-        etiqueta: r.nivel === "SIN_PRODUCTO" ? "sin producto" : `${pct(r.proporcionPct)} del Radar`,
-        color: NIVELES[r.nivel].color,
-      })),
+      filas
+        .filter((r) => r.nivel !== "INCONSISTENTE")
+        .slice(0, TOP_GRAFICO)
+        .map((r) => ({
+          nombre: r.name.length > 30 ? `${r.name.slice(0, 29)}…` : r.name,
+          coberturaVisual: Math.min(r.coberturaDias ?? TOPE_GRAFICO_DIAS, TOPE_GRAFICO_DIAS),
+          etiqueta: r.nivel === "AGOTADO" ? "agotado" : dias(r.coberturaDias),
+          color: NIVELES_ROTACION[r.nivel].color,
+        })),
     [filas]
   );
 
@@ -150,40 +206,58 @@ export function CruceMercaderistaRadar({
     { header: "Ciudad", value: (r) => (r.sector ? sectorLabels[r.sector] : ""), width: 14 },
     { header: "Zona", value: (r) => r.zona ?? "", width: 16 },
     { header: "Asesor", value: (r) => r.asesor ?? "", width: 22 },
-    { header: "Segmento", value: (r) => r.segmento ?? "", width: 20 },
+    { header: "Segmento", value: (r) => segmentoDe(r), width: 20 },
     { header: "Modelo", value: (r) => r.esquema ?? "", width: 12 },
-    { header: "Última visita", value: (r) => r.fechaVisita, width: 14 },
     { header: "Mercaderista", value: (r) => r.mercaderista, width: 22 },
+    {
+      header: "Medición",
+      value: (r) => (r.tipoMedicion === "ENTRE_VISITAS" ? "Entre visitas" : "Desde primer pedido"),
+      width: 18,
+    },
+    { header: "Inicio del período", value: (r) => r.fechaInicio, width: 14 },
+    { header: "Última visita", value: (r) => r.fechaVisita, width: 14 },
+    { header: "Días", value: (r) => r.dias, width: 8 },
+    { header: "Inventario inicial (kg)", value: (r) => r.inventarioInicialKg, width: 18 },
+    { header: "Radar del período (kg)", value: (r) => r.radarPeriodoKg, width: 18 },
+    { header: "Disponible (kg)", value: (r) => r.disponibleKg, width: 14 },
     { header: "Unid. 400g anaquel", value: (r) => r.unidades400, width: 16 },
     { header: "Unid. 800g anaquel", value: (r) => r.unidades800, width: 16 },
     { header: "Anaquel (kg)", value: (r) => r.anaquelKg, width: 14 },
-    { header: "Depósito (kg)", value: (r) => (r.depositoIncluido ? r.depositoKg : "sin acceso"), width: 14 },
-    { header: "Inventario reportado (kg)", value: (r) => r.inventarioKg, width: 22 },
-    { header: "Vendido según Radar (kg)", value: (r) => r.radarKg, width: 22 },
-    { header: "Inventario / Radar (%)", value: (r) => r.proporcionPct, width: 20 },
-    { header: "Nivel", value: (r) => NIVELES[r.nivel].label, width: 16 },
+    { header: "Depósito (kg)", value: (r) => r.depositoKg, width: 14 },
+    { header: "Depósito completo", value: (r) => (r.depositoIncluido ? "sí" : "no"), width: 14 },
+    { header: "Inventario contado (kg)", value: (r) => r.inventarioKg, width: 18 },
+    { header: "Vendido (kg)", value: (r) => r.vendidoKg, width: 14 },
+    { header: "% vendido", value: (r) => r.pctVendido, width: 12 },
+    { header: "Ritmo (kg/día)", value: (r) => r.ritmoKgDia, width: 14 },
+    { header: "Cobertura (días)", value: (r) => r.coberturaDias ?? "sin venta", width: 14 },
+    { header: "Nivel de rotación", value: (r) => NIVELES_ROTACION[r.nivel].label, width: 18 },
+    { header: "Justificación", value: (r) => r.justificacion, width: 90 },
+    { header: "Pedido desde la visita (kg)", value: (r) => r.pedidoPosteriorKg, width: 20 },
+    { header: "Radar total (kg, referencia)", value: (r) => r.radarTotalKg, width: 20 },
+    { header: "Inventario / Radar total (%, referencia)", value: (r) => r.proporcionAcumuladaPct, width: 24 },
   ];
 
-  const enAlerta = resumen.porNivel.get("ALTO") ?? 0;
+  const baja = resumen.porNivel.BAJA + resumen.porNivel.MUY_BAJA;
 
   return (
     <Card className="mb-6 print-avoid-break">
       <CardHeader className="flex flex-col gap-3 lg:flex-row lg:items-start lg:justify-between space-y-0">
         <div>
-          <CardTitle>¿Dónde hace falta apoyo? — Mercaderistas vs Radar</CardTitle>
+          <CardTitle>Rotación de Panquecitas por PDV y segmento — Mercaderistas vs Radar</CardTitle>
           <p className="text-xs text-slate-400 mt-1">
-            Solo PDV <span className="font-medium">visitados por un mercaderista y con venta Radar</span>. Por cada
-            uno, lo que <span className="font-medium">contó el mercaderista</span> en su última
-            visita (anaquel + depósito) contra lo que <span className="font-medium">el Radar dice que se vendió</span>{" "}
-            a ese PDV. La proporción es qué parte de lo vendido sigue en la tienda: mientras más alta, más producto
-            estancado y más apoyo necesita ese punto. {filtroTexto}.
+            Por cada PDV visitado: lo que <span className="font-medium">tenía disponible</span> (inventario de la
+            visita anterior + lo que le llegó por Radar) menos lo que{" "}
+            <span className="font-medium">contó el mercaderista</span> en su última visita es lo vendido en ese
+            período. Con una sola visita, el período empieza en su primer pedido por Radar con inventario 0. Los{" "}
+            <span className="font-medium">días de cobertura</span> (inventario ÷ ritmo de venta) ubican al PDV en la
+            escala. {filtroTexto}.
           </p>
         </div>
         <div className="flex flex-wrap items-center gap-2 print:hidden">
           <div className="flex rounded-lg border border-slate-200 overflow-hidden text-xs font-medium">
             {(
               [
-                ["proporcion", "Mayor proporción"],
+                ["rotacion", "Menor rotación"],
                 ["inventario", "Más inventario"],
               ] as const
             ).map(([key, label]) => (
@@ -199,7 +273,7 @@ export function CruceMercaderistaRadar({
             ))}
           </div>
           <ExportExcelButton
-            filename={`Mercaderistas vs Radar — ${filtroTexto}`}
+            filename={`Rotación mercaderistas vs Radar — ${filtroTexto}${segmentoActivo ? ` — ${segmentoActivo}` : ""}`}
             rows={filas}
             columns={columnas}
           />
@@ -210,38 +284,134 @@ export function CruceMercaderistaRadar({
           <div className="h-[200px] flex items-center justify-center text-slate-400">
             <div className="text-center">
               <p className="text-4xl mb-2">📦</p>
-              <p>Sin PDV visitados con venta Radar para este corte.</p>
+              <p>Sin PDV visitados con compra por Radar para este corte.</p>
             </div>
           </div>
         ) : (
           <>
+            {/* ── Escala ─────────────────────────────────────────────── */}
+            <div className="flex flex-wrap gap-x-4 gap-y-1 mb-4 text-[11px] text-slate-500">
+              {ORDEN_NIVELES.map((n) => (
+                <span key={n} className="inline-flex items-center gap-1.5">
+                  <span className="inline-block w-2 h-2 rounded-full" style={{ background: NIVELES_ROTACION[n].color }} />
+                  <span className="font-medium text-slate-700">{NIVELES_ROTACION[n].label}</span>: {rangoNivel(n)}
+                </span>
+              ))}
+            </div>
+
+            {/* ── Rotación por segmento ───────────────────────────────── */}
+            <p className="text-xs font-semibold uppercase tracking-widest text-muted-foreground mb-1">
+              Rotación por segmento
+            </p>
+            <div className="max-h-[320px] overflow-y-auto mb-5 border border-slate-100 rounded-lg">
+              <Table>
+                <TableHeader>
+                  <TableRow>
+                    <TableHead>Segmento</TableHead>
+                    <TableHead className="text-right">PDV</TableHead>
+                    <TableHead className="text-right">Disponible</TableHead>
+                    <TableHead className="text-right">Vendido</TableHead>
+                    <TableHead className="text-right">Inventario</TableHead>
+                    <TableHead className="text-right">Ritmo</TableHead>
+                    <TableHead className="text-right">Cobertura</TableHead>
+                    <TableHead>Nivel</TableHead>
+                    <TableHead>PDV por nivel</TableHead>
+                  </TableRow>
+                </TableHeader>
+                <TableBody>
+                  {porSegmento.map(({ nombre, resumen: s }) => {
+                    const activo = segmentoActivo === nombre;
+                    return (
+                      <TableRow
+                        key={nombre}
+                        onClick={() => setSegmento(activo ? null : nombre)}
+                        className={`cursor-pointer ${activo ? "bg-slate-100" : ""}`}
+                      >
+                        <TableCell className="font-medium">
+                          {nombre}
+                          {s.pdvValidos < MUESTRA_MINIMA_SEGMENTO && (
+                            <p className="text-[11px] font-normal text-amber-600">
+                              muestra chica (&lt; {MUESTRA_MINIMA_SEGMENTO} PDV)
+                            </p>
+                          )}
+                        </TableCell>
+                        <TableCell className="text-right">{s.pdv}</TableCell>
+                        <TableCell className="text-right">{kg(s.disponibleKg)}</TableCell>
+                        <TableCell className="text-right">
+                          {kg(s.vendidoKg)}
+                          <p className="text-xs text-slate-400">{pct(s.pctVendido)}</p>
+                        </TableCell>
+                        <TableCell className="text-right">{kg(s.inventarioKg)}</TableCell>
+                        <TableCell className="text-right whitespace-nowrap">
+                          {s.ritmoKgDia.toLocaleString("es-VE", { maximumFractionDigits: 2 })} kg/día
+                        </TableCell>
+                        <TableCell className="text-right font-semibold whitespace-nowrap">
+                          {s.nivel === "AGOTADO" ? "—" : dias(s.coberturaDias)}
+                        </TableCell>
+                        <TableCell>
+                          {s.nivel && (
+                            <Badge variant="outline" className={`text-[11px] font-normal ${NIVELES_ROTACION[s.nivel].badge}`}>
+                              {NIVELES_ROTACION[s.nivel].label}
+                            </Badge>
+                          )}
+                        </TableCell>
+                        <TableCell>
+                          <DistribucionNiveles porNivel={s.porNivel} />
+                        </TableCell>
+                      </TableRow>
+                    );
+                  })}
+                </TableBody>
+              </Table>
+            </div>
+
+            {segmentoActivo && (
+              <div className="flex items-center gap-2 mb-3 text-xs">
+                <span className="text-slate-500">Segmento:</span>
+                <span className="font-medium text-slate-800">{segmentoActivo}</span>
+                <button onClick={() => setSegmento(null)} className="text-slate-400 underline hover:text-slate-600 print:hidden">
+                  ver todos
+                </button>
+              </div>
+            )}
+
+            {/* ── Totales del corte ───────────────────────────────────── */}
             <div className="grid grid-cols-2 lg:grid-cols-4 gap-3 mb-4">
               <div className="rounded-lg border border-slate-200 p-3">
-                <p className="text-[11px] uppercase tracking-wide text-slate-400">Inventario reportado</p>
-                <p className="text-xl font-bold text-slate-900">{kg(resumen.inventario)}</p>
-                <p className="text-xs text-slate-400">{delSector.length} PDV visitados con venta Radar</p>
+                <p className="text-[11px] uppercase tracking-wide text-slate-400">Vendido en el período</p>
+                <p className="text-xl font-bold text-slate-900">{kg(resumen.vendidoKg)}</p>
+                <p className="text-xs text-slate-400">
+                  {pct(resumen.pctVendido)} de {kg(resumen.disponibleKg)} disponibles
+                </p>
               </div>
               <div className="rounded-lg border border-slate-200 p-3">
-                <p className="text-[11px] uppercase tracking-wide text-slate-400">Vendido según Radar</p>
-                <p className="text-xl font-bold text-slate-900">{kg(resumen.radar)}</p>
-                <p className="text-xs text-slate-400">de esos mismos PDV</p>
+                <p className="text-[11px] uppercase tracking-wide text-slate-400">Inventario contado</p>
+                <p className="text-xl font-bold text-slate-900">{kg(resumen.inventarioKg)}</p>
+                <p className="text-xs text-slate-400">
+                  {resumen.pdvValidos} PDV · ritmo {resumen.ritmoKgDia.toLocaleString("es-VE", { maximumFractionDigits: 2 })}{" "}
+                  kg/día
+                </p>
               </div>
               <div className="rounded-lg border border-slate-200 p-3">
-                <p className="text-[11px] uppercase tracking-wide text-slate-400">Proporción global</p>
-                <p className="text-xl font-bold text-slate-900">{pct(resumen.proporcion)}</p>
-                <p className="text-xs text-slate-400">inventario ÷ Radar</p>
+                <p className="text-[11px] uppercase tracking-wide text-slate-400">Días de cobertura</p>
+                <p className="text-xl font-bold text-slate-900">{dias(resumen.coberturaDias)}</p>
+                <p className="text-xs text-slate-400">
+                  {resumen.nivel ? NIVELES_ROTACION[resumen.nivel].label : "—"} · Σ inventario ÷ Σ ritmo
+                </p>
               </div>
               <div className="rounded-lg border border-red-200 bg-red-50/40 p-3">
-                <p className="text-[11px] uppercase tracking-wide text-red-500">PDV que necesitan apoyo</p>
-                <p className="text-xl font-bold text-red-700">{enAlerta}</p>
-                <p className="text-xs text-slate-500">producto estancado (≥ {data.umbralAltoPct}% de lo vendido)</p>
+                <p className="text-[11px] uppercase tracking-wide text-red-500">Rotación baja o muy baja</p>
+                <p className="text-xl font-bold text-red-700">{baja}</p>
+                <p className="text-xs text-slate-500">
+                  PDV con {COBERTURA_MEDIA_DIAS} días o más de cobertura
+                </p>
               </div>
             </div>
 
             <div className="flex flex-wrap gap-2 mb-3 print:hidden">
-              {(["TODOS", ...ORDEN_NIVEL] as FiltroNivel[]).map((n) => {
+              {(["TODOS", ...ORDEN_NIVELES] as FiltroNivel[]).map((n) => {
                 const activo = filtroNivel === n;
-                const cuenta = n === "TODOS" ? delSector.length : resumen.porNivel.get(n) ?? 0;
+                const cuenta = n === "TODOS" ? delSegmento.length : resumen.porNivel[n];
                 return (
                   <button
                     key={n}
@@ -253,9 +423,9 @@ export function CruceMercaderistaRadar({
                     }`}
                   >
                     {n !== "TODOS" && (
-                      <span className="inline-block w-2 h-2 rounded-full" style={{ background: NIVELES[n].color }} />
+                      <span className="inline-block w-2 h-2 rounded-full" style={{ background: NIVELES_ROTACION[n].color }} />
                     )}
-                    {n === "TODOS" ? "Todos" : NIVELES[n].label} ({cuenta})
+                    {n === "TODOS" ? "Todos" : NIVELES_ROTACION[n].label} ({cuenta})
                   </button>
                 );
               })}
@@ -265,7 +435,8 @@ export function CruceMercaderistaRadar({
               <>
                 <p className="text-xs font-semibold uppercase tracking-widest text-muted-foreground mb-1">
                   {filas.length > TOP_GRAFICO ? `Top ${TOP_GRAFICO} de ${filas.length} PDV` : `${filas.length} PDV`} —{" "}
-                  {orden === "proporcion" ? "ordenados por proporción" : "ordenados por inventario"}
+                  {orden === "rotacion" ? "de menor a mayor rotación" : "ordenados por inventario"} · días de cobertura
+                  (barra topada en {TOPE_GRAFICO_DIAS})
                 </p>
                 <Grafico data={puntos} />
               </>
@@ -274,50 +445,68 @@ export function CruceMercaderistaRadar({
             )}
 
             {filas.length > 0 && (
-              <div className="max-h-[420px] overflow-y-auto mt-4 border-t border-slate-100">
+              <div className="max-h-[520px] overflow-y-auto mt-4 border-t border-slate-100">
                 <Table>
                   <TableHeader>
                     <TableRow>
                       <TableHead>Cliente</TableHead>
-                      <TableHead>Última visita</TableHead>
-                      <TableHead className="text-right">Inventario (kg)</TableHead>
-                      <TableHead className="text-right">Radar (kg)</TableHead>
-                      <TableHead className="text-right">Inventario / Radar</TableHead>
-                      <TableHead>Nivel</TableHead>
+                      <TableHead>Período</TableHead>
+                      <TableHead className="text-right">Disponible</TableHead>
+                      <TableHead className="text-right">Inventario</TableHead>
+                      <TableHead className="text-right">Vendido</TableHead>
+                      <TableHead className="text-right">Cobertura</TableHead>
+                      <TableHead className="min-w-[280px]">Nivel y justificación</TableHead>
                     </TableRow>
                   </TableHeader>
                   <TableBody>
                     {filas.map((r) => (
-                      <TableRow key={r.locationId}>
+                      <TableRow key={r.locationId} className="align-top">
                         <TableCell>
                           <p className="font-medium">{r.name}</p>
                           <p className="text-xs text-slate-400">
-                            {[r.sector ? sectorLabels[r.sector] : null, r.segmento, r.zona].filter(Boolean).join(" · ")}
+                            {[r.sector ? sectorLabels[r.sector] : null, segmentoDe(r), r.zona].filter(Boolean).join(" · ")}
                           </p>
+                          {r.mercaderista && <p className="text-xs text-slate-400">{r.mercaderista}</p>}
                         </TableCell>
                         <TableCell className="text-xs text-slate-500 whitespace-nowrap">
-                          {r.fechaVisita}
-                          {r.mercaderista && <p className="text-slate-400">{r.mercaderista}</p>}
+                          {fecha(r.fechaInicio)} → {fecha(r.fechaVisita)} ({r.dias} d)
+                          <p className="text-slate-400">
+                            {r.tipoMedicion === "ENTRE_VISITAS" ? "entre visitas" : "desde primer pedido"}
+                          </p>
+                          {r.pedidoPosteriorKg > 0 && (
+                            <p className="text-slate-400">pidió {kg(r.pedidoPosteriorKg)} desde la visita</p>
+                          )}
                         </TableCell>
                         <TableCell className="text-right">
-                          {r.inventarioKg.toLocaleString("es-VE", { maximumFractionDigits: 1 })}
+                          {kg(r.disponibleKg)}
+                          {r.tipoMedicion === "ENTRE_VISITAS" && (
+                            <p className="text-xs text-slate-400">
+                              {kg(r.inventarioInicialKg)} + {kg(r.radarPeriodoKg)} Radar
+                            </p>
+                          )}
+                        </TableCell>
+                        <TableCell className="text-right">
+                          {kg(r.inventarioKg)}
                           <p className="text-xs text-slate-400">
                             {r.unidades400} u. 400g · {r.unidades800} u. 800g
-                            {r.depositoIncluido
-                              ? r.depositoKg > 0
-                                ? ` · dep. ${r.depositoKg.toLocaleString("es-VE", { maximumFractionDigits: 1 })} kg`
-                                : ""
-                              : " · sin acceso a depósito"}
+                            {r.depositoKg > 0 ? ` · dep. ${kg(r.depositoKg)}` : ""}
+                            {!r.depositoIncluido && " · depósito incompleto"}
                           </p>
                         </TableCell>
                         <TableCell className="text-right">
-                          {r.radarKg.toLocaleString("es-VE", { maximumFractionDigits: 1 })}
+                          {kg(r.vendidoKg)}
+                          <p className="text-xs text-slate-400">
+                            {pct(r.pctVendido)} · {r.ritmoKgDia.toLocaleString("es-VE", { maximumFractionDigits: 2 })} kg/día
+                          </p>
                         </TableCell>
-                        <TableCell className="text-right font-semibold">{pct(r.proporcionPct)}</TableCell>
+                        <TableCell className="text-right font-semibold whitespace-nowrap">
+                          {r.nivel === "AGOTADO" || r.nivel === "INCONSISTENTE" ? "—" : dias(r.coberturaDias)}
+                        </TableCell>
                         <TableCell>
-                          <Badge variant="outline" className={`text-[11px] font-normal ${NIVELES[r.nivel].badge}`}>
-                            {NIVELES[r.nivel].label}
+                          <Badge variant="outline" className={`text-[11px] font-normal ${NIVELES_ROTACION[r.nivel].badge}`}>
+                            {NIVELES_ROTACION[r.nivel].label}
                           </Badge>
+                          <p className="text-xs text-slate-500 mt-1 whitespace-normal">{r.justificacion}</p>
                         </TableCell>
                       </TableRow>
                     ))}
@@ -329,17 +518,15 @@ export function CruceMercaderistaRadar({
         )}
 
         <p className="text-xs text-slate-400 mt-3">
-          <span className="font-medium text-slate-600">Inventario reportado</span>: última visita del mercaderista a
-          cada PDV — unidades de 400 g y 800 g en anaquel más el depósito (si no tuvo acceso, solo anaquel).{" "}
-          <span className="font-medium text-slate-600">Radar</span>: acumulado de Panquecitas despachado a ese PDV
-          (Carga Radar). Mismos dos números que la lista de Sell-Out por cliente.{" "}
-          <span className="font-medium text-red-700">Estancado</span>: el inventario es ≥ {data.umbralAltoPct}% de lo
-          vendido; <span className="font-medium text-amber-700">rotación lenta</span>: entre {data.umbralMedioPct}% y{" "}
-          {data.umbralAltoPct}%; <span className="font-medium text-emerald-700">rotando</span>: menos de{" "}
-          {data.umbralMedioPct}%. <span className="font-medium text-slate-600">Sin producto</span>: tiene venta Radar
-          pero el mercaderista no encontró producto — se vendió todo y toca reponer. Una proporción mayor a 100%
-          significa más producto en tienda que todo lo que el Radar le vendió. De {data.visitados} PDV visitados en
-          total, {data.visitadosSinRadar} no tienen venta Radar y no entran en este cruce.
+          <span className="font-medium text-slate-600">Vendido</span> = inventario al inicio + Radar de Panquecitas del
+          período − inventario contado en la última visita (anaquel 400 g y 800 g + depósito).{" "}
+          <span className="font-medium text-slate-600">Inicio</span>: la visita anterior de otro día; con una sola
+          visita, el primer pedido por Radar con inventario 0 (antes de su primer pedido el PDV no tenía Panquecitas).
+          Un pedido con la misma fecha de la visita se toma como posterior al conteo.{" "}
+          <span className="font-medium text-slate-600">Cobertura</span> = inventario ÷ ritmo diario de venta; por
+          segmento, Σ inventario ÷ Σ ritmo (los datos inconsistentes no suman). De {data.visitados} PDV visitados,{" "}
+          {data.visitadosSinCompraPrevia} no tenían producto disponible en el período (sin compra por Radar antes de la
+          visita) y no se pueden medir.
         </p>
       </CardContent>
     </Card>

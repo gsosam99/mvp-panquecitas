@@ -4,42 +4,50 @@ import { PRODUCT_IDS } from "@/data/catalog";
 import { getUniverseLocations, vigentesAl, sectorGroup, type Sector } from "@/lib/universe";
 import { todayISO } from "@/lib/date-buckets";
 import { presentacionFromVariant } from "@/lib/sellout-utils";
+import { nivelRotacion, rangoNivel, type NivelRotacion } from "@/lib/rotacion-utils";
 
-// ── Cruce: lo que reporta el mercaderista vs lo que dice el Radar ────
-// (pedido de DIENN, 14-09-2026)
+// ── Cruce: rotación de Panquecitas en el PDV (mercaderista × Radar) ──
+// (pedido de DIENN, 14-09-2026; rehecho como rotación entre visitas el
+// 16-09-2026)
 //
-// Responde: ¿en qué PDV hay producto que no se está vendiendo? Por cada PDV
-// de la cartera vigente con visita de mercaderista se ponen lado a lado:
+// Responde: ¿a qué velocidad rota el producto en cada PDV? Se mide dentro de
+// un período corto que termina en la ÚLTIMA visita del mercaderista:
 //
-//   - INVENTARIO REPORTADO: lo que contó el mercaderista en su ÚLTIMA visita
-//     (anaquel 400 g + 800 g, más depósito si tuvo acceso), en kg.
-//   - VENDIDO SEGÚN RADAR: el acumulado de Panquecitas del PDV en la Carga
-//     Radar, en kg.
+//   vendido = inventario al inicio + Radar del período − inventario contado
 //
-// y la PROPORCIÓN = inventario ÷ Radar × 100: qué parte de lo que le llegó
-// al PDV sigue en la tienda. Una proporción alta es producto estancado — el
-// PDV que más apoyo necesita (exhibición, POP, degustación). Mismo inventario
-// y mismo Radar que "Sell-Out por cliente" (getSellOutPorClienteDiff), así
-// que los dos cuadros cuadran entre sí; ese lista la diferencia, este la
-// ordena por proporción.
+// El inicio depende de cuántas visitas tenga el PDV:
 //
-// POBLACIÓN: PDV visitados por un mercaderista Y con venta Radar, los dos a la
-// vez (DIENN, 14-09-2026). Un PDV sin visita no tiene inventario que cruzar y
-// uno sin Radar no tiene venta contra la cual medir. Los visitados sin Radar
-// se cuentan aparte para que no desaparezcan en silencio. Los que tienen
-// Radar pero inventario 0 SÍ entran, con su propio nivel: se vendió todo.
+//   - DOS O MÁS visitas: la visita anterior (con su inventario contado).
+//   - UNA visita: el PRIMER pedido de Panquecitas por Radar, con inventario 0.
+//     Panquecitas es un producto nuevo del piloto: antes de su primer pedido el
+//     PDV no tenía producto, así que no es una estimación.
+//
+// Con eso:
+//   % vendido  = vendido ÷ disponible (inventario inicial + Radar del período)
+//   ritmo      = vendido ÷ días del período (kg/día)
+//   cobertura  = inventario contado ÷ ritmo (días que le dura lo que tiene)
+//
+// La escala (rotación alta / media / baja / muy baja) sale de la cobertura,
+// que no depende de lo largo del período. Ver src/lib/rotacion-utils.ts.
+//
+// Antes este cruce dividía el inventario entre TODO el Radar acumulado del
+// PDV, incluido lo despachado después de la visita: la proporción mejoraba
+// sola con el tiempo y no medía velocidad. Esa proporción se conserva solo
+// como referencia en el Excel.
+//
+// FECHAS: la visita se toma por día (created_at.slice(0, 10), igual que el
+// resto del dashboard). Un pedido Radar con la MISMA fecha de una visita se
+// considera POSTERIOR al conteo — el Radar no dice a qué hora llegó — así que
+// no cuenta como comprado antes de la visita final y sí entra en el período
+// que empieza en la visita anterior.
+//
+// POBLACIÓN: cartera vigente, con visita de mercaderista y con Radar de
+// Panquecitas ANTES de la última visita (sin compra previa no hay qué medir,
+// salvo que la visita anterior ya hubiera encontrado producto). Los visitados
+// que no se pueden medir se cuentan aparte para que no desaparezcan en
+// silencio.
 
-/** Desde esta proporción el producto se considera estancado. */
-export const CRUCE_UMBRAL_ALTO_PCT = 50;
-/** Entre este umbral y el alto, rotación lenta. Debajo, rotando. */
-export const CRUCE_UMBRAL_MEDIO_PCT = 20;
-
-/**
- * - ALTO / MEDIO / ROTANDO: según la proporción inventario ÷ Radar.
- * - SIN_PRODUCTO: tiene venta Radar pero el mercaderista no encontró
- *   producto (inventario 0): se vendió todo, toca reponer.
- */
-export type NivelApoyo = "ALTO" | "MEDIO" | "ROTANDO" | "SIN_PRODUCTO";
+export type TipoMedicion = "ENTRE_VISITAS" | "DESDE_PRIMER_PEDIDO";
 
 export interface CruceInventarioRadarRow {
   locationId: string;
@@ -50,30 +58,58 @@ export interface CruceInventarioRadarRow {
   asesor: string | null;
   segmento: string | null;
   esquema: string | null;
-  /** Fecha de la última visita ("YYYY-MM-DD"). */
-  fechaVisita: string;
   mercaderista: string;
+
+  tipoMedicion: TipoMedicion;
+  /** Inicio del período ("YYYY-MM-DD"): visita anterior o primer pedido Radar. */
+  fechaInicio: string;
+  /** Última visita ("YYYY-MM-DD"). */
+  fechaVisita: string;
+  /** Días naturales del período. */
+  dias: number;
+
+  /** Inventario al inicio: el de la visita anterior, o 0 desde el primer pedido. */
+  inventarioInicialKg: number;
+  /** Radar de Panquecitas del período (neto de devoluciones). */
+  radarPeriodoKg: number;
+  /** inventario inicial + Radar del período. */
+  disponibleKg: number;
+
   unidades400: number;
   unidades800: number;
   anaquelKg: number;
   depositoKg: number;
-  /** false = el mercaderista no tuvo acceso al depósito; el inventario es solo anaquel. */
+  /** false = en alguna de las visitas no hubo acceso al depósito; el inventario puede estar incompleto. */
   depositoIncluido: boolean;
+  /** Inventario contado en la última visita. */
   inventarioKg: number;
-  radarKg: number;
-  /** inventario ÷ Radar × 100. */
-  proporcionPct: number;
-  nivel: NivelApoyo;
+
+  /** disponible − inventario contado. Negativo = inconsistente. */
+  vendidoKg: number;
+  /** vendido ÷ disponible × 100. */
+  pctVendido: number | null;
+  /** vendido ÷ días, kg/día (0 si no vendió). */
+  ritmoKgDia: number;
+  /** inventario ÷ ritmo; null si no vendió nada. */
+  coberturaDias: number | null;
+  nivel: NivelRotacion;
+  /** Por qué el PDV cae en ese nivel, con sus números. */
+  justificacion: string;
+
+  /** Radar despachado desde el día de la visita en adelante (volvió a pedir). */
+  pedidoPosteriorKg: number;
+  /** Referencia del cálculo anterior: todo el Radar del PDV. */
+  radarTotalKg: number;
+  /** Referencia del cálculo anterior: inventario ÷ Radar total × 100. */
+  proporcionAcumuladaPct: number;
 }
 
 export interface CruceInventarioRadarResult {
   filas: CruceInventarioRadarRow[];
   /** PDV de la cartera vigente con al menos una visita. */
   visitados: number;
-  /** De esos, los que no tienen venta Radar (fuera del cruce). */
-  visitadosSinRadar: number;
-  umbralAltoPct: number;
-  umbralMedioPct: number;
+  /** Visitados sin Radar antes de la última visita (no se pueden medir). */
+  visitadosSinCompraPrevia: number;
 }
 
 interface VisitaCruce {
@@ -87,21 +123,69 @@ interface VisitaCruce {
   deposit_access: boolean;
 }
 
-function nivelDe(inventarioKg: number, proporcionPct: number): NivelApoyo {
-  if (inventarioKg <= 0) return "SIN_PRODUCTO";
-  if (proporcionPct >= CRUCE_UMBRAL_ALTO_PCT) return "ALTO";
-  if (proporcionPct >= CRUCE_UMBRAL_MEDIO_PCT) return "MEDIO";
-  return "ROTANDO";
+interface RadarDia {
+  location_id: string;
+  quantity_kg: number;
+  date_of_sale: string;
+}
+
+function diasEntre(desde: string, hasta: string): number {
+  return Math.round((Date.parse(`${hasta}T00:00:00Z`) - Date.parse(`${desde}T00:00:00Z`)) / 86_400_000);
+}
+
+const r1 = (v: number) => Math.round(v * 10) / 10;
+const num = (v: number, dec = 1) => v.toLocaleString("es-VE", { maximumFractionDigits: dec });
+const fechaCorta = (iso: string) => `${iso.slice(8, 10)}-${iso.slice(5, 7)}`;
+
+const NOMBRE_NIVEL: Record<NivelRotacion, string> = {
+  AGOTADO: "agotado",
+  ALTA: "rotación alta",
+  MEDIA: "rotación media",
+  BAJA: "rotación baja",
+  MUY_BAJA: "rotación muy baja",
+  INCONSISTENTE: "dato inconsistente",
+};
+
+function justificar(f: Omit<CruceInventarioRadarRow, "justificacion">): string {
+  const periodo =
+    f.tipoMedicion === "ENTRE_VISITAS"
+      ? `Entre la visita del ${fechaCorta(f.fechaInicio)} (contó ${num(f.inventarioInicialKg)} kg) y la del ${fechaCorta(
+          f.fechaVisita
+        )} (${f.dias} días) le llegaron ${num(f.radarPeriodoKg)} kg por Radar: tuvo ${num(f.disponibleKg)} kg disponibles`
+      : `Desde su primer pedido (${fechaCorta(f.fechaInicio)}) hasta la visita del ${fechaCorta(f.fechaVisita)} (${
+          f.dias
+        } días) compró ${num(f.disponibleKg)} kg por Radar`;
+
+  let lectura: string;
+  switch (f.nivel) {
+    case "INCONSISTENTE":
+      lectura = `, pero el mercaderista contó ${num(f.inventarioKg)} kg, ${num(-f.vendidoKg)} kg más de lo disponible. El conteo y el Radar no cuadran, así que no se clasifica`;
+      break;
+    case "AGOTADO":
+      lectura = ` y el mercaderista contó 0 kg: vendió todo lo disponible (${num(f.vendidoKg)} kg, ${num(
+        f.ritmoKgDia,
+        2
+      )} kg/día) → ${NOMBRE_NIVEL.AGOTADO}`;
+      break;
+    default:
+      lectura =
+        f.coberturaDias == null
+          ? ` y el mercaderista contó ${num(f.inventarioKg)} kg: no vendió nada en el período → ${NOMBRE_NIVEL[f.nivel]} (${rangoNivel(f.nivel)})`
+          : ` y el mercaderista contó ${num(f.inventarioKg)} kg: vendió ${num(f.vendidoKg)} kg (${num(
+              f.pctVendido ?? 0
+            )}%), ${num(f.ritmoKgDia, 2)} kg/día. A ese ritmo lo que tiene le dura ${num(f.coberturaDias)} días → ${
+              NOMBRE_NIVEL[f.nivel]
+            } (${rangoNivel(f.nivel)})`;
+  }
+
+  const deposito = f.depositoIncluido
+    ? ""
+    : " Sin acceso al depósito en alguna visita: el inventario puede estar incompleto y la rotación verse más alta de lo que es.";
+  return `${periodo}${lectura}.${deposito}`;
 }
 
 export async function getCruceInventarioRadar(): Promise<CruceInventarioRadarResult> {
-  const vacio: CruceInventarioRadarResult = {
-    filas: [],
-    visitados: 0,
-    visitadosSinRadar: 0,
-    umbralAltoPct: CRUCE_UMBRAL_ALTO_PCT,
-    umbralMedioPct: CRUCE_UMBRAL_MEDIO_PCT,
-  };
+  const vacio: CruceInventarioRadarResult = { filas: [], visitados: 0, visitadosSinCompraPrevia: 0 };
 
   // Cartera vigente hoy, igual que Sell-Out por cliente.
   const universo = vigentesAl(await getUniverseLocations(), todayISO());
@@ -120,33 +204,51 @@ export async function getCruceInventarioRadar(): Promise<CruceInventarioRadarRes
           .in("location_id", lote),
       locationIds
     ),
-    fetchAllRowsChunked<{ location_id: string; quantity_kg: number }>(
+    fetchAllRowsChunked<RadarDia>(
       (lote) =>
         supabase
           .from("sap_sell_in_records")
-          .select("location_id, quantity_kg")
+          .select("location_id, quantity_kg, date_of_sale")
           .eq("product_id", PRODUCT_IDS.PANQUECITAS)
           .in("location_id", lote),
       locationIds
     ),
   ]);
 
-  // Última visita por PDV, comparando la fecha y no el orden de llegada: la
-  // lista viene partida en lotes y paginada por id.
-  const ultimaVisita = new Map<string, VisitaCruce>();
+  // Visitas por PDV, de la más reciente a la más vieja. Se ordena por fecha y
+  // no por orden de llegada: la lista viene partida en lotes y paginada por id.
+  const visitasPorLoc = new Map<string, VisitaCruce[]>();
   for (const v of visitas) {
-    const actual = ultimaVisita.get(v.location_id);
-    if (!actual || v.created_at > actual.created_at) ultimaVisita.set(v.location_id, v);
+    const lista = visitasPorLoc.get(v.location_id) ?? [];
+    lista.push(v);
+    visitasPorLoc.set(v.location_id, lista);
   }
-  if (ultimaVisita.size === 0) return vacio;
+  if (visitasPorLoc.size === 0) return vacio;
 
-  const radarKgPorLoc = new Map<string, number>();
+  // Última visita y la anterior de OTRO día (dos visitas el mismo día no
+  // forman un período).
+  const pares = new Map<string, { ultima: VisitaCruce; anterior: VisitaCruce | null }>();
+  for (const [loc, lista] of visitasPorLoc) {
+    lista.sort((a, b) => (a.created_at < b.created_at ? 1 : a.created_at > b.created_at ? -1 : 0));
+    const ultima = lista[0];
+    const diaUltima = ultima.created_at.slice(0, 10);
+    const anterior = lista.find((v) => v.created_at.slice(0, 10) < diaUltima) ?? null;
+    pares.set(loc, { ultima, anterior });
+  }
+
+  const radarPorLoc = new Map<string, RadarDia[]>();
   for (const r of radar) {
-    radarKgPorLoc.set(r.location_id, (radarKgPorLoc.get(r.location_id) ?? 0) + Number(r.quantity_kg));
+    const lista = radarPorLoc.get(r.location_id) ?? [];
+    lista.push({ ...r, quantity_kg: Number(r.quantity_kg) });
+    radarPorLoc.set(r.location_id, lista);
   }
 
-  // Depósito (BODEGA) de esas visitas, en kg — solo presentaciones de Panquecitas.
-  const visitIds = Array.from(ultimaVisita.values()).map((v) => v.id);
+  // Depósito (BODEGA) de las visitas usadas, en kg — solo presentaciones de Panquecitas.
+  const visitIds: string[] = [];
+  for (const { ultima, anterior } of pares.values()) {
+    visitIds.push(ultima.id);
+    if (anterior) visitIds.push(anterior.id);
+  }
   const depositoKgPorVisita = new Map<string, number>();
   const { data: variantsData } = await supabase.from("variants").select("id, presentation_kg, units_per_bulk");
   const kgPorUnidad = new Map<string, number>(
@@ -166,30 +268,70 @@ export async function getCruceInventarioRadar(): Promise<CruceInventarioRadarRes
     depositoKgPorVisita.set(a.visit_id, (depositoKgPorVisita.get(a.visit_id) ?? 0) + kg);
   }
 
-  const r1 = (v: number) => Math.round(v * 10) / 10;
+  const inventarioDe = (v: VisitaCruce) => {
+    const anaquelKg = (v.anaquel_400_units ?? 0) * 0.4 + (v.anaquel_800_units ?? 0) * 0.8;
+    const depositoKg = v.deposit_access ? depositoKgPorVisita.get(v.id) ?? 0 : 0;
+    return { anaquelKg, depositoKg, totalKg: anaquelKg + depositoKg };
+  };
+
   const filas: CruceInventarioRadarRow[] = [];
-  let visitadosSinRadar = 0;
+  let visitadosSinCompraPrevia = 0;
 
   for (const l of universo) {
-    // Solo PDV visitados por un mercaderista…
-    const v = ultimaVisita.get(l.id);
-    if (!v) continue;
+    const par = pares.get(l.id);
+    if (!par) continue;
+    const { ultima } = par;
+    const diaVisita = ultima.created_at.slice(0, 10);
+    const radarLoc = radarPorLoc.get(l.id) ?? [];
 
-    // …y con venta Radar.
-    const radarKg = radarKgPorLoc.get(l.id) ?? 0;
-    if (radarKg <= 0) {
-      visitadosSinRadar += 1;
+    const radarTotalKg = radarLoc.reduce((s, r) => s + r.quantity_kg, 0);
+    // Pedido del mismo día de la visita = posterior al conteo.
+    const pedidoPosteriorKg = radarLoc.filter((r) => r.date_of_sale >= diaVisita).reduce((s, r) => s + r.quantity_kg, 0);
+    const final = inventarioDe(ultima);
+
+    let tipoMedicion: TipoMedicion;
+    let fechaInicio: string;
+    let inventarioInicialKg: number;
+    let radarPeriodoKg: number;
+    let depositoIncluido = ultima.deposit_access;
+
+    const anterior = par.anterior;
+    if (anterior) {
+      const diaAnterior = anterior.created_at.slice(0, 10);
+      tipoMedicion = "ENTRE_VISITAS";
+      fechaInicio = diaAnterior;
+      inventarioInicialKg = inventarioDe(anterior).totalKg;
+      radarPeriodoKg = radarLoc
+        .filter((r) => r.date_of_sale >= diaAnterior && r.date_of_sale < diaVisita)
+        .reduce((s, r) => s + r.quantity_kg, 0);
+      depositoIncluido = depositoIncluido && anterior.deposit_access;
+    } else {
+      const previos = radarLoc.filter((r) => r.date_of_sale < diaVisita);
+      const primerPedido = previos
+        .filter((r) => r.quantity_kg > 0)
+        .reduce<string | null>((min, r) => (min == null || r.date_of_sale < min ? r.date_of_sale : min), null);
+      tipoMedicion = "DESDE_PRIMER_PEDIDO";
+      fechaInicio = primerPedido ?? diaVisita;
+      inventarioInicialKg = 0;
+      radarPeriodoKg = previos.reduce((s, r) => s + r.quantity_kg, 0);
+    }
+
+    const disponibleKg = inventarioInicialKg + radarPeriodoKg;
+    // Sin nada disponible no hay rotación que medir.
+    if (disponibleKg <= 0) {
+      visitadosSinCompraPrevia += 1;
       continue;
     }
 
-    const unidades400 = v.anaquel_400_units ?? 0;
-    const unidades800 = v.anaquel_800_units ?? 0;
-    const anaquelKg = unidades400 * 0.4 + unidades800 * 0.8;
-    const depositoKg = v.deposit_access ? depositoKgPorVisita.get(v.id) ?? 0 : 0;
-    const inventarioKg = anaquelKg + depositoKg;
-    const proporcionPct = r1((inventarioKg / radarKg) * 100);
+    const dias = Math.max(1, diasEntre(fechaInicio, diaVisita));
+    const vendidoKg = disponibleKg - final.totalKg;
+    const ritmoKgDia = vendidoKg > 0 ? vendidoKg / dias : 0;
+    // Redondeada ANTES de clasificar, para que el nivel y la cifra que se
+    // muestra en la justificación nunca se contradigan en un borde (6,96 → 7).
+    const coberturaDias = ritmoKgDia > 0 ? r1(final.totalKg / ritmoKgDia) : null;
+    const nivel = nivelRotacion(final.totalKg, vendidoKg, coberturaDias);
 
-    filas.push({
+    const fila: Omit<CruceInventarioRadarRow, "justificacion"> = {
       locationId: l.id,
       name: l.name,
       sapCode: l.sap_code,
@@ -198,27 +340,31 @@ export async function getCruceInventarioRadar(): Promise<CruceInventarioRadarRes
       asesor: l.asesor_encargado,
       segmento: l.segmento_cliente?.trim() || null,
       esquema: l.esquema_atencion,
-      fechaVisita: v.created_at.slice(0, 10),
-      mercaderista: `${v.worker_first_name ?? ""} ${v.worker_last_name ?? ""}`.trim(),
-      unidades400,
-      unidades800,
-      anaquelKg: r1(anaquelKg),
-      depositoKg: r1(depositoKg),
-      depositoIncluido: !!v.deposit_access,
-      inventarioKg: r1(inventarioKg),
-      radarKg: r1(radarKg),
-      proporcionPct,
-      nivel: nivelDe(inventarioKg, proporcionPct),
-    });
+      mercaderista: `${ultima.worker_first_name ?? ""} ${ultima.worker_last_name ?? ""}`.trim(),
+      tipoMedicion,
+      fechaInicio,
+      fechaVisita: diaVisita,
+      dias,
+      inventarioInicialKg: r1(inventarioInicialKg),
+      radarPeriodoKg: r1(radarPeriodoKg),
+      disponibleKg: r1(disponibleKg),
+      unidades400: ultima.anaquel_400_units ?? 0,
+      unidades800: ultima.anaquel_800_units ?? 0,
+      anaquelKg: r1(final.anaquelKg),
+      depositoKg: r1(final.depositoKg),
+      depositoIncluido,
+      inventarioKg: r1(final.totalKg),
+      vendidoKg: r1(vendidoKg),
+      pctVendido: r1((vendidoKg / disponibleKg) * 100),
+      ritmoKgDia: Math.round(ritmoKgDia * 100) / 100,
+      coberturaDias,
+      nivel,
+      pedidoPosteriorKg: r1(pedidoPosteriorKg),
+      radarTotalKg: r1(radarTotalKg),
+      proporcionAcumuladaPct: radarTotalKg > 0 ? r1((final.totalKg / radarTotalKg) * 100) : 0,
+    };
+    filas.push({ ...fila, justificacion: justificar(fila) });
   }
 
-  filas.sort((a, b) => b.inventarioKg - a.inventarioKg);
-
-  return {
-    filas,
-    visitados: ultimaVisita.size,
-    visitadosSinRadar,
-    umbralAltoPct: CRUCE_UMBRAL_ALTO_PCT,
-    umbralMedioPct: CRUCE_UMBRAL_MEDIO_PCT,
-  };
+  return { filas, visitados: pares.size, visitadosSinCompraPrevia };
 }

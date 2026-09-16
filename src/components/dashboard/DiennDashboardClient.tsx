@@ -39,6 +39,7 @@ import { CombinacionesPilotoTabla } from "@/components/dashboard/CombinacionesPi
 import { CombinacionesParticipacionCharts } from "@/components/dashboard/CombinacionesParticipacionCharts";
 import { CruceMercaderistaRadar } from "@/components/dashboard/CruceMercaderistaRadar";
 import type { CruceInventarioRadarResult } from "@/lib/cruce-mercaderista-radar";
+import { resumirRotacion } from "@/lib/rotacion-utils";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Separator } from "@/components/ui/separator";
 import {
@@ -50,11 +51,8 @@ import {
   TableRow,
 } from "@/components/ui/table";
 import {
-  computeRotacion,
-  filterRecords,
   filterSellOutClientes,
   type SellOutClienteDiffRow,
-  type SellOutRecord,
 } from "@/lib/sellout-utils";
 import type {
   CoberturaComunicacionPoint,
@@ -238,7 +236,6 @@ interface Props {
   tiendaIdeal: { pct: number; cumplen: number; total: number };
   sectorLabels: Record<Sector, string>;
   pilotSectors: readonly Sector[];
-  sellOutRecords: SellOutRecord[];
   sellOutClientes: SellOutClienteDiffRow[];
   zonas: string[];
   asesores: string[];
@@ -270,7 +267,6 @@ export function DiennDashboardClient({
   tiendaIdeal,
   sectorLabels,
   pilotSectors,
-  sellOutRecords,
   sellOutClientes,
   zonas,
   asesores,
@@ -394,17 +390,6 @@ export function DiennDashboardClient({
   const scatterSectors = useMemo<Sector[]>(
     () => (filter === "TOTAL" ? [...pilotSectors] : [filter]),
     [filter, pilotSectors]
-  );
-
-  const filteredSellOut = useMemo(
-    () =>
-      filterRecords(sellOutRecords, {
-        sector: filter === "TOTAL" ? undefined : filter,
-        zona: zonaFilter || undefined,
-        asesor: asesorFilter || undefined,
-        fuente: fuenteFilter,
-      }),
-    [sellOutRecords, filter, zonaFilter, asesorFilter, fuenteFilter]
   );
 
   const sellOutPorCliente = useMemo(
@@ -594,7 +579,20 @@ export function DiennDashboardClient({
     ],
     [carteraPorSegmento, totalGranularity, pilotSectors, sectorLabels]
   );
-  const rotacion = useMemo(() => computeRotacion(filteredSellOut), [filteredSellOut]);
+  // Días de inventario en calle: misma medición entre visitas que la tarjeta de
+  // rotación (Σ inventario ÷ Σ ritmo), con los filtros de ciudad, zona y asesor.
+  const rotacion = useMemo(
+    () =>
+      resumirRotacion(
+        cruceMercaderistaRadar.filas.filter(
+          (r) =>
+            (filter === "TOTAL" || r.sector === filter) &&
+            (!zonaFilter || r.zona === zonaFilter) &&
+            (!asesorFilter || r.asesor === asesorFilter)
+        )
+      ),
+    [cruceMercaderistaRadar.filas, filter, zonaFilter, asesorFilter]
+  );
   const mixProducto = bundle.mixProducto;
 
   // Segmento con más volumen de Panquecitas (Carga Radar) del corte activo, para
@@ -2267,8 +2265,12 @@ export function DiennDashboardClient({
         />
         <KpiCard
           title="Días de Inventario en Calle"
-          value={`${rotacion.diasInventarioEnCalle}`}
-          subtitle="Inventario promedio ÷ ritmo de Sell-Out (días hábiles)"
+          value={
+            rotacion.coberturaDias == null
+              ? "s/d"
+              : rotacion.coberturaDias.toLocaleString("es-VE", { maximumFractionDigits: 1 })
+          }
+          subtitle={`Días naturales · inventario contado ÷ ritmo de venta entre visitas · ${rotacion.pdvValidos} PDV medidos`}
         />
         <KpiCard
           title="Clientes en Stock Out"

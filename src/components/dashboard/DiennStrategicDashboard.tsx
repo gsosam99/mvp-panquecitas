@@ -25,7 +25,7 @@ import {
 } from "@/lib/dienn-queries";
 import { getIndiceTiendaPerfecta } from "@/lib/admin-queries";
 import { getMotivosNoVenta } from "@/lib/efectividad-queries";
-import { computeSellOut, getSellOutPorClienteDiff } from "@/lib/sellout-queries";
+import { getSellOutPorClienteDiff } from "@/lib/sellout-queries";
 import { getAvailableZonasYAsesores } from "@/lib/sellout-utils";
 import { getUniverseLocations, COHORTE_PILOTO_ORIGINAL, SECTOR_LABELS, type Sector } from "@/lib/universe";
 import { getCruceInventarioRadar } from "@/lib/cruce-mercaderista-radar";
@@ -123,14 +123,13 @@ async function getBundle(sector?: Sector): Promise<SectorBundle> {
 // Sell-Out completo (sin filtrar), y se le pasan al cliente, que decide
 // qué mostrar sin volver a pedir datos.
 export async function DiennStrategicDashboard() {
-  const [total, cumana, barquisimetoEste, coberturaComunicacion, tiendaIdeal, sellOutRecords, sellOutClientes, universo, motivosNoVenta, posicionPorCliente, carteraPorSegmento, precioCorrecto, portafolioPorCiudad, ventas3MesesPorCiudad, ventaDiariaPorSegmento, combinacionesPiloto, combinacionesPilotoOriginal, cruceMercaderistaRadar] =
+  const [total, cumana, barquisimetoEste, coberturaComunicacion, tiendaIdeal, sellOutClientes, universo, motivosNoVenta, posicionPorCliente, carteraPorSegmento, precioCorrecto, portafolioPorCiudad, ventas3MesesPorCiudad, ventaDiariaPorSegmento, combinacionesPiloto, combinacionesPilotoOriginal, cruceMercaderistaRadar] =
     await Promise.all([
       getBundle(undefined),
       getBundle("cumana"),
       getBundle("barquisimeto_este"),
       getCoberturaComunicacionPorSector(),
       getIndiceTiendaPerfecta(),
-      computeSellOut(),
       getSellOutPorClienteDiff(),
       getUniverseLocations(),
       getMotivosNoVenta(),
@@ -155,7 +154,6 @@ export async function DiennStrategicDashboard() {
       tiendaIdeal={tiendaIdeal}
       sectorLabels={SECTOR_LABELS}
       pilotSectors={PILOT_SECTOR_KEYS}
-      sellOutRecords={sellOutRecords}
       sellOutClientes={sellOutClientes}
       zonas={zonas}
       asesores={asesores}
