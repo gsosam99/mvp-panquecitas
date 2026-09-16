@@ -2270,7 +2270,7 @@ export function DiennDashboardClient({
               ? "s/d"
               : rotacion.coberturaDias.toLocaleString("es-VE", { maximumFractionDigits: 1 })
           }
-          subtitle={`Días naturales · inventario contado ÷ ritmo de venta entre visitas · ${rotacion.pdvValidos} PDV medidos`}
+          subtitle={`Días hábiles · Σ inventario ÷ Σ ritmo entre visitas · promedio por PDV ${rotacion.promedioCoberturaDias == null ? "s/d" : rotacion.promedioCoberturaDias.toLocaleString("es-VE", { maximumFractionDigits: 1 })} · ${rotacion.pdvValidos} PDV medidos`}
         />
         <KpiCard
           title="Clientes en Stock Out"

@@ -51,7 +51,7 @@ const kg = (v: number) => `${v.toLocaleString("es-VE", { maximumFractionDigits: 
 const pct = (v: number | null) =>
   v == null ? "—" : `${v.toLocaleString("es-VE", { maximumFractionDigits: 1 })}%`;
 const dias = (v: number | null) =>
-  v == null ? "sin movimiento" : `${v.toLocaleString("es-VE", { maximumFractionDigits: 1 })} días`;
+  v == null ? "sin movimiento" : `${v.toLocaleString("es-VE", { maximumFractionDigits: 1 })} días háb.`;
 const fecha = (iso: string) => `${iso.slice(8, 10)}-${iso.slice(5, 7)}`;
 const segmentoDe = (r: CruceInventarioRadarRow) => r.segmento ?? SEGMENTO_SIN_DATO;
 
@@ -82,7 +82,7 @@ const Grafico = dynamic(
         <ResponsiveContainer width="100%" height={height}>
           <BarChart data={data} layout="vertical" margin={{ top: 16, right: 90, left: 8, bottom: 8 }}>
             <CartesianGrid strokeDasharray="3 3" stroke="#f1f5f9" horizontal={false} />
-            <XAxis type="number" domain={[0, TOPE_GRAFICO_DIAS]} tick={{ fontSize: 11, fill: "#94a3b8" }} unit=" d" />
+            <XAxis type="number" domain={[0, TOPE_GRAFICO_DIAS]} tick={{ fontSize: 11, fill: "#94a3b8" }} unit=" háb." />
             <YAxis
               type="category"
               dataKey="nombre"
@@ -98,10 +98,10 @@ const Grafico = dynamic(
                 x={x}
                 stroke="#94a3b8"
                 strokeDasharray="4 4"
-                label={{ value: `${x} d`, position: "top", fontSize: 10, fill: "#64748b" }}
+                label={{ value: `${x} háb.`, position: "top", fontSize: 10, fill: "#64748b" }}
               />
             ))}
-            <Bar dataKey="coberturaVisual" name="Días de cobertura" radius={[0, 3, 3, 0]} minPointSize={2}>
+            <Bar dataKey="coberturaVisual" name="Días hábiles de cobertura" radius={[0, 3, 3, 0]} minPointSize={2}>
               {data.map((p, i) => (
                 <Cell key={i} fill={p.color} />
               ))}
@@ -192,6 +192,9 @@ export function CruceMercaderistaRadar({
     );
   }, [delSegmento, filtroNivel, orden]);
 
+  // Promedio simple por PDV de la lista que se está viendo (ciudad, segmento y nivel).
+  const promedioLista = useMemo(() => resumirRotacion(filas), [filas]);
+
   const puntos = useMemo<PuntoGrafico[]>(
     () =>
       filas
@@ -222,7 +225,7 @@ export function CruceMercaderistaRadar({
     },
     { header: "Inicio del período", value: (r) => r.fechaInicio, width: 14 },
     { header: "Última visita", value: (r) => r.fechaVisita, width: 14 },
-    { header: "Días", value: (r) => r.dias, width: 8 },
+    { header: "Días hábiles", value: (r) => r.dias, width: 12 },
     { header: "Inventario inicial (kg)", value: (r) => r.inventarioInicialKg, width: 18 },
     { header: "Radar del período (kg)", value: (r) => r.radarPeriodoKg, width: 18 },
     { header: "Disponible (kg)", value: (r) => r.disponibleKg, width: 14 },
@@ -234,8 +237,8 @@ export function CruceMercaderistaRadar({
     { header: "Inventario contado (kg)", value: (r) => r.inventarioKg, width: 18 },
     { header: "Vendido (kg)", value: (r) => r.vendidoKg, width: 14 },
     { header: "% vendido", value: (r) => r.pctVendido, width: 12 },
-    { header: "Ritmo (kg/día)", value: (r) => r.ritmoKgDia, width: 14 },
-    { header: "Cobertura (días)", value: (r) => r.coberturaDias ?? "sin movimiento", width: 14 },
+    { header: "Ritmo (kg/día hábil)", value: (r) => r.ritmoKgDia, width: 14 },
+    { header: "Cobertura (días hábiles)", value: (r) => r.coberturaDias ?? "sin movimiento", width: 14 },
     { header: "Nivel de rotación", value: (r) => NIVELES_ROTACION[r.nivel].label, width: 18 },
     { header: "Nivel según la fórmula", value: (r) => NIVELES_ROTACION[r.nivelFormula].label, width: 18 },
     { header: "Conteo igual a la visita anterior", value: (r) => (r.conteoRepetido ? "sí" : "no"), width: 16 },
@@ -257,7 +260,7 @@ export function CruceMercaderistaRadar({
             visita anterior + lo que le llegó por Radar) menos lo que{" "}
             <span className="font-medium">contó el mercaderista</span> en su última visita es lo vendido en ese
             período. Con una sola visita, el período empieza en su primer pedido por Radar con inventario 0. Los{" "}
-            <span className="font-medium">días de cobertura</span> (inventario ÷ ritmo de venta) ubican al PDV en la
+            <span className="font-medium">días hábiles de cobertura</span> (inventario ÷ ritmo de venta) ubican al PDV en la
             escala. {filtroTexto}.
           </p>
         </div>
@@ -323,6 +326,7 @@ export function CruceMercaderistaRadar({
                     <TableHead className="text-right">Ritmo</TableHead>
                     <TableHead className="text-right">Cobertura</TableHead>
                     <TableHead>Nivel</TableHead>
+                    <TableHead className="text-right">Promedio por PDV</TableHead>
                     <TableHead>PDV por nivel</TableHead>
                   </TableRow>
                 </TableHeader>
@@ -351,7 +355,7 @@ export function CruceMercaderistaRadar({
                         </TableCell>
                         <TableCell className="text-right">{kg(s.inventarioKg)}</TableCell>
                         <TableCell className="text-right whitespace-nowrap">
-                          {s.ritmoKgDia.toLocaleString("es-VE", { maximumFractionDigits: 2 })} kg/día
+                          {s.ritmoKgDia.toLocaleString("es-VE", { maximumFractionDigits: 2 })} kg/día háb.
                         </TableCell>
                         <TableCell className="text-right font-semibold whitespace-nowrap">
                           {s.nivel === "AGOTADO" ? "—" : dias(s.coberturaDias)}
@@ -361,6 +365,12 @@ export function CruceMercaderistaRadar({
                             <Badge variant="outline" className={`text-[11px] font-normal ${NIVELES_ROTACION[s.nivel].badge}`}>
                               {NIVELES_ROTACION[s.nivel].label}
                             </Badge>
+                          )}
+                        </TableCell>
+                        <TableCell className="text-right whitespace-nowrap">
+                          {dias(s.promedioCoberturaDias)}
+                          {s.nivelPromedio && (
+                            <p className="text-xs text-slate-400">{NIVELES_ROTACION[s.nivelPromedio].label}</p>
                           )}
                         </TableCell>
                         <TableCell>
@@ -397,11 +407,11 @@ export function CruceMercaderistaRadar({
                 <p className="text-xl font-bold text-slate-900">{kg(resumen.inventarioKg)}</p>
                 <p className="text-xs text-slate-400">
                   {resumen.pdvValidos} PDV · ritmo {resumen.ritmoKgDia.toLocaleString("es-VE", { maximumFractionDigits: 2 })}{" "}
-                  kg/día
+                  kg/día háb.
                 </p>
               </div>
               <div className="rounded-lg border border-slate-200 p-3">
-                <p className="text-[11px] uppercase tracking-wide text-slate-400">Días de cobertura</p>
+                <p className="text-[11px] uppercase tracking-wide text-slate-400">Cobertura total</p>
                 <p className="text-xl font-bold text-slate-900">{dias(resumen.coberturaDias)}</p>
                 <p className="text-xs text-slate-400">
                   {resumen.nivel ? NIVELES_ROTACION[resumen.nivel].label : "—"} · Σ inventario ÷ Σ ritmo
@@ -411,7 +421,7 @@ export function CruceMercaderistaRadar({
                 <p className="text-[11px] uppercase tracking-wide text-red-500">Rotación baja o muy baja</p>
                 <p className="text-xl font-bold text-red-700">{baja}</p>
                 <p className="text-xs text-slate-500">
-                  PDV con {COBERTURA_MEDIA_DIAS} días o más de cobertura
+                  PDV con {COBERTURA_MEDIA_DIAS} días hábiles o más de cobertura
                 </p>
               </div>
             </div>
@@ -439,11 +449,60 @@ export function CruceMercaderistaRadar({
               })}
             </div>
 
+            {/* ── Promedio de rotación de los PDV de la lista ──────────── */}
+            <div className="rounded-lg border border-slate-200 bg-slate-50/60 p-3 mb-4">
+              <p className="text-xs font-semibold uppercase tracking-widest text-muted-foreground">
+                Promedio de rotación por PDV
+              </p>
+              <p className="text-[11px] text-slate-400 mb-2">
+                {promedioLista.pdvValidos} PDV de la lista actual
+                {filtroNivel !== "TODOS" ? ` (${NIVELES_ROTACION[filtroNivel].label})` : ""} · cada PDV pesa igual
+                {promedioLista.pdv > promedioLista.pdvValidos
+                  ? ` · ${promedioLista.pdv - promedioLista.pdvValidos} fuera de la escala no entran`
+                  : ""}
+              </p>
+              {promedioLista.pdvValidos === 0 ? (
+                <p className="text-sm text-slate-400">Sin PDV dentro de la escala en esta lista.</p>
+              ) : (
+                <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
+                  <div>
+                    <p className="text-[11px] uppercase tracking-wide text-slate-400">Cobertura promedio</p>
+                    <p className="text-xl font-bold text-slate-900">{dias(promedioLista.promedioCoberturaDias)}</p>
+                    <p className="text-xs text-slate-500">
+                      {promedioLista.nivelPromedio ? NIVELES_ROTACION[promedioLista.nivelPromedio].label : "—"}
+                      {promedioLista.pdvSinMovimiento > 0
+                        ? ` · sin contar ${promedioLista.pdvSinMovimiento} PDV sin movimiento`
+                        : ""}
+                    </p>
+                  </div>
+                  <div>
+                    <p className="text-[11px] uppercase tracking-wide text-slate-400">% vendido promedio</p>
+                    <p className="text-xl font-bold text-slate-900">{pct(promedioLista.promedioPctVendido)}</p>
+                    <p className="text-xs text-slate-500">de lo disponible en el período</p>
+                  </div>
+                  <div>
+                    <p className="text-[11px] uppercase tracking-wide text-slate-400">Ritmo promedio</p>
+                    <p className="text-xl font-bold text-slate-900">
+                      {(promedioLista.promedioRitmoKgDia ?? 0).toLocaleString("es-VE", { maximumFractionDigits: 2 })} kg
+                    </p>
+                    <p className="text-xs text-slate-500">por día hábil</p>
+                  </div>
+                  <div>
+                    <p className="text-[11px] uppercase tracking-wide text-slate-400">Período promedio</p>
+                    <p className="text-xl font-bold text-slate-900">
+                      {(promedioLista.promedioDias ?? 0).toLocaleString("es-VE", { maximumFractionDigits: 1 })} días háb.
+                    </p>
+                    <p className="text-xs text-slate-500">medidos por PDV</p>
+                  </div>
+                </div>
+              )}
+            </div>
+
             {puntos.length > 0 ? (
               <>
                 <p className="text-xs font-semibold uppercase tracking-widest text-muted-foreground mb-1">
                   {filas.length > TOP_GRAFICO ? `Top ${TOP_GRAFICO} de ${filas.length} PDV` : `${filas.length} PDV`} —{" "}
-                  {orden === "rotacion" ? "de menor a mayor rotación" : "ordenados por inventario"} · días de cobertura
+                  {orden === "rotacion" ? "de menor a mayor rotación" : "ordenados por inventario"} · días hábiles de cobertura
                   (barra topada en {TOPE_GRAFICO_DIAS})
                 </p>
                 <Grafico data={puntos} />
@@ -481,7 +540,7 @@ export function CruceMercaderistaRadar({
                           {r.mercaderista && <p className="text-xs text-slate-400">{r.mercaderista}</p>}
                         </TableCell>
                         <TableCell className="text-xs text-slate-500 whitespace-nowrap">
-                          {fecha(r.fechaInicio)} → {fecha(r.fechaVisita)} ({r.dias} d)
+                          {fecha(r.fechaInicio)} → {fecha(r.fechaVisita)} ({r.dias} días háb.)
                           <p className="text-slate-400">
                             {r.tipoMedicion === "ENTRE_VISITAS" ? "entre visitas" : "desde primer pedido"}
                           </p>
@@ -508,7 +567,7 @@ export function CruceMercaderistaRadar({
                         <TableCell className="text-right">
                           {kg(r.vendidoKg)}
                           <p className="text-xs text-slate-400">
-                            {pct(r.pctVendido)} · {r.ritmoKgDia.toLocaleString("es-VE", { maximumFractionDigits: 2 })} kg/día
+                            {pct(r.pctVendido)} · {r.ritmoKgDia.toLocaleString("es-VE", { maximumFractionDigits: 2 })} kg/día háb.
                           </p>
                         </TableCell>
                         <TableCell className="text-right font-semibold whitespace-nowrap">
@@ -540,12 +599,17 @@ export function CruceMercaderistaRadar({
           <span className="font-medium text-slate-600">Vendido</span> = inventario al inicio + Radar de Panquecitas del
           período − inventario contado en la última visita (anaquel 400 g y 800 g + depósito).{" "}
           <span className="font-medium text-slate-600">Inicio</span>: la visita anterior más reciente con al menos{" "}
-          {PERIODO_MINIMO_DIAS} días de distancia; si no hay, el primer pedido por Radar con inventario 0 (antes de su
-          primer pedido el PDV no tenía Panquecitas). Con menos de {PERIODO_MINIMO_DIAS} días el período es corto y no se
+          {PERIODO_MINIMO_DIAS} días hábiles de distancia; si no hay, el primer pedido por Radar con inventario 0 (antes de su
+          primer pedido el PDV no tenía Panquecitas). Con menos de {PERIODO_MINIMO_DIAS} días hábiles el período es corto y no se
           clasifica.
           Un pedido con la misma fecha de la visita se toma como posterior al conteo.{" "}
-          <span className="font-medium text-slate-600">Cobertura</span> = inventario ÷ ritmo diario de venta; por
-          segmento, Σ inventario ÷ Σ ritmo.{" "}
+          <span className="font-medium text-slate-600">Días hábiles</span>: lunes a viernes entre el inicio y el día
+          de la visita (sin contarlo). <span className="font-medium text-slate-600">Cobertura</span> = inventario ÷ ritmo
+          de venta por día hábil. <span className="font-medium text-slate-600">Cobertura total</span>: Σ inventario ÷ Σ
+          ritmo, donde pesan más los PDV con más volumen.{" "}
+          <span className="font-medium text-slate-600">Promedio por PDV</span>: promedio simple de la cobertura de cada
+          PDV (cada uno pesa igual; los agotados cuentan con 0 y los sin movimiento no se pueden promediar y se informan
+          aparte).{" "}
           <span className="font-medium text-slate-600">Sin movimiento</span>: el mercaderista contó exactamente lo
           disponible; si además repite el conteo de la visita anterior se marca como conteo repetido.{" "}
           <span className="font-medium text-slate-600">Fuera de la escala</span> (no suman en los totales): datos

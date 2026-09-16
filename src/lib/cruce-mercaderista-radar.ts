@@ -4,6 +4,7 @@ import { PRODUCT_IDS } from "@/data/catalog";
 import { getUniverseLocations, vigentesAl, sectorGroup, type Sector } from "@/lib/universe";
 import { todayISO } from "@/lib/date-buckets";
 import { presentacionFromVariant } from "@/lib/sellout-utils";
+import { diasHabilesEntre } from "@/lib/business-days";
 import {
   EPSILON_KG,
   PERIODO_MINIMO_DIAS,
@@ -24,14 +25,14 @@ import {
 // El inicio depende de cuántas visitas tenga el PDV:
 //
 //   - DOS O MÁS visitas: la visita anterior más reciente que tenga al menos
-//     PERIODO_MINIMO_DIAS (7) antes de la última, con su inventario contado.
-//   - UNA visita (o ninguna anterior a 7 días o más): el PRIMER pedido de
+//     PERIODO_MINIMO_DIAS (5) días hábiles antes de la última, con su inventario contado.
+//   - UNA visita (o ninguna anterior a 5 hábiles o más): el PRIMER pedido de
 //     Panquecitas por Radar, con inventario 0. Panquecitas es un producto
 //     nuevo del piloto: antes de su primer pedido el PDV no tenía producto,
 //     así que no es una estimación.
 //
 // Correcciones del 16-09-2026 (DIENN, tras ver 91 PDV "sin venta"):
-//   - Un período de menos de 7 días no se clasifica (PERIODO_CORTO): no
+//   - Un período de menos de 5 días hábiles no se clasifica (PERIODO_CORTO): no
 //     vender nada en 2 días no dice nada de la rotación.
 //   - Vendido 0 se llama "sin movimiento" y, si el conteo es idéntico al de
 //     la visita anterior, se marca (conteoRepetido): puede ser un conteo
@@ -42,8 +43,12 @@ import {
 //
 // Con eso:
 //   % vendido  = vendido ÷ disponible (inventario inicial + Radar del período)
-//   ritmo      = vendido ÷ días del período (kg/día)
-//   cobertura  = inventario contado ÷ ritmo (días que le dura lo que tiene)
+//   ritmo      = vendido ÷ días HÁBILES del período (kg/día hábil)
+//   cobertura  = inventario contado ÷ ritmo (días hábiles que le dura lo que tiene)
+//
+// DÍAS HÁBILES (lunes a viernes, DIENN 16-09-2026, igual que business-days.ts):
+// los del intervalo [inicio, visita) — el día de la visita no cuenta porque el
+// conteo se hizo ese día, igual que su pedido Radar se toma como posterior.
 //
 // La escala (rotación alta / media / baja / muy baja) sale de la cobertura,
 // que no depende de lo largo del período. Ver src/lib/rotacion-utils.ts.
@@ -83,7 +88,7 @@ export interface CruceInventarioRadarRow {
   fechaInicio: string;
   /** Última visita ("YYYY-MM-DD"). */
   fechaVisita: string;
-  /** Días naturales del período. */
+  /** Días hábiles (L–V) del período: [inicio, visita). */
   dias: number;
 
   /** Inventario al inicio: el de la visita anterior, o 0 desde el primer pedido. */
@@ -106,7 +111,7 @@ export interface CruceInventarioRadarRow {
   vendidoKg: number;
   /** vendido ÷ disponible × 100. */
   pctVendido: number | null;
-  /** vendido ÷ días, kg/día (0 si no vendió). */
+  /** vendido ÷ días hábiles, kg/día hábil (0 si no vendió). */
   ritmoKgDia: number;
   /** inventario ÷ ritmo; null si no vendió nada. */
   coberturaDias: number | null;
@@ -153,8 +158,9 @@ interface RadarDia {
   date_of_sale: string;
 }
 
-function diasEntre(desde: string, hasta: string): number {
-  return Math.round((Date.parse(`${hasta}T00:00:00Z`) - Date.parse(`${desde}T00:00:00Z`)) / 86_400_000);
+/** Días hábiles (L–V) de [desde, hasta): el día final no cuenta. */
+function diasHabilesPeriodo(desde: string, hasta: string): number {
+  return diasHabilesEntre(desde, hasta).filter((d) => d < hasta).length;
 }
 
 const r1 = (v: number) => Math.round(v * 10) / 10;
@@ -177,10 +183,10 @@ function justificar(f: Omit<CruceInventarioRadarRow, "justificacion">): string {
     f.tipoMedicion === "ENTRE_VISITAS"
       ? `Entre la visita del ${fechaCorta(f.fechaInicio)} (contó ${num(f.inventarioInicialKg)} kg) y la del ${fechaCorta(
           f.fechaVisita
-        )} (${f.dias} días) le llegaron ${num(f.radarPeriodoKg)} kg por Radar: tuvo ${num(f.disponibleKg)} kg disponibles`
+        )} (${f.dias} días hábiles) le llegaron ${num(f.radarPeriodoKg)} kg por Radar: tuvo ${num(f.disponibleKg)} kg disponibles`
       : `Desde su primer pedido (${fechaCorta(f.fechaInicio)}) hasta la visita del ${fechaCorta(f.fechaVisita)} (${
           f.dias
-        } días) compró ${num(f.disponibleKg)} kg por Radar`;
+        } días hábiles) compró ${num(f.disponibleKg)} kg por Radar`;
 
   // Lectura según la fórmula (nivelFormula); el nivel final puede quedar fuera
   // de la escala por período corto o modelo indirecto.
@@ -192,13 +198,13 @@ function justificar(f: Omit<CruceInventarioRadarRow, "justificacion">): string {
     lectura = ` y el mercaderista contó 0 kg: vendió todo lo disponible (${num(f.vendidoKg)} kg, ${num(
       f.ritmoKgDia,
       2
-    )} kg/día) → ${NOMBRE_NIVEL.AGOTADO}`;
+    )} kg/día hábil) → ${NOMBRE_NIVEL.AGOTADO}`;
   } else if (f.coberturaDias == null) {
     lectura = ` y el mercaderista contó ${num(f.inventarioKg)} kg, exactamente lo que tenía disponible: no hubo movimiento de inventario en el período → ${NOMBRE_NIVEL[n]} (${rangoNivel(n)})`;
   } else {
     lectura = ` y el mercaderista contó ${num(f.inventarioKg)} kg: vendió ${num(f.vendidoKg)} kg (${num(
       f.pctVendido ?? 0
-    )}%), ${num(f.ritmoKgDia, 2)} kg/día. A ese ritmo lo que tiene le dura ${num(f.coberturaDias)} días → ${
+    )}%), ${num(f.ritmoKgDia, 2)} kg/día hábil. A ese ritmo lo que tiene le dura ${num(f.coberturaDias)} días hábiles → ${
       NOMBRE_NIVEL[n]
     } (${rangoNivel(n)})`;
   }
@@ -207,7 +213,7 @@ function justificar(f: Omit<CruceInventarioRadarRow, "justificacion">): string {
   if (f.nivel === "INDIRECTO") {
     texto = `${periodo}${lectura}. Es un PDV de modelo indirecto: su reposición llega por franquiciada o distribuidora y el Radar puede no reflejarla completa, así que queda fuera de la escala y ese resultado es solo referencia.`;
   } else if (f.nivel === "PERIODO_CORTO") {
-    texto = `${periodo} y el mercaderista contó ${num(f.inventarioKg)} kg. Son solo ${f.dias} días (mínimo ${PERIODO_MINIMO_DIAS}): el período es muy corto para clasificar su rotación.`;
+    texto = `${periodo} y el mercaderista contó ${num(f.inventarioKg)} kg. Son solo ${f.dias} días hábiles (mínimo ${PERIODO_MINIMO_DIAS}): el período es muy corto para clasificar su rotación.`;
   } else {
     texto = `${periodo}${lectura}.`;
   }
@@ -280,7 +286,7 @@ export async function getCruceInventarioRadar(): Promise<CruceInventarioRadarRes
     const ultima = lista[0];
     const diaUltima = ultima.created_at.slice(0, 10);
     const anterior =
-      lista.find((v) => diasEntre(v.created_at.slice(0, 10), diaUltima) >= PERIODO_MINIMO_DIAS) ?? null;
+      lista.find((v) => diasHabilesPeriodo(v.created_at.slice(0, 10), diaUltima) >= PERIODO_MINIMO_DIAS) ?? null;
     pares.set(loc, { ultima, anterior });
   }
 
@@ -379,7 +385,9 @@ export async function getCruceInventarioRadar(): Promise<CruceInventarioRadarRes
       continue;
     }
 
-    const dias = Math.max(1, diasEntre(fechaInicio, diaVisita));
+    // Al menos 1 para poder dividir: un período de 0 hábiles (p. ej. pedido del
+    // sábado y visita del lunes) igual queda como período corto.
+    const dias = Math.max(1, diasHabilesPeriodo(fechaInicio, diaVisita));
     const vendidoKg = disponibleKg - final.totalKg;
     // Un vendido dentro de la tolerancia es "sin movimiento", no un ritmo
     // ínfimo con miles de días de cobertura.
