@@ -1343,6 +1343,16 @@ export async function getRendimiento3MFocoRecompra(
   const vigentes = vigentesAl(delSector, todayISO());
   if (vigentes.length === 0) return vacio;
 
+  // PDV fuera de cartera del corte: sus kg de Panquecitas SÍ suman en la serie
+  // del gráfico con cartera completa (DIENN, 16-09-2026: "todos los kg de
+  // panquecitas se deben ver reflejados"), igual que en getRendimiento3M. No
+  // entran al promedio de PAN ni a la cartera piloto: no son población.
+  const volumenTotal = await getVolumenLocations();
+  const fueraDeCartera = vigentesAl(
+    sector ? volumenTotal.filter((l) => sectorGroup(l.oficina_venta) === sector) : volumenTotal,
+    todayISO()
+  ).filter((l) => esFueraDeCartera(l.cohorte));
+
   const supabase = createSupabaseServiceClient();
 
   // Harina PAN de 3 meses: la MISMA lectura que getRendimiento3M (último corte
@@ -1428,11 +1438,19 @@ export async function getRendimiento3MFocoRecompra(
   }
 
   // `clientes` define la serie de Panquecitas; `clientesPan`, de quién sale el
-  // promedio de PAN.
-  const armar = (clientes: Cliente[], clientesPan: Cliente[], soloRecompra: boolean): Rendimiento3MResult => {
+  // promedio de PAN; `fuera`, los PDV fuera de cartera cuyos kg se suman a la
+  // serie (solo volumen, no población).
+  const armar = (
+    clientes: Cliente[],
+    clientesPan: Cliente[],
+    soloRecompra: boolean,
+    fuera: Cliente[]
+  ): Rendimiento3MResult => {
     if (clientes.length === 0 || clientesPan.length === 0) return RENDIMIENTO_3M_VACIO;
-    const ids = new Set(clientes.map((l) => l.id));
+    const idsFuera = new Set(fuera.map((l) => l.id));
+    const ids = new Set([...clientes.map((l) => l.id), ...idsFuera]);
     const idsPan = new Set(clientesPan.map((l) => l.id));
+    let fueraKg = 0;
 
     const filasPan = panPorCliente.filter((r) => idsPan.has(r.locId));
     if (filasPan.length === 0) return RENDIMIENTO_3M_VACIO;
@@ -1449,6 +1467,7 @@ export async function getRendimiento3MFocoRecompra(
       if (soloRecompra && fecha === primeraCompraPanq.get(r.location_id)) continue;
       const dia = siguienteDiaHabil(fecha);
       kgPorDia.set(dia, (kgPorDia.get(dia) ?? 0) + Number(r.quantity_kg));
+      if (idsFuera.has(r.location_id)) fueraKg += Number(r.quantity_kg);
     }
 
     const fechasPan = filasPan.map((r) => r.fecha).sort();
@@ -1472,30 +1491,40 @@ export async function getRendimiento3MFocoRecompra(
       // De los clientes de la base de PAN, cuántos tienen PAN en el reporte.
       clientesPan: new Set(filasPan.map((r) => r.locId)).size,
       clientesPoblacion: idsPan.size,
-      // Fuera de cartera no es población: acá no entra.
-      panquecitasFueraKg: 0,
+      panquecitasFueraKg: Math.round(fueraKg * 10) / 10,
       puntos,
     };
   };
 
   // Los cortes: cartera × segmento × base del promedio de PAN × serie de Panquecitas.
-  const porSerie = (clientes: Cliente[], clientesPan: Cliente[]): Record<SeriePanq, Rendimiento3MResult> => ({
-    totales: armar(clientes, clientesPan, false),
-    recompra: armar(clientes, clientesPan, true),
+  const porSerie = (
+    clientes: Cliente[],
+    clientesPan: Cliente[],
+    fuera: Cliente[]
+  ): Record<SeriePanq, Rendimiento3MResult> => ({
+    totales: armar(clientes, clientesPan, false, fuera),
+    recompra: armar(clientes, clientesPan, true, fuera),
   });
-  const porBase = (clientes: Cliente[]): Record<BasePan, Record<SeriePanq, Rendimiento3MResult>> => ({
-    cartera: porSerie(clientes, clientes),
-    recompraPan: porSerie(clientes, clientes.filter(recompraPan)),
-    recompraPanquecitas: porSerie(clientes, clientes.filter(recompraPanquecitas)),
+  const porBase = (clientes: Cliente[], fuera: Cliente[]): Record<BasePan, Record<SeriePanq, Rendimiento3MResult>> => ({
+    cartera: porSerie(clientes, clientes, fuera),
+    recompraPan: porSerie(clientes, clientes.filter(recompraPan), fuera),
+    recompraPanquecitas: porSerie(clientes, clientes.filter(recompraPanquecitas), fuera),
   });
+  // El corte "foco" también se aplica a los fuera de cartera según su segmento
+  // (sin segmento cuentan como foco, igual que en la cartera).
   const porSegmento = (
-    clientes: Cliente[]
+    clientes: Cliente[],
+    fuera: Cliente[]
   ): Record<SegmentoRecompra, Record<BasePan, Record<SeriePanq, Rendimiento3MResult>>> => ({
-    foco: porBase(clientes.filter(esFoco)),
-    todos: porBase(clientes),
+    foco: porBase(clientes.filter(esFoco), fuera.filter(esFoco)),
+    todos: porBase(clientes, fuera),
   });
 
-  return { completa: porSegmento(vigentes), piloto: porSegmento(vigentes.filter(esPiloto)) };
+  return {
+    completa: porSegmento(vigentes, fueraDeCartera),
+    // La cartera piloto son los 358 del arranque: los fuera de cartera no son parte.
+    piloto: porSegmento(vigentes.filter(esPiloto), []),
+  };
 }
 // ── 5. Cobertura y Comunicación por sector (semanal) ───────────────
 // Ver decisión #11: no hay datos reales de campañas de comunicación ni
