@@ -37,9 +37,10 @@ import {
 //   - Vendido 0 se llama "sin movimiento" y, si el conteo es idéntico al de
 //     la visita anterior, se marca (conteoRepetido): puede ser un conteo
 //     copiado.
-//   - Los PDV de modelo indirecto quedan fuera de la escala (INDIRECTO): su
-//     reposición llega por franquiciada o distribuidora y el Radar puede no
-//     reflejarla completa. Se muestra igual lo que daría la fórmula.
+//   - Los PDV de modelo indirecto SÍ se miden igual que los directos: su
+//     Radar es la venta de la franquiciada o distribuidora a ese PDV. Una
+//     versión intermedia los dejaba fuera de la escala; DIENN lo corrigió.
+//     esIndirecto se conserva para poder filtrarlos.
 //
 // Con eso:
 //   % vendido  = vendido ÷ disponible (inventario inicial + Radar del período)
@@ -116,7 +117,7 @@ export interface CruceInventarioRadarRow {
   /** inventario ÷ ritmo; null si no vendió nada. */
   coberturaDias: number | null;
   nivel: NivelRotacion;
-  /** Lo que da la fórmula aunque el PDV quede fuera de la escala (indirecto / período corto). */
+  /** Lo que da la fórmula aunque el PDV quede fuera de la escala por período corto. */
   nivelFormula: NivelRotacion;
   /** Modelo indirecto según el esquema de atención. */
   esIndirecto: boolean;
@@ -175,7 +176,6 @@ const NOMBRE_NIVEL: Record<NivelRotacion, string> = {
   MUY_BAJA: "rotación muy baja",
   INCONSISTENTE: "dato inconsistente",
   PERIODO_CORTO: "período corto",
-  INDIRECTO: "modelo indirecto",
 };
 
 function justificar(f: Omit<CruceInventarioRadarRow, "justificacion">): string {
@@ -189,7 +189,7 @@ function justificar(f: Omit<CruceInventarioRadarRow, "justificacion">): string {
         } días hábiles) compró ${num(f.disponibleKg)} kg por Radar`;
 
   // Lectura según la fórmula (nivelFormula); el nivel final puede quedar fuera
-  // de la escala por período corto o modelo indirecto.
+  // de la escala por período corto.
   const n = f.nivelFormula;
   let lectura: string;
   if (n === "INCONSISTENTE") {
@@ -210,9 +210,7 @@ function justificar(f: Omit<CruceInventarioRadarRow, "justificacion">): string {
   }
 
   let texto: string;
-  if (f.nivel === "INDIRECTO") {
-    texto = `${periodo}${lectura}. Es un PDV de modelo indirecto: su reposición llega por franquiciada o distribuidora y el Radar puede no reflejarla completa, así que queda fuera de la escala y ese resultado es solo referencia.`;
-  } else if (f.nivel === "PERIODO_CORTO") {
+  if (f.nivel === "PERIODO_CORTO") {
     texto = `${periodo} y el mercaderista contó ${num(f.inventarioKg)} kg. Son solo ${f.dias} días hábiles (mínimo ${PERIODO_MINIMO_DIAS}): el período es muy corto para clasificar su rotación.`;
   } else {
     texto = `${periodo}${lectura}.`;
@@ -397,11 +395,7 @@ export async function getCruceInventarioRadar(): Promise<CruceInventarioRadarRes
     const coberturaDias = ritmoKgDia > 0 ? r1(final.totalKg / ritmoKgDia) : null;
     const nivelFormula = nivelRotacion(final.totalKg, vendidoKg, coberturaDias);
     const esIndirecto = esModeloIndirecto(l.esquema_atencion);
-    const nivel: NivelRotacion = esIndirecto
-      ? "INDIRECTO"
-      : dias < PERIODO_MINIMO_DIAS
-        ? "PERIODO_CORTO"
-        : nivelFormula;
+    const nivel: NivelRotacion = dias < PERIODO_MINIMO_DIAS ? "PERIODO_CORTO" : nivelFormula;
 
     const fila: Omit<CruceInventarioRadarRow, "justificacion"> = {
       locationId: l.id,

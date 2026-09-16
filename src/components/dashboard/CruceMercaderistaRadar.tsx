@@ -37,11 +37,17 @@ const NIVELES_ROTACION: Record<NivelRotacion, { label: string; color: string; ba
   MUY_BAJA: { label: "Rotación muy baja", color: "#dc2626", badge: "border-red-300 text-red-700 bg-red-50" },
   INCONSISTENTE: { label: "Dato inconsistente", color: "#64748b", badge: "border-slate-300 text-slate-600 bg-slate-50" },
   PERIODO_CORTO: { label: "Período corto", color: "#94a3b8", badge: "border-slate-200 text-slate-500 bg-white" },
-  INDIRECTO: { label: "Modelo indirecto", color: "#6366f1", badge: "border-indigo-300 text-indigo-700 bg-indigo-50" },
 };
 
 type Orden = "rotacion" | "inventario";
 type FiltroNivel = "TODOS" | NivelRotacion;
+type FiltroModelo = "TODOS" | "DIRECTO" | "INDIRECTO";
+
+const MODELOS: [FiltroModelo, string][] = [
+  ["TODOS", "Todos los modelos"],
+  ["DIRECTO", "Directo y mixto"],
+  ["INDIRECTO", "Indirecto"],
+];
 
 const TOP_GRAFICO = 15;
 /** Tope visual de la barra de cobertura; la etiqueta muestra el valor real. */
@@ -57,7 +63,6 @@ const segmentoDe = (r: CruceInventarioRadarRow) => r.segmento ?? SEGMENTO_SIN_DA
 
 /** Mayor valor = menor rotación. Agotados y los fuera de la escala van al final. */
 function claveRotacion(r: CruceInventarioRadarRow): number {
-  if (r.nivel === "INDIRECTO") return -4;
   if (r.nivel === "PERIODO_CORTO") return -3;
   if (r.nivel === "INCONSISTENTE") return -2;
   if (r.nivel === "AGOTADO") return -1;
@@ -152,10 +157,17 @@ export function CruceMercaderistaRadar({
   const [orden, setOrden] = useState<Orden>("rotacion");
   const [filtroNivel, setFiltroNivel] = useState<FiltroNivel>("TODOS");
   const [segmento, setSegmento] = useState<string | null>(null);
+  const [modelo, setModelo] = useState<FiltroModelo>("TODOS");
 
+  // Ciudad del dashboard + modelo de atención.
   const delSector = useMemo(
-    () => (sector === "TOTAL" ? data.filas : data.filas.filter((r) => r.sector === sector)),
-    [data.filas, sector]
+    () =>
+      data.filas.filter(
+        (r) =>
+          (sector === "TOTAL" || r.sector === sector) &&
+          (modelo === "TODOS" || (modelo === "INDIRECTO") === r.esIndirecto)
+      ),
+    [data.filas, sector, modelo]
   );
 
   // Rotación por segmento, con la misma escala que el PDV.
@@ -192,7 +204,7 @@ export function CruceMercaderistaRadar({
     );
   }, [delSegmento, filtroNivel, orden]);
 
-  // Promedio simple por PDV de la lista que se está viendo (ciudad, segmento y nivel).
+  // Rotación ponderada de la lista que se está viendo (ciudad, modelo, segmento y nivel).
   const promedioLista = useMemo(() => resumirRotacion(filas), [filas]);
 
   const puntos = useMemo<PuntoGrafico[]>(
@@ -266,6 +278,19 @@ export function CruceMercaderistaRadar({
         </div>
         <div className="flex flex-wrap items-center gap-2 print:hidden">
           <div className="flex rounded-lg border border-slate-200 overflow-hidden text-xs font-medium">
+            {MODELOS.map(([key, label]) => (
+              <button
+                key={key}
+                onClick={() => setModelo(key)}
+                className={`px-3 py-1.5 transition-colors ${
+                  modelo === key ? "bg-slate-900 text-white" : "bg-white text-slate-500 hover:bg-slate-50"
+                }`}
+              >
+                {label}
+              </button>
+            ))}
+          </div>
+          <div className="flex rounded-lg border border-slate-200 overflow-hidden text-xs font-medium">
             {(
               [
                 ["rotacion", "Menor rotación"],
@@ -284,7 +309,9 @@ export function CruceMercaderistaRadar({
             ))}
           </div>
           <ExportExcelButton
-            filename={`Rotación mercaderistas vs Radar — ${filtroTexto}${segmentoActivo ? ` — ${segmentoActivo}` : ""}`}
+            filename={`Rotación mercaderistas vs Radar — ${filtroTexto}${
+              modelo === "TODOS" ? "" : ` — ${modelo === "INDIRECTO" ? "Indirecto" : "Directo y mixto"}`
+            }${segmentoActivo ? ` — ${segmentoActivo}` : ""}`}
             rows={filas}
             columns={columnas}
           />
@@ -326,7 +353,6 @@ export function CruceMercaderistaRadar({
                     <TableHead className="text-right">Ritmo</TableHead>
                     <TableHead className="text-right">Cobertura</TableHead>
                     <TableHead>Nivel</TableHead>
-                    <TableHead className="text-right">Promedio por PDV</TableHead>
                     <TableHead>PDV por nivel</TableHead>
                   </TableRow>
                 </TableHeader>
@@ -367,12 +393,6 @@ export function CruceMercaderistaRadar({
                             </Badge>
                           )}
                         </TableCell>
-                        <TableCell className="text-right whitespace-nowrap">
-                          {dias(s.promedioCoberturaDias)}
-                          {s.nivelPromedio && (
-                            <p className="text-xs text-slate-400">{NIVELES_ROTACION[s.nivelPromedio].label}</p>
-                          )}
-                        </TableCell>
                         <TableCell>
                           <DistribucionNiveles porNivel={s.porNivel} />
                         </TableCell>
@@ -411,7 +431,7 @@ export function CruceMercaderistaRadar({
                 </p>
               </div>
               <div className="rounded-lg border border-slate-200 p-3">
-                <p className="text-[11px] uppercase tracking-wide text-slate-400">Cobertura total</p>
+                <p className="text-[11px] uppercase tracking-wide text-slate-400">Cobertura ponderada</p>
                 <p className="text-xl font-bold text-slate-900">{dias(resumen.coberturaDias)}</p>
                 <p className="text-xs text-slate-400">
                   {resumen.nivel ? NIVELES_ROTACION[resumen.nivel].label : "—"} · Σ inventario ÷ Σ ritmo
@@ -449,14 +469,15 @@ export function CruceMercaderistaRadar({
               })}
             </div>
 
-            {/* ── Promedio de rotación de los PDV de la lista ──────────── */}
+            {/* ── Rotación ponderada de los PDV de la lista ───────────── */}
             <div className="rounded-lg border border-slate-200 bg-slate-50/60 p-3 mb-4">
               <p className="text-xs font-semibold uppercase tracking-widest text-muted-foreground">
-                Promedio de rotación por PDV
+                Rotación ponderada de la lista
               </p>
               <p className="text-[11px] text-slate-400 mb-2">
                 {promedioLista.pdvValidos} PDV de la lista actual
-                {filtroNivel !== "TODOS" ? ` (${NIVELES_ROTACION[filtroNivel].label})` : ""} · cada PDV pesa igual
+                {filtroNivel !== "TODOS" ? ` (${NIVELES_ROTACION[filtroNivel].label})` : ""} · cada PDV pesa según sus
+                kilos
                 {promedioLista.pdv > promedioLista.pdvValidos
                   ? ` · ${promedioLista.pdv - promedioLista.pdvValidos} fuera de la escala no entran`
                   : ""}
@@ -466,33 +487,38 @@ export function CruceMercaderistaRadar({
               ) : (
                 <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
                   <div>
-                    <p className="text-[11px] uppercase tracking-wide text-slate-400">Cobertura promedio</p>
-                    <p className="text-xl font-bold text-slate-900">{dias(promedioLista.promedioCoberturaDias)}</p>
+                    <p className="text-[11px] uppercase tracking-wide text-slate-400">Cobertura</p>
+                    <p className="text-xl font-bold text-slate-900">{dias(promedioLista.coberturaDias)}</p>
                     <p className="text-xs text-slate-500">
-                      {promedioLista.nivelPromedio ? NIVELES_ROTACION[promedioLista.nivelPromedio].label : "—"}
-                      {promedioLista.pdvSinMovimiento > 0
-                        ? ` · sin contar ${promedioLista.pdvSinMovimiento} PDV sin movimiento`
-                        : ""}
+                      {promedioLista.nivel ? NIVELES_ROTACION[promedioLista.nivel].label : "—"} · Σ inventario ÷ Σ ritmo
                     </p>
                   </div>
                   <div>
-                    <p className="text-[11px] uppercase tracking-wide text-slate-400">% vendido promedio</p>
-                    <p className="text-xl font-bold text-slate-900">{pct(promedioLista.promedioPctVendido)}</p>
-                    <p className="text-xs text-slate-500">de lo disponible en el período</p>
+                    <p className="text-[11px] uppercase tracking-wide text-slate-400">% vendido</p>
+                    <p className="text-xl font-bold text-slate-900">{pct(promedioLista.pctVendido)}</p>
+                    <p className="text-xs text-slate-500">
+                      {kg(promedioLista.vendidoKg)} de {kg(promedioLista.disponibleKg)} disponibles
+                    </p>
                   </div>
                   <div>
-                    <p className="text-[11px] uppercase tracking-wide text-slate-400">Ritmo promedio</p>
+                    <p className="text-[11px] uppercase tracking-wide text-slate-400">Ritmo por PDV</p>
                     <p className="text-xl font-bold text-slate-900">
-                      {(promedioLista.promedioRitmoKgDia ?? 0).toLocaleString("es-VE", { maximumFractionDigits: 2 })} kg
+                      {(promedioLista.ritmoPorPdvKgDia ?? 0).toLocaleString("es-VE", { maximumFractionDigits: 2 })} kg
                     </p>
-                    <p className="text-xs text-slate-500">por día hábil</p>
+                    <p className="text-xs text-slate-500">
+                      por día hábil · {promedioLista.ritmoKgDia.toLocaleString("es-VE", { maximumFractionDigits: 2 })} kg
+                      entre todos
+                    </p>
                   </div>
                   <div>
-                    <p className="text-[11px] uppercase tracking-wide text-slate-400">Período promedio</p>
+                    <p className="text-[11px] uppercase tracking-wide text-slate-400">Período</p>
                     <p className="text-xl font-bold text-slate-900">
-                      {(promedioLista.promedioDias ?? 0).toLocaleString("es-VE", { maximumFractionDigits: 1 })} días háb.
+                      {(promedioLista.periodoDias ?? 0).toLocaleString("es-VE", { maximumFractionDigits: 1 })} días háb.
                     </p>
-                    <p className="text-xs text-slate-500">medidos por PDV</p>
+                    <p className="text-xs text-slate-500">
+                      ponderado por kg disponibles
+                      {promedioLista.pdvSinMovimiento > 0 ? ` · ${promedioLista.pdvSinMovimiento} PDV sin movimiento` : ""}
+                    </p>
                   </div>
                 </div>
               )}
@@ -605,16 +631,15 @@ export function CruceMercaderistaRadar({
           Un pedido con la misma fecha de la visita se toma como posterior al conteo.{" "}
           <span className="font-medium text-slate-600">Días hábiles</span>: lunes a viernes entre el inicio y el día
           de la visita (sin contarlo). <span className="font-medium text-slate-600">Cobertura</span> = inventario ÷ ritmo
-          de venta por día hábil. <span className="font-medium text-slate-600">Cobertura total</span>: Σ inventario ÷ Σ
-          ritmo, donde pesan más los PDV con más volumen.{" "}
-          <span className="font-medium text-slate-600">Promedio por PDV</span>: promedio simple de la cobertura de cada
-          PDV (cada uno pesa igual; los agotados cuentan con 0 y los sin movimiento no se pueden promediar y se informan
-          aparte).{" "}
+          de venta por día hábil. <span className="font-medium text-slate-600">Ponderado</span>: se suma primero y se divide
+          después, así cada PDV pesa según sus kilos — cobertura = Σ inventario ÷ Σ ritmo; % vendido = Σ vendido ÷ Σ
+          disponible; período = Σ (días × disponible) ÷ Σ disponible. Los PDV sin movimiento entran con su inventario y
+          ritmo 0.{" "}
           <span className="font-medium text-slate-600">Sin movimiento</span>: el mercaderista contó exactamente lo
           disponible; si además repite el conteo de la visita anterior se marca como conteo repetido.{" "}
           <span className="font-medium text-slate-600">Fuera de la escala</span> (no suman en los totales): datos
-          inconsistentes, períodos cortos y PDV de modelo indirecto, cuya reposición llega por franquiciada o
-          distribuidora y el Radar puede no reflejarla completa; de estos últimos se muestra igual lo que da la fórmula. De {data.visitados} PDV visitados,{" "}
+          inconsistentes y períodos cortos. Los PDV de modelo indirecto se miden igual: su Radar es la venta de la
+          franquiciada o distribuidora a ese PDV. De {data.visitados} PDV visitados,{" "}
           {data.visitadosSinCompraPrevia} no tenían producto disponible en el período (sin compra por Radar antes de la
           visita) y no se pueden medir.
         </p>

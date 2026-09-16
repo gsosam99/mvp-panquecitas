@@ -32,8 +32,9 @@ export const MUESTRA_MINIMA_SEGMENTO = 5;
  *   el conteo o el Radar no cuadran.
  * - PERIODO_CORTO: menos de PERIODO_MINIMO_DIAS hábiles entre el inicio y la
  *   visita; muy poco tiempo para decir algo de su rotación.
- * - INDIRECTO: PDV de modelo indirecto; su reposición llega por franquiciada o
- *   distribuidora y el Radar puede no reflejarla completa (DIENN, 16-09-2026).
+ *
+ * Los PDV de modelo indirecto SÍ se miden igual que los directos: su Radar es
+ * la venta de la franquiciada o distribuidora a ese PDV (DIENN, 16-09-2026).
  */
 export type NivelRotacion =
   | "AGOTADO"
@@ -42,8 +43,7 @@ export type NivelRotacion =
   | "BAJA"
   | "MUY_BAJA"
   | "INCONSISTENTE"
-  | "PERIODO_CORTO"
-  | "INDIRECTO";
+  | "PERIODO_CORTO";
 
 export const ORDEN_NIVELES: NivelRotacion[] = [
   "AGOTADO",
@@ -53,14 +53,12 @@ export const ORDEN_NIVELES: NivelRotacion[] = [
   "MUY_BAJA",
   "INCONSISTENTE",
   "PERIODO_CORTO",
-  "INDIRECTO",
 ];
 
 /** Niveles que no entran en la escala ni en los totales. */
 export const NIVELES_FUERA_DE_ESCALA: ReadonlySet<NivelRotacion> = new Set<NivelRotacion>([
   "INCONSISTENTE",
   "PERIODO_CORTO",
-  "INDIRECTO",
 ]);
 
 /** Tolerancia para no marcar como inconsistente (o con venta) un redondeo de gramos. */
@@ -99,8 +97,6 @@ export function rangoNivel(nivel: NivelRotacion): string {
       return "se contó más producto del disponible";
     case "PERIODO_CORTO":
       return `menos de ${PERIODO_MINIMO_DIAS} días hábiles de período, no se clasifica`;
-    case "INDIRECTO":
-      return "modelo indirecto, fuera de la escala";
   }
 }
 
@@ -121,48 +117,38 @@ export interface ResumenRotacion {
   pdv: number;
   /** PDV que entran a los totales (sin los fuera de la escala). */
   pdvValidos: number;
+  /** PDV "sin movimiento" (ritmo 0) dentro de la escala: suman inventario y no ritmo. */
+  pdvSinMovimiento: number;
   inventarioKg: number;
   disponibleKg: number;
   vendidoKg: number;
-  /** vendido ÷ disponible × 100; null sin disponible. */
+  /** % vendido ponderado: Σ vendido ÷ Σ disponible × 100; null sin disponible. */
   pctVendido: number | null;
   /** Σ ritmo de los PDV, kg/día hábil. */
   ritmoKgDia: number;
-  /** Σ inventario ÷ Σ ritmo, días hábiles; null si no hubo venta. */
+  /** Ritmo por PDV: Σ ritmo ÷ PDV, kg/día hábil. */
+  ritmoPorPdvKgDia: number | null;
+  /** Cobertura ponderada: Σ inventario ÷ Σ ritmo, días hábiles; null si no hubo venta. */
   coberturaDias: number | null;
-  /** Nivel del grupo (total ponderado) con la misma escala que el PDV. */
+  /** Período ponderado por disponible: Σ (días × disponible) ÷ Σ disponible, días hábiles. */
+  periodoDias: number | null;
+  /** Nivel del grupo (cobertura ponderada) con la misma escala que el PDV. */
   nivel: NivelRotacion | null;
-
-  // ── Promedio simple por PDV (cada PDV pesa igual) ──
-  /** Promedio de los días hábiles de cobertura de los PDV con venta (sin los "sin movimiento"). */
-  promedioCoberturaDias: number | null;
-  /** Nivel de la escala que corresponde a ese promedio. */
-  nivelPromedio: NivelRotacion | null;
-  /** PDV "sin movimiento" (cobertura infinita) que no entran al promedio de cobertura. */
-  pdvSinMovimiento: number;
-  /** Promedio del % vendido de los PDV (los "sin movimiento" cuentan con 0%). */
-  promedioPctVendido: number | null;
-  /** Promedio del ritmo de los PDV, kg/día hábil. */
-  promedioRitmoKgDia: number | null;
-  /** Promedio de días hábiles del período medido. */
-  promedioDias: number | null;
-
   porNivel: Record<NivelRotacion, number>;
 }
 
-const promedio = (valores: number[]) =>
-  valores.length > 0 ? valores.reduce((s, v) => s + v, 0) / valores.length : null;
-
 /**
- * Agrega mediciones por PDV de dos formas:
+ * Agrega mediciones por PDV PONDERANDO por volumen (DIENN, 16-09-2026): se
+ * suma primero y se divide después, no se promedian los ratios de cada PDV.
+ * Un PDV chico con 190 días de cobertura no arrastra al grupo; pesa lo que
+ * pesan sus kilos.
  *
- * - TOTAL PONDERADO: se suma primero y se divide después (Σ inventario ÷ Σ
- *   ritmo). Los PDV con más volumen pesan más.
- * - PROMEDIO SIMPLE POR PDV: cada PDV pesa igual. La cobertura de un PDV "sin
- *   movimiento" es infinita y no se puede promediar: queda fuera de ese
- *   promedio y se informa cuántos son.
+ *   cobertura = Σ inventario ÷ Σ ritmo
+ *   % vendido = Σ vendido ÷ Σ disponible
+ *   período   = Σ (días × disponible) ÷ Σ disponible
  *
- * En los dos casos, los fuera de la escala se cuentan pero no suman.
+ * Los "sin movimiento" entran con su inventario y ritmo 0. Los fuera de la
+ * escala se cuentan pero no suman.
  */
 export function resumirRotacion(filas: readonly MedicionRotacion[]): ResumenRotacion {
   const porNivel = Object.fromEntries(ORDEN_NIVELES.map((n) => [n, 0])) as Record<NivelRotacion, number>;
@@ -170,51 +156,36 @@ export function resumirRotacion(filas: readonly MedicionRotacion[]): ResumenRota
   let disponibleKg = 0;
   let vendidoKg = 0;
   let ritmoKgDia = 0;
-  const coberturas: number[] = [];
-  const pcts: number[] = [];
-  const ritmos: number[] = [];
-  const diasPeriodo: number[] = [];
+  let diasPorDisponible = 0;
+  let pdvValidos = 0;
   let pdvSinMovimiento = 0;
 
   for (const f of filas) {
     porNivel[f.nivel] += 1;
     if (NIVELES_FUERA_DE_ESCALA.has(f.nivel)) continue;
+    pdvValidos += 1;
+    if (f.nivel !== "AGOTADO" && f.coberturaDias == null) pdvSinMovimiento += 1;
     inventarioKg += f.inventarioKg;
     disponibleKg += f.disponibleKg;
     vendidoKg += f.vendidoKg;
     ritmoKgDia += f.ritmoKgDia;
-
-    // Agotado: cobertura 0 (no le queda nada).
-    const cobertura = f.nivel === "AGOTADO" ? 0 : f.coberturaDias;
-    if (cobertura == null) pdvSinMovimiento += 1;
-    else coberturas.push(cobertura);
-    if (f.pctVendido != null) pcts.push(f.pctVendido);
-    ritmos.push(f.ritmoKgDia);
-    diasPeriodo.push(f.dias);
+    diasPorDisponible += f.dias * f.disponibleKg;
   }
 
-  const pdvValidos = ritmos.length;
-  const r1 = (v: number | null) => (v == null ? null : Math.round(v * 10) / 10);
   const coberturaDias = ritmoKgDia > 0 ? Math.round((inventarioKg / ritmoKgDia) * 10) / 10 : null;
-  const promedioCoberturaDias = r1(promedio(coberturas));
-  const promedioRitmo = promedio(ritmos);
-
   return {
     pdv: filas.length,
     pdvValidos,
+    pdvSinMovimiento,
     inventarioKg: Math.round(inventarioKg * 10) / 10,
     disponibleKg: Math.round(disponibleKg * 10) / 10,
     vendidoKg: Math.round(vendidoKg * 10) / 10,
     pctVendido: disponibleKg > 0 ? Math.round((vendidoKg / disponibleKg) * 1000) / 10 : null,
     ritmoKgDia: Math.round(ritmoKgDia * 100) / 100,
+    ritmoPorPdvKgDia: pdvValidos > 0 ? Math.round((ritmoKgDia / pdvValidos) * 100) / 100 : null,
     coberturaDias,
+    periodoDias: disponibleKg > 0 ? Math.round((diasPorDisponible / disponibleKg) * 10) / 10 : null,
     nivel: pdvValidos > 0 ? nivelRotacion(inventarioKg, vendidoKg, coberturaDias) : null,
-    promedioCoberturaDias,
-    nivelPromedio: promedioCoberturaDias == null ? null : nivelPorCobertura(promedioCoberturaDias),
-    pdvSinMovimiento,
-    promedioPctVendido: r1(promedio(pcts)),
-    promedioRitmoKgDia: promedioRitmo == null ? null : Math.round(promedioRitmo * 100) / 100,
-    promedioDias: r1(promedio(diasPeriodo)),
     porNivel,
   };
 }
