@@ -15,6 +15,8 @@ import {
   COBERTURA_BAJA_DIAS,
   COBERTURA_MEDIA_DIAS,
   MUESTRA_MINIMA_SEGMENTO,
+  NIVELES_FUERA_DE_ESCALA,
+  PERIODO_MINIMO_DIAS,
   ORDEN_NIVELES,
   rangoNivel,
   resumirRotacion,
@@ -34,6 +36,8 @@ const NIVELES_ROTACION: Record<NivelRotacion, { label: string; color: string; ba
   BAJA: { label: "Rotación baja", color: "#f59e0b", badge: "border-amber-300 text-amber-700 bg-amber-50" },
   MUY_BAJA: { label: "Rotación muy baja", color: "#dc2626", badge: "border-red-300 text-red-700 bg-red-50" },
   INCONSISTENTE: { label: "Dato inconsistente", color: "#64748b", badge: "border-slate-300 text-slate-600 bg-slate-50" },
+  PERIODO_CORTO: { label: "Período corto", color: "#94a3b8", badge: "border-slate-200 text-slate-500 bg-white" },
+  INDIRECTO: { label: "Modelo indirecto", color: "#6366f1", badge: "border-indigo-300 text-indigo-700 bg-indigo-50" },
 };
 
 type Orden = "rotacion" | "inventario";
@@ -47,12 +51,14 @@ const kg = (v: number) => `${v.toLocaleString("es-VE", { maximumFractionDigits: 
 const pct = (v: number | null) =>
   v == null ? "—" : `${v.toLocaleString("es-VE", { maximumFractionDigits: 1 })}%`;
 const dias = (v: number | null) =>
-  v == null ? "sin venta" : `${v.toLocaleString("es-VE", { maximumFractionDigits: 1 })} días`;
+  v == null ? "sin movimiento" : `${v.toLocaleString("es-VE", { maximumFractionDigits: 1 })} días`;
 const fecha = (iso: string) => `${iso.slice(8, 10)}-${iso.slice(5, 7)}`;
 const segmentoDe = (r: CruceInventarioRadarRow) => r.segmento ?? SEGMENTO_SIN_DATO;
 
-/** Mayor valor = menor rotación. Agotados e inconsistentes van al final. */
+/** Mayor valor = menor rotación. Agotados y los fuera de la escala van al final. */
 function claveRotacion(r: CruceInventarioRadarRow): number {
+  if (r.nivel === "INDIRECTO") return -4;
+  if (r.nivel === "PERIODO_CORTO") return -3;
   if (r.nivel === "INCONSISTENTE") return -2;
   if (r.nivel === "AGOTADO") return -1;
   return r.coberturaDias ?? Number.POSITIVE_INFINITY;
@@ -189,7 +195,7 @@ export function CruceMercaderistaRadar({
   const puntos = useMemo<PuntoGrafico[]>(
     () =>
       filas
-        .filter((r) => r.nivel !== "INCONSISTENTE")
+        .filter((r) => !NIVELES_FUERA_DE_ESCALA.has(r.nivel))
         .slice(0, TOP_GRAFICO)
         .map((r) => ({
           nombre: r.name.length > 30 ? `${r.name.slice(0, 29)}…` : r.name,
@@ -229,8 +235,10 @@ export function CruceMercaderistaRadar({
     { header: "Vendido (kg)", value: (r) => r.vendidoKg, width: 14 },
     { header: "% vendido", value: (r) => r.pctVendido, width: 12 },
     { header: "Ritmo (kg/día)", value: (r) => r.ritmoKgDia, width: 14 },
-    { header: "Cobertura (días)", value: (r) => r.coberturaDias ?? "sin venta", width: 14 },
+    { header: "Cobertura (días)", value: (r) => r.coberturaDias ?? "sin movimiento", width: 14 },
     { header: "Nivel de rotación", value: (r) => NIVELES_ROTACION[r.nivel].label, width: 18 },
+    { header: "Nivel según la fórmula", value: (r) => NIVELES_ROTACION[r.nivelFormula].label, width: 18 },
+    { header: "Conteo igual a la visita anterior", value: (r) => (r.conteoRepetido ? "sí" : "no"), width: 16 },
     { header: "Justificación", value: (r) => r.justificacion, width: 90 },
     { header: "Pedido desde la visita (kg)", value: (r) => r.pedidoPosteriorKg, width: 20 },
     { header: "Radar total (kg, referencia)", value: (r) => r.radarTotalKg, width: 20 },
@@ -441,7 +449,11 @@ export function CruceMercaderistaRadar({
                 <Grafico data={puntos} />
               </>
             ) : (
-              <p className="text-sm text-slate-400 py-6 text-center">Ningún PDV en ese nivel.</p>
+              <p className="text-sm text-slate-400 py-6 text-center">
+                {filas.length === 0
+                  ? "Ningún PDV en ese nivel."
+                  : "Estos PDV quedan fuera de la escala: sus números están en la tabla."}
+              </p>
             )}
 
             {filas.length > 0 && (
@@ -500,12 +512,19 @@ export function CruceMercaderistaRadar({
                           </p>
                         </TableCell>
                         <TableCell className="text-right font-semibold whitespace-nowrap">
-                          {r.nivel === "AGOTADO" || r.nivel === "INCONSISTENTE" ? "—" : dias(r.coberturaDias)}
+                          {r.nivel === "AGOTADO" || r.nivel === "PERIODO_CORTO" || r.nivelFormula === "INCONSISTENTE"
+                            ? "—"
+                            : dias(r.coberturaDias)}
                         </TableCell>
                         <TableCell>
                           <Badge variant="outline" className={`text-[11px] font-normal ${NIVELES_ROTACION[r.nivel].badge}`}>
                             {NIVELES_ROTACION[r.nivel].label}
                           </Badge>
+                          {r.conteoRepetido && (
+                            <Badge variant="outline" className="ml-1 text-[11px] font-normal border-amber-300 text-amber-700 bg-white">
+                              conteo repetido
+                            </Badge>
+                          )}
                           <p className="text-xs text-slate-500 mt-1 whitespace-normal">{r.justificacion}</p>
                         </TableCell>
                       </TableRow>
@@ -520,11 +539,18 @@ export function CruceMercaderistaRadar({
         <p className="text-xs text-slate-400 mt-3">
           <span className="font-medium text-slate-600">Vendido</span> = inventario al inicio + Radar de Panquecitas del
           período − inventario contado en la última visita (anaquel 400 g y 800 g + depósito).{" "}
-          <span className="font-medium text-slate-600">Inicio</span>: la visita anterior de otro día; con una sola
-          visita, el primer pedido por Radar con inventario 0 (antes de su primer pedido el PDV no tenía Panquecitas).
+          <span className="font-medium text-slate-600">Inicio</span>: la visita anterior más reciente con al menos{" "}
+          {PERIODO_MINIMO_DIAS} días de distancia; si no hay, el primer pedido por Radar con inventario 0 (antes de su
+          primer pedido el PDV no tenía Panquecitas). Con menos de {PERIODO_MINIMO_DIAS} días el período es corto y no se
+          clasifica.
           Un pedido con la misma fecha de la visita se toma como posterior al conteo.{" "}
           <span className="font-medium text-slate-600">Cobertura</span> = inventario ÷ ritmo diario de venta; por
-          segmento, Σ inventario ÷ Σ ritmo (los datos inconsistentes no suman). De {data.visitados} PDV visitados,{" "}
+          segmento, Σ inventario ÷ Σ ritmo.{" "}
+          <span className="font-medium text-slate-600">Sin movimiento</span>: el mercaderista contó exactamente lo
+          disponible; si además repite el conteo de la visita anterior se marca como conteo repetido.{" "}
+          <span className="font-medium text-slate-600">Fuera de la escala</span> (no suman en los totales): datos
+          inconsistentes, períodos cortos y PDV de modelo indirecto, cuya reposición llega por franquiciada o
+          distribuidora y el Radar puede no reflejarla completa; de estos últimos se muestra igual lo que da la fórmula. De {data.visitados} PDV visitados,{" "}
           {data.visitadosSinCompraPrevia} no tenían producto disponible en el período (sin compra por Radar antes de la
           visita) y no se pueden medir.
         </p>

@@ -15,21 +15,54 @@ export const COBERTURA_ALTA_DIAS = 7;
 export const COBERTURA_MEDIA_DIAS = 14;
 /** Desde MEDIA hasta estos días inclusive: rotación baja. Por encima: muy baja. */
 export const COBERTURA_BAJA_DIAS = 28;
+/** Período mínimo (días) entre el inicio y la visita para clasificar la rotación. */
+export const PERIODO_MINIMO_DIAS = 7;
 /** Segmentos con menos PDV medidos que esto se marcan como muestra chica. */
 export const MUESTRA_MINIMA_SEGMENTO = 5;
 
 /**
  * - AGOTADO: el mercaderista contó 0 — vendió todo lo disponible del período.
- * - ALTA / MEDIA / BAJA / MUY_BAJA: según los días de cobertura.
+ * - ALTA / MEDIA / BAJA / MUY_BAJA: según los días de cobertura. MUY_BAJA
+ *   incluye "sin movimiento": contó exactamente lo disponible.
+ *
+ * Fuera de la escala (se muestran, pero no suman en los totales):
  * - INCONSISTENTE: contó más producto del que tenía disponible (vendido < 0);
- *   el conteo o el Radar no cuadran y no se clasifica.
+ *   el conteo o el Radar no cuadran.
+ * - PERIODO_CORTO: menos de PERIODO_MINIMO_DIAS entre el inicio y la visita;
+ *   muy poco tiempo para decir algo de su rotación.
+ * - INDIRECTO: PDV de modelo indirecto; su reposición llega por franquiciada o
+ *   distribuidora y el Radar puede no reflejarla completa (DIENN, 16-09-2026).
  */
-export type NivelRotacion = "AGOTADO" | "ALTA" | "MEDIA" | "BAJA" | "MUY_BAJA" | "INCONSISTENTE";
+export type NivelRotacion =
+  | "AGOTADO"
+  | "ALTA"
+  | "MEDIA"
+  | "BAJA"
+  | "MUY_BAJA"
+  | "INCONSISTENTE"
+  | "PERIODO_CORTO"
+  | "INDIRECTO";
 
-export const ORDEN_NIVELES: NivelRotacion[] = ["AGOTADO", "ALTA", "MEDIA", "BAJA", "MUY_BAJA", "INCONSISTENTE"];
+export const ORDEN_NIVELES: NivelRotacion[] = [
+  "AGOTADO",
+  "ALTA",
+  "MEDIA",
+  "BAJA",
+  "MUY_BAJA",
+  "INCONSISTENTE",
+  "PERIODO_CORTO",
+  "INDIRECTO",
+];
 
-/** Tolerancia para no marcar como inconsistente un redondeo de gramos. */
-const EPSILON_KG = 0.05;
+/** Niveles que no entran en la escala ni en los totales. */
+export const NIVELES_FUERA_DE_ESCALA: ReadonlySet<NivelRotacion> = new Set<NivelRotacion>([
+  "INCONSISTENTE",
+  "PERIODO_CORTO",
+  "INDIRECTO",
+]);
+
+/** Tolerancia para no marcar como inconsistente (o con venta) un redondeo de gramos. */
+export const EPSILON_KG = 0.05;
 
 export function nivelRotacion(inventarioKg: number, vendidoKg: number, coberturaDias: number | null): NivelRotacion {
   if (vendidoKg < -EPSILON_KG) return "INCONSISTENTE";
@@ -54,9 +87,13 @@ export function rangoNivel(nivel: NivelRotacion): string {
     case "BAJA":
       return `de ${COBERTURA_MEDIA_DIAS} a ${COBERTURA_BAJA_DIAS} días de cobertura`;
     case "MUY_BAJA":
-      return `más de ${COBERTURA_BAJA_DIAS} días de cobertura, o sin venta en el período`;
+      return `más de ${COBERTURA_BAJA_DIAS} días de cobertura, o sin movimiento en el período`;
     case "INCONSISTENTE":
       return "se contó más producto del disponible";
+    case "PERIODO_CORTO":
+      return `menos de ${PERIODO_MINIMO_DIAS} días de período, no se clasifica`;
+    case "INDIRECTO":
+      return "modelo indirecto, fuera de la escala";
   }
 }
 
@@ -70,9 +107,9 @@ export interface MedicionRotacion {
 }
 
 export interface ResumenRotacion {
-  /** PDV medidos (incluye inconsistentes). */
+  /** PDV del grupo (incluye los que quedan fuera de la escala). */
   pdv: number;
-  /** PDV que entran a los totales (sin inconsistentes). */
+  /** PDV que entran a los totales (sin los fuera de la escala). */
   pdvValidos: number;
   inventarioKg: number;
   disponibleKg: number;
@@ -91,7 +128,7 @@ export interface ResumenRotacion {
 /**
  * Agrega mediciones por PDV. Se suma primero y se divide después (Σ inventario
  * ÷ Σ ritmo), no se promedian las coberturas: un PDV chico con 200 días no
- * debe arrastrar al grupo. Los INCONSISTENTES se cuentan pero no suman.
+ * debe arrastrar al grupo. Los fuera de la escala se cuentan pero no suman.
  */
 export function resumirRotacion(filas: readonly MedicionRotacion[]): ResumenRotacion {
   const porNivel = Object.fromEntries(ORDEN_NIVELES.map((n) => [n, 0])) as Record<NivelRotacion, number>;
@@ -103,7 +140,7 @@ export function resumirRotacion(filas: readonly MedicionRotacion[]): ResumenRota
 
   for (const f of filas) {
     porNivel[f.nivel] += 1;
-    if (f.nivel === "INCONSISTENTE") continue;
+    if (NIVELES_FUERA_DE_ESCALA.has(f.nivel)) continue;
     pdvValidos += 1;
     inventarioKg += f.inventarioKg;
     disponibleKg += f.disponibleKg;

@@ -4,7 +4,13 @@ import { PRODUCT_IDS } from "@/data/catalog";
 import { getUniverseLocations, vigentesAl, sectorGroup, type Sector } from "@/lib/universe";
 import { todayISO } from "@/lib/date-buckets";
 import { presentacionFromVariant } from "@/lib/sellout-utils";
-import { nivelRotacion, rangoNivel, type NivelRotacion } from "@/lib/rotacion-utils";
+import {
+  EPSILON_KG,
+  PERIODO_MINIMO_DIAS,
+  nivelRotacion,
+  rangoNivel,
+  type NivelRotacion,
+} from "@/lib/rotacion-utils";
 
 // ── Cruce: rotación de Panquecitas en el PDV (mercaderista × Radar) ──
 // (pedido de DIENN, 14-09-2026; rehecho como rotación entre visitas el
@@ -17,10 +23,22 @@ import { nivelRotacion, rangoNivel, type NivelRotacion } from "@/lib/rotacion-ut
 //
 // El inicio depende de cuántas visitas tenga el PDV:
 //
-//   - DOS O MÁS visitas: la visita anterior (con su inventario contado).
-//   - UNA visita: el PRIMER pedido de Panquecitas por Radar, con inventario 0.
-//     Panquecitas es un producto nuevo del piloto: antes de su primer pedido el
-//     PDV no tenía producto, así que no es una estimación.
+//   - DOS O MÁS visitas: la visita anterior más reciente que tenga al menos
+//     PERIODO_MINIMO_DIAS (7) antes de la última, con su inventario contado.
+//   - UNA visita (o ninguna anterior a 7 días o más): el PRIMER pedido de
+//     Panquecitas por Radar, con inventario 0. Panquecitas es un producto
+//     nuevo del piloto: antes de su primer pedido el PDV no tenía producto,
+//     así que no es una estimación.
+//
+// Correcciones del 16-09-2026 (DIENN, tras ver 91 PDV "sin venta"):
+//   - Un período de menos de 7 días no se clasifica (PERIODO_CORTO): no
+//     vender nada en 2 días no dice nada de la rotación.
+//   - Vendido 0 se llama "sin movimiento" y, si el conteo es idéntico al de
+//     la visita anterior, se marca (conteoRepetido): puede ser un conteo
+//     copiado.
+//   - Los PDV de modelo indirecto quedan fuera de la escala (INDIRECTO): su
+//     reposición llega por franquiciada o distribuidora y el Radar puede no
+//     reflejarla completa. Se muestra igual lo que daría la fórmula.
 //
 // Con eso:
 //   % vendido  = vendido ÷ disponible (inventario inicial + Radar del período)
@@ -93,6 +111,12 @@ export interface CruceInventarioRadarRow {
   /** inventario ÷ ritmo; null si no vendió nada. */
   coberturaDias: number | null;
   nivel: NivelRotacion;
+  /** Lo que da la fórmula aunque el PDV quede fuera de la escala (indirecto / período corto). */
+  nivelFormula: NivelRotacion;
+  /** Modelo indirecto según el esquema de atención. */
+  esIndirecto: boolean;
+  /** Entre visitas: mismas unidades de anaquel y mismo depósito que la visita anterior. */
+  conteoRepetido: boolean;
   /** Por qué el PDV cae en ese nivel, con sus números. */
   justificacion: string;
 
@@ -144,6 +168,8 @@ const NOMBRE_NIVEL: Record<NivelRotacion, string> = {
   BAJA: "rotación baja",
   MUY_BAJA: "rotación muy baja",
   INCONSISTENTE: "dato inconsistente",
+  PERIODO_CORTO: "período corto",
+  INDIRECTO: "modelo indirecto",
 };
 
 function justificar(f: Omit<CruceInventarioRadarRow, "justificacion">): string {
@@ -156,32 +182,53 @@ function justificar(f: Omit<CruceInventarioRadarRow, "justificacion">): string {
           f.dias
         } días) compró ${num(f.disponibleKg)} kg por Radar`;
 
+  // Lectura según la fórmula (nivelFormula); el nivel final puede quedar fuera
+  // de la escala por período corto o modelo indirecto.
+  const n = f.nivelFormula;
   let lectura: string;
-  switch (f.nivel) {
-    case "INCONSISTENTE":
-      lectura = `, pero el mercaderista contó ${num(f.inventarioKg)} kg, ${num(-f.vendidoKg)} kg más de lo disponible. El conteo y el Radar no cuadran, así que no se clasifica`;
-      break;
-    case "AGOTADO":
-      lectura = ` y el mercaderista contó 0 kg: vendió todo lo disponible (${num(f.vendidoKg)} kg, ${num(
-        f.ritmoKgDia,
-        2
-      )} kg/día) → ${NOMBRE_NIVEL.AGOTADO}`;
-      break;
-    default:
-      lectura =
-        f.coberturaDias == null
-          ? ` y el mercaderista contó ${num(f.inventarioKg)} kg: no vendió nada en el período → ${NOMBRE_NIVEL[f.nivel]} (${rangoNivel(f.nivel)})`
-          : ` y el mercaderista contó ${num(f.inventarioKg)} kg: vendió ${num(f.vendidoKg)} kg (${num(
-              f.pctVendido ?? 0
-            )}%), ${num(f.ritmoKgDia, 2)} kg/día. A ese ritmo lo que tiene le dura ${num(f.coberturaDias)} días → ${
-              NOMBRE_NIVEL[f.nivel]
-            } (${rangoNivel(f.nivel)})`;
+  if (n === "INCONSISTENTE") {
+    lectura = `, pero el mercaderista contó ${num(f.inventarioKg)} kg, ${num(-f.vendidoKg)} kg más de lo disponible. El conteo y el Radar no cuadran, así que no se clasifica`;
+  } else if (n === "AGOTADO") {
+    lectura = ` y el mercaderista contó 0 kg: vendió todo lo disponible (${num(f.vendidoKg)} kg, ${num(
+      f.ritmoKgDia,
+      2
+    )} kg/día) → ${NOMBRE_NIVEL.AGOTADO}`;
+  } else if (f.coberturaDias == null) {
+    lectura = ` y el mercaderista contó ${num(f.inventarioKg)} kg, exactamente lo que tenía disponible: no hubo movimiento de inventario en el período → ${NOMBRE_NIVEL[n]} (${rangoNivel(n)})`;
+  } else {
+    lectura = ` y el mercaderista contó ${num(f.inventarioKg)} kg: vendió ${num(f.vendidoKg)} kg (${num(
+      f.pctVendido ?? 0
+    )}%), ${num(f.ritmoKgDia, 2)} kg/día. A ese ritmo lo que tiene le dura ${num(f.coberturaDias)} días → ${
+      NOMBRE_NIVEL[n]
+    } (${rangoNivel(n)})`;
   }
 
-  const deposito = f.depositoIncluido
-    ? ""
-    : " Sin acceso al depósito en alguna visita: el inventario puede estar incompleto y la rotación verse más alta de lo que es.";
-  return `${periodo}${lectura}.${deposito}`;
+  let texto: string;
+  if (f.nivel === "INDIRECTO") {
+    texto = `${periodo}${lectura}. Es un PDV de modelo indirecto: su reposición llega por franquiciada o distribuidora y el Radar puede no reflejarla completa, así que queda fuera de la escala y ese resultado es solo referencia.`;
+  } else if (f.nivel === "PERIODO_CORTO") {
+    texto = `${periodo} y el mercaderista contó ${num(f.inventarioKg)} kg. Son solo ${f.dias} días (mínimo ${PERIODO_MINIMO_DIAS}): el período es muy corto para clasificar su rotación.`;
+  } else {
+    texto = `${periodo}${lectura}.`;
+  }
+
+  if (f.conteoRepetido) {
+    texto += ` El conteo es idéntico al de la visita anterior (${f.unidades400} u. 400 g, ${f.unidades800} u. 800 g${
+      f.depositoKg > 0 ? `, ${num(f.depositoKg)} kg en depósito` : ""
+    }): puede ser falta de movimiento o un conteo repetido.`;
+  }
+  if (!f.depositoIncluido) {
+    texto += " Sin acceso al depósito en alguna visita: el inventario puede estar incompleto y la rotación verse más alta de lo que es.";
+  }
+  return texto;
+}
+
+function esModeloIndirecto(esquema: string | null): boolean {
+  return (esquema ?? "")
+    .toLowerCase()
+    .normalize("NFD")
+    .replace(/\p{Diacritic}/gu, "")
+    .includes("indirecto");
 }
 
 export async function getCruceInventarioRadar(): Promise<CruceInventarioRadarResult> {
@@ -225,14 +272,15 @@ export async function getCruceInventarioRadar(): Promise<CruceInventarioRadarRes
   }
   if (visitasPorLoc.size === 0) return vacio;
 
-  // Última visita y la anterior de OTRO día (dos visitas el mismo día no
-  // forman un período).
+  // Última visita y la anterior más reciente con al menos PERIODO_MINIMO_DIAS
+  // de distancia: dos visitas muy seguidas no forman un período medible.
   const pares = new Map<string, { ultima: VisitaCruce; anterior: VisitaCruce | null }>();
   for (const [loc, lista] of visitasPorLoc) {
     lista.sort((a, b) => (a.created_at < b.created_at ? 1 : a.created_at > b.created_at ? -1 : 0));
     const ultima = lista[0];
     const diaUltima = ultima.created_at.slice(0, 10);
-    const anterior = lista.find((v) => v.created_at.slice(0, 10) < diaUltima) ?? null;
+    const anterior =
+      lista.find((v) => diasEntre(v.created_at.slice(0, 10), diaUltima) >= PERIODO_MINIMO_DIAS) ?? null;
     pares.set(loc, { ultima, anterior });
   }
 
@@ -294,17 +342,25 @@ export async function getCruceInventarioRadar(): Promise<CruceInventarioRadarRes
     let inventarioInicialKg: number;
     let radarPeriodoKg: number;
     let depositoIncluido = ultima.deposit_access;
+    let conteoRepetido = false;
 
     const anterior = par.anterior;
     if (anterior) {
       const diaAnterior = anterior.created_at.slice(0, 10);
       tipoMedicion = "ENTRE_VISITAS";
       fechaInicio = diaAnterior;
-      inventarioInicialKg = inventarioDe(anterior).totalKg;
+      const inicial = inventarioDe(anterior);
+      inventarioInicialKg = inicial.totalKg;
       radarPeriodoKg = radarLoc
         .filter((r) => r.date_of_sale >= diaAnterior && r.date_of_sale < diaVisita)
         .reduce((s, r) => s + r.quantity_kg, 0);
       depositoIncluido = depositoIncluido && anterior.deposit_access;
+      conteoRepetido =
+        (anterior.anaquel_400_units ?? 0) === (ultima.anaquel_400_units ?? 0) &&
+        (anterior.anaquel_800_units ?? 0) === (ultima.anaquel_800_units ?? 0) &&
+        anterior.deposit_access === ultima.deposit_access &&
+        Math.abs(inicial.depositoKg - final.depositoKg) <= EPSILON_KG &&
+        final.totalKg > 0;
     } else {
       const previos = radarLoc.filter((r) => r.date_of_sale < diaVisita);
       const primerPedido = previos
@@ -325,11 +381,19 @@ export async function getCruceInventarioRadar(): Promise<CruceInventarioRadarRes
 
     const dias = Math.max(1, diasEntre(fechaInicio, diaVisita));
     const vendidoKg = disponibleKg - final.totalKg;
-    const ritmoKgDia = vendidoKg > 0 ? vendidoKg / dias : 0;
+    // Un vendido dentro de la tolerancia es "sin movimiento", no un ritmo
+    // ínfimo con miles de días de cobertura.
+    const ritmoKgDia = vendidoKg > EPSILON_KG ? vendidoKg / dias : 0;
     // Redondeada ANTES de clasificar, para que el nivel y la cifra que se
     // muestra en la justificación nunca se contradigan en un borde (6,96 → 7).
     const coberturaDias = ritmoKgDia > 0 ? r1(final.totalKg / ritmoKgDia) : null;
-    const nivel = nivelRotacion(final.totalKg, vendidoKg, coberturaDias);
+    const nivelFormula = nivelRotacion(final.totalKg, vendidoKg, coberturaDias);
+    const esIndirecto = esModeloIndirecto(l.esquema_atencion);
+    const nivel: NivelRotacion = esIndirecto
+      ? "INDIRECTO"
+      : dias < PERIODO_MINIMO_DIAS
+        ? "PERIODO_CORTO"
+        : nivelFormula;
 
     const fila: Omit<CruceInventarioRadarRow, "justificacion"> = {
       locationId: l.id,
@@ -359,6 +423,9 @@ export async function getCruceInventarioRadar(): Promise<CruceInventarioRadarRes
       ritmoKgDia: Math.round(ritmoKgDia * 100) / 100,
       coberturaDias,
       nivel,
+      nivelFormula,
+      esIndirecto,
+      conteoRepetido,
       pedidoPosteriorKg: r1(pedidoPosteriorKg),
       radarTotalKg: r1(radarTotalKg),
       proporcionAcumuladaPct: radarTotalKg > 0 ? r1((final.totalKg / radarTotalKg) * 100) : 0,
