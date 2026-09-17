@@ -35,10 +35,13 @@ const fechaCorta = (iso: string) => {
 
 export function TandasClientesTabla({ tandas }: { tandas: CombinacionesTanda[] }) {
   const [activa, setActiva] = useState(0);
+  // Corte por segmento: foco = sin licorerías, farmacias de barrio, mascotas y
+  // demás segmentos que no venden alimentos. Se aplica a TODA la tabla.
+  const [soloFoco, setSoloFoco] = useState(false);
   if (tandas.length === 0) return null;
 
   const tanda = tandas[Math.min(activa, tandas.length - 1)];
-  const { resultado } = tanda;
+  const resultado = soloFoco ? tanda.resultadoFoco : tanda.resultado;
   // Una tanda solo abrió ciertos grupos vendedores: las combinaciones sin un
   // PDV suyo se ocultan en vez de mostrar cuatro filas en cero, que es lo que
   // hacía parecer que la tanda no existía. En la cartera completa se muestran
@@ -58,6 +61,11 @@ export function TandasClientesTabla({ tandas }: { tandas: CombinacionesTanda[] }
     {
       header: "Recompra sobre activos (%)",
       value: (r) => (r.activos > 0 ? Math.round((r.conRecompra / r.activos) * 1000) / 10 : null),
+      width: 26,
+    },
+    {
+      header: "Recompra sobre cartera (%)",
+      value: (r) => (r.clientes > 0 ? Math.round((r.conRecompra / r.clientes) * 1000) / 10 : null),
       width: 26,
     },
     { header: "Ratio vs Harina PAN (%)", value: (r) => r.ratioHarinaPan, width: 24 },
@@ -88,7 +96,7 @@ export function TandasClientesTabla({ tandas }: { tandas: CombinacionesTanda[] }
           </p>
         </div>
         <ExportExcelButton
-          filename={`Tandas — ${tanda.etiqueta}`}
+          filename={`Tandas — ${tanda.etiqueta}${soloFoco ? " (foco)" : ""}`}
           rows={filas}
           columns={columnas}
           className="shrink-0"
@@ -109,10 +117,26 @@ export function TandasClientesTabla({ tandas }: { tandas: CombinacionesTanda[] }
             >
               {t.etiqueta}
               <span className={`ml-2 font-normal ${i === activa ? "text-slate-300" : "text-slate-400"}`}>
-                {num(t.resultado.filas.reduce((s, f) => s + f.clientes, 0) + t.resultado.sinCombinacion)} PDV
+                {(() => {
+                  const r = soloFoco ? t.resultadoFoco : t.resultado;
+                  return num(r.filas.reduce((s, f) => s + f.clientes, 0) + r.sinCombinacion);
+                })()}{" "}
+                PDV
               </span>
             </button>
           ))}
+          {/* Corte por segmento: aplica a la tabla entera, no solo a una fila. */}
+          <button
+            onClick={() => setSoloFoco((v) => !v)}
+            title="Cuenta solo clientes de segmentos foco: deja fuera licorerías, farmacias de barrio, mascotas y demás segmentos que no venden alimentos"
+            className={`ml-auto rounded-lg border px-3 py-1.5 text-xs font-medium transition-colors ${
+              soloFoco
+                ? "border-emerald-600 bg-emerald-600 text-white"
+                : "border-slate-200 bg-white text-slate-500 hover:bg-slate-50"
+            }`}
+          >
+            Solo segmentos foco
+          </button>
         </div>
 
         <div className="overflow-x-auto">
@@ -128,6 +152,7 @@ export function TandasClientesTabla({ tandas }: { tandas: CombinacionesTanda[] }
                 <TableHead className="text-right">Activación</TableHead>
                 <TableHead className="text-right">Recompraron</TableHead>
                 <TableHead className="text-right">Recompra s/ activos</TableHead>
+                <TableHead className="text-right">Recompra s/ cartera</TableHead>
                 <TableHead className="text-right">Ratio Harina PAN</TableHead>
                 <TableHead className="text-right">Ventas kg</TableHead>
               </TableRow>
@@ -161,6 +186,7 @@ export function TandasClientesTabla({ tandas }: { tandas: CombinacionesTanda[] }
                   <TableCell className="text-right font-semibold text-violet-700">
                     {tasa(f.conRecompra, f.activos)}
                   </TableCell>
+                  <TableCell className="text-right text-slate-500">{tasa(f.conRecompra, f.clientes)}</TableCell>
                   <TableCell className="text-right font-semibold text-blue-700">{pct(f.ratioHarinaPan)}</TableCell>
                   <TableCell className="text-right font-semibold">{kg1(f.panquecitasKg)}</TableCell>
                 </TableRow>
@@ -172,6 +198,7 @@ export function TandasClientesTabla({ tandas }: { tandas: CombinacionesTanda[] }
                 <TableCell className="text-right">{tasa(total.activos, total.clientes)}</TableCell>
                 <TableCell className="text-right">{num(total.conRecompra)}</TableCell>
                 <TableCell className="text-right">{tasa(total.conRecompra, total.activos)}</TableCell>
+                <TableCell className="text-right">{tasa(total.conRecompra, total.clientes)}</TableCell>
                 <TableCell className="text-right text-xs font-normal text-slate-400">los ratios no se suman</TableCell>
                 <TableCell className="text-right">{kg1(total.kg)}</TableCell>
               </TableRow>
@@ -185,7 +212,10 @@ export function TandasClientesTabla({ tandas }: { tandas: CombinacionesTanda[] }
           <span className="font-medium text-slate-600">Recompraron</span> los que compraron en 2 o más fechas distintas
           — una devolución no cuenta como compra. La tasa de recompra se mide{" "}
           <span className="font-medium text-slate-600">sobre los activos</span>, no sobre la cartera: quien nunca compró
-          no pudo recomprar. El <span className="font-medium text-slate-600">Ratio Harina PAN</span> es el mismo de la
+          no pudo recomprar. Al lado va la misma recompra{" "}
+          <span className="font-medium text-slate-600">sobre la cartera</span> —los mismos PDV que recompraron, pero
+          divididos entre todos los de la tanda—, que mide activación y recompra juntas y siempre da menor. El{" "}
+          <span className="font-medium text-slate-600">Ratio Harina PAN</span> es el mismo de la
           tabla de combinaciones, pero medido en la ventana de ESTA tanda: Panquecitas de esos PDV desde el{" "}
           {resultado.desdePanquecitas} ÷ {resultado.diasPanquecitas} días hábiles transcurridos desde esa fecha, contra
           su Harina PAN de mayo–julio ÷ {resultado.diasReferencia} días hábiles.{" "}
@@ -194,6 +224,13 @@ export function TandasClientesTabla({ tandas }: { tandas: CombinacionesTanda[] }
               Esta tanda se incorporó el <span className="font-medium text-slate-600">{fechaCorta(tanda.desde)}</span>:
               antes de esa fecha sus PDV no eran cartera y no podían vender, así que sus kilos y su divisor arrancan
               ahí. Con el divisor de todo el piloto el ratio salía a una fracción del real.{" "}
+            </>
+          )}
+          {soloFoco && (
+            <>
+              <span className="font-medium text-emerald-700">Solo segmentos foco</span>: quedan fuera licorerías,
+              farmacias de barrio, mascotas y los demás segmentos que no venden alimentos, en los dos lados del ratio y
+              en todos los conteos.{" "}
             </>
           )}
           {ocultas > 0 && (

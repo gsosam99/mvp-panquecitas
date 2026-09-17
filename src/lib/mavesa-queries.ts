@@ -10,6 +10,7 @@ import {
 import { DIAS_HABILES_3M, contarDiasHabiles, diasHabilesEntre, siguienteDiaHabil } from "@/lib/business-days";
 import { COMBINACIONES, combinacionDeGrupo, nombreCombinacion } from "@/lib/combinaciones";
 import { COHORTES, cohortePorNombre } from "@/lib/cohortes";
+import { esSegmentoSinAlimentos } from "@/lib/segmentos";
 import { bucketLabelFor, todayISO } from "@/lib/date-buckets";
 import { PRODUCT_IDS } from "@/data/catalog";
 import { getVolumenRadarAcumulado, getRendimiento3M } from "@/lib/dienn-queries";
@@ -546,7 +547,17 @@ async function cargarDatosCombinaciones(): Promise<DatosCombinaciones> {
   };
 }
 
-function calcularCombinaciones(datos: DatosCombinaciones, soloCohorte?: string): CombinacionesResult {
+function calcularCombinaciones(
+  datos: DatosCombinaciones,
+  soloCohorte?: string,
+  /**
+   * `true` = solo clientes de segmentos FOCO (los que no están en
+   * SEGMENTOS_SIN_ALIMENTOS: fuera licorerías, farmacias de barrio, mascotas…).
+   * El recorte se aplica al universo, así que alcanza a los dos lados del
+   * ratio y a todos los conteos — mismo criterio que el corte por tanda.
+   */
+  soloFoco = false
+): CombinacionesResult {
   const { hoy, universoTotal, margarina, mayonesa, harinaPan, panquecitas } = datos;
   // Ventana propia de la tanda: sus kilos y su divisor arrancan el día que
   // entró a la cartera, no el día que arrancó el piloto.
@@ -570,7 +581,9 @@ function calcularCombinaciones(datos: DatosCombinaciones, soloCohorte?: string):
   // los dos lados del ratio (Panquecitas y la categoría de referencia) y al
   // conteo de PDV. Un cliente sin cohorte registrada no cae en ninguna tanda.
   const universo = vigentesAl(universoTotal, hoy).filter(
-    (l) => !soloCohorte || (l.cohorte ?? "").trim() === soloCohorte
+    (l) =>
+      (!soloCohorte || (l.cohorte ?? "").trim() === soloCohorte) &&
+      (!soloFoco || !esSegmentoSinAlimentos(l.segmento_cliente))
   );
   if (universo.length === 0) return vacio;
 
@@ -746,7 +759,11 @@ export interface CombinacionesTanda {
   etiqueta: string;
   /** Desde cuándo cuentan sus PDV ("YYYY-MM-DD"); null en la cartera completa. */
   desde: string | null;
+  /** Todos los segmentos. */
   resultado: CombinacionesResult;
+  /** Solo segmentos foco. Los dos cortes se precalculan para que el botón del
+   *  dashboard no vuelva a pedir datos. */
+  resultadoFoco: CombinacionesResult;
 }
 
 export async function getCombinacionesPorTanda(): Promise<CombinacionesTanda[]> {
@@ -757,12 +774,14 @@ export async function getCombinacionesPorTanda(): Promise<CombinacionesTanda[]> 
       etiqueta: "Cartera completa",
       desde: null,
       resultado: calcularCombinaciones(datos),
+      resultadoFoco: calcularCombinaciones(datos, undefined, true),
     },
     ...COHORTES.map((c) => ({
       cohorte: c.nombre,
       etiqueta: c.nombre,
       desde: c.desde,
       resultado: calcularCombinaciones(datos, c.nombre),
+      resultadoFoco: calcularCombinaciones(datos, c.nombre, true),
     })),
   ];
 }
