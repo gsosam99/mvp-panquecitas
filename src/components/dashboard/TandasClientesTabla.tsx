@@ -39,7 +39,12 @@ export function TandasClientesTabla({ tandas }: { tandas: CombinacionesTanda[] }
 
   const tanda = tandas[Math.min(activa, tandas.length - 1)];
   const { resultado } = tanda;
-  const filas = resultado.filas;
+  // Una tanda solo abrió ciertos grupos vendedores: las combinaciones sin un
+  // PDV suyo se ocultan en vez de mostrar cuatro filas en cero, que es lo que
+  // hacía parecer que la tanda no existía. En la cartera completa se muestran
+  // las cuatro siempre.
+  const filas = tanda.cohorte == null ? resultado.filas : resultado.filas.filter((f) => f.clientes > 0);
+  const ocultas = resultado.filas.length - filas.length;
 
   const columnas: ExcelColumn<CombinacionRow>[] = [
     { header: "Combinación", value: (r) => r.nombre, width: 18 },
@@ -79,7 +84,7 @@ export function TandasClientesTabla({ tandas }: { tandas: CombinacionesTanda[] }
           <p className="text-xs text-slate-400 mt-1">
             La cartera no entró toda el mismo día: arrancó con los 358 del plan original el 03-08-2026 y se amplió en
             cuatro hitos más. Elegí una tanda arriba y la tabla entera pasa a ser la de esos PDV — su activación, su
-            recompra, su ratio y sus kilos, sin mezclarla con las demás.
+            recompra, su ratio y sus kilos, contados desde el día en que esa tanda entró a la cartera.
           </p>
         </div>
         <ExportExcelButton
@@ -181,13 +186,20 @@ export function TandasClientesTabla({ tandas }: { tandas: CombinacionesTanda[] }
           — una devolución no cuenta como compra. La tasa de recompra se mide{" "}
           <span className="font-medium text-slate-600">sobre los activos</span>, no sobre la cartera: quien nunca compró
           no pudo recomprar. El <span className="font-medium text-slate-600">Ratio Harina PAN</span> es el mismo de la
-          tabla de combinaciones: Panquecitas de esos PDV ÷ {resultado.diasPanquecitas} días hábiles transcurridos,
-          contra su Harina PAN de mayo–julio ÷ {resultado.diasReferencia} días hábiles.{" "}
+          tabla de combinaciones, pero medido en la ventana de ESTA tanda: Panquecitas de esos PDV desde el{" "}
+          {resultado.desdePanquecitas} ÷ {resultado.diasPanquecitas} días hábiles transcurridos desde esa fecha, contra
+          su Harina PAN de mayo–julio ÷ {resultado.diasReferencia} días hábiles.{" "}
           {tanda.desde && (
             <>
-              Esta tanda se incorporó el <span className="font-medium text-slate-600">{fechaCorta(tanda.desde)}</span>,
-              así que sus PDV tuvieron menos días de venta que los del arranque — el ratio y los kilos no son
-              comparables de una tanda a otra, sí lo son la activación y la recompra.{" "}
+              Esta tanda se incorporó el <span className="font-medium text-slate-600">{fechaCorta(tanda.desde)}</span>:
+              antes de esa fecha sus PDV no eran cartera y no podían vender, así que sus kilos y su divisor arrancan
+              ahí. Con el divisor de todo el piloto el ratio salía a una fracción del real.{" "}
+            </>
+          )}
+          {ocultas > 0 && (
+            <>
+              Se ocultan {ocultas} combinaciones sin PDV en esta tanda: solo se abrieron los grupos vendedores que se
+              ven arriba.{" "}
             </>
           )}
           {resultado.sinCombinacion > 0 && (

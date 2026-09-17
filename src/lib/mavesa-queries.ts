@@ -9,7 +9,7 @@ import {
 } from "@/lib/universe";
 import { DIAS_HABILES_3M, contarDiasHabiles, diasHabilesEntre, siguienteDiaHabil } from "@/lib/business-days";
 import { COMBINACIONES, combinacionDeGrupo, nombreCombinacion } from "@/lib/combinaciones";
-import { COHORTES } from "@/lib/cohortes";
+import { COHORTES, cohortePorNombre } from "@/lib/cohortes";
 import { bucketLabelFor, todayISO } from "@/lib/date-buckets";
 import { PRODUCT_IDS } from "@/data/catalog";
 import { getVolumenRadarAcumulado, getRendimiento3M } from "@/lib/dienn-queries";
@@ -486,6 +486,21 @@ export async function getCombinacionesPiloto(
   return calcularCombinaciones(await cargarDatosCombinaciones(), opciones.soloCohorte);
 }
 
+/**
+ * Ventana de venta de una tanda: desde que SUS PDV son cartera, nunca antes
+ * del arranque del piloto.
+ *
+ * Una tanda que entró el 08-09 no vendió nada entre el 03-08 y esa fecha
+ * porque todavía no existía como cartera. Dividir sus kilos entre los días
+ * hábiles de todo el piloto le baja el ratio a una fracción del real y la
+ * tabla la muestra como si no hubiera pasado nada (DIENN, 17-09-2026). Cada
+ * tanda se mide con sus propios días.
+ */
+function desdeDeCohorte(soloCohorte?: string): string {
+  const desde = soloCohorte ? cohortePorNombre(soloCohorte)?.desde : undefined;
+  return desde && desde > RENDIMIENTO_DIARIO_DESDE ? desde : RENDIMIENTO_DIARIO_DESDE;
+}
+
 async function cargarDatosCombinaciones(): Promise<DatosCombinaciones> {
   const hoy = todayISO();
   const supabase = createSupabaseServiceClient();
@@ -532,14 +547,21 @@ async function cargarDatosCombinaciones(): Promise<DatosCombinaciones> {
 }
 
 function calcularCombinaciones(datos: DatosCombinaciones, soloCohorte?: string): CombinacionesResult {
-  const { hoy, diasPanquecitas, universoTotal, margarina, mayonesa, harinaPan, panquecitas } = datos;
+  const { hoy, universoTotal, margarina, mayonesa, harinaPan, panquecitas } = datos;
+  // Ventana propia de la tanda: sus kilos y su divisor arrancan el día que
+  // entró a la cartera, no el día que arrancó el piloto.
+  const desdePanquecitas = desdeDeCohorte(soloCohorte);
+  const diasPanquecitas =
+    desdePanquecitas === RENDIMIENTO_DIARIO_DESDE
+      ? datos.diasPanquecitas
+      : contarDiasHabiles(desdePanquecitas, hoy);
   const vacio: CombinacionesResult = {
     filas: [],
     sinCombinacion: 0,
     gruposSinMapear: [],
     diasReferencia: DIAS_HABILES_3M,
     diasPanquecitas,
-    desdePanquecitas: RENDIMIENTO_DIARIO_DESDE,
+    desdePanquecitas,
     totalPanquecitasKg: 0,
     cohorte: soloCohorte ?? null,
   };
@@ -608,7 +630,9 @@ function calcularCombinaciones(datos: DatosCombinaciones, soloCohorte?: string):
   let totalPanquecitasKg = 0;
   for (const r of panquecitas) {
     const fecha = r.date_of_sale.slice(0, 10);
-    if (fecha < RENDIMIENTO_DIARIO_DESDE) continue;
+    // La ventana es la de la tanda: kilos, días con venta, activos y recompra
+    // se cuentan desde que esos PDV son cartera.
+    if (fecha < desdePanquecitas) continue;
     if (enAlcance.has(r.location_id)) totalPanquecitasKg += Number(r.quantity_kg);
     if (Number(r.quantity_kg) > 0 && combiPorLoc.has(r.location_id)) {
       const fechas = fechasCompraPorLoc.get(r.location_id) ?? new Set<string>();
@@ -698,7 +722,7 @@ function calcularCombinaciones(datos: DatosCombinaciones, soloCohorte?: string):
     gruposSinMapear: [...gruposSinMapear].sort(),
     diasReferencia: DIAS_HABILES_3M,
     diasPanquecitas,
-    desdePanquecitas: RENDIMIENTO_DIARIO_DESDE,
+    desdePanquecitas,
     totalPanquecitasKg: r1(totalPanquecitasKg),
     cohorte: soloCohorte ?? null,
   };
