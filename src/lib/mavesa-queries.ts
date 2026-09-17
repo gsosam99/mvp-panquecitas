@@ -384,7 +384,9 @@ export async function getVentas3MesesPorCiudad(): Promise<Ventas3MesesRow[]> {
 // Los dos lados se acotan a los PDV de los grupos vendedores de la
 // combinación: nada usa el total de la ciudad ni del piloto.
 //
-// El denominador es idéntico al del resto del dashboard. El numerador NO: acá
+// El denominador de Margarina y Mayonesa es el del resto del dashboard; el de
+// Harina PAN suma TODAS las filas del Radar 3M en vez del último corte del mes
+// (DIENN, 17-09-2026 — ver el fetch). El numerador tampoco es el mismo: acá
 // divide entre los días hábiles transcurridos y no entre los días CON VENTA
 // que usa el ratio universal. Es deliberado y la razón está en el uso —ver el
 // comentario junto al cálculo—: esta tabla compara cuatro combinaciones entre
@@ -514,8 +516,14 @@ export async function getCombinacionesPiloto(
         .select("location_id, quantity_kg")
         .eq("product_id", PRODUCT_IDS.MAYONESA)
     ),
+    // Harina PAN = SUMA de todas las filas del Radar 3M (radar_3m_ventas_dia),
+    // no el último corte del mes de radar_3m_records (DIENN, 17-09-2026). En el
+    // archivo cada fila es el despacho de ese día —el valor baja de una fecha a
+    // otra dentro del mismo mes—, así que el último corte se quedaba con ~40%
+    // de los kilos e inflaba el ratio. Solo esta tabla: los gráficos de ratio
+    // 3M siguen con su propia lectura.
     fetchAllRows<{ sap_code: string; quantity_kg: number }>(() =>
-      supabase.from("radar_3m_records").select("sap_code, quantity_kg").eq("product_id", PRODUCT_IDS.HARINA_PAN)
+      supabase.from("radar_3m_ventas_dia").select("sap_code, quantity_kg").eq("product_id", PRODUCT_IDS.HARINA_PAN)
     ),
     fetchAllRows<{ location_id: string; quantity_kg: number; date_of_sale: string }>(() =>
       supabase
