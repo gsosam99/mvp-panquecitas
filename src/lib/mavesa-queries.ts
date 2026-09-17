@@ -522,21 +522,9 @@ export async function getCombinacionesPiloto(
     // otra dentro del mismo mes—, así que el último corte se quedaba con ~40%
     // de los kilos e inflaba el ratio. Solo esta tabla: los gráficos de ratio
     // 3M siguen con su propia lectura.
-    //
-    // Con el grupo vendedor DEL ARCHIVO (migration 025): así cuentan todos los
-    // clientes que el Radar trae en esos grupos, no solo los de la cartera. Si
-    // la columna todavía no existe, se lee sin ella y cae a la cartera.
-    fetchAllRows<{ sap_code: string; quantity_kg: number; grupo_vendedor: string | null }>(() =>
-      supabase
-        .from("radar_3m_ventas_dia")
-        .select("sap_code, quantity_kg, grupo_vendedor")
-        .eq("product_id", PRODUCT_IDS.HARINA_PAN)
-    ).catch((error) => {
-      console.error("[getCombinacionesPiloto] radar_3m_ventas_dia sin grupo_vendedor (falta migration 025):", error);
-      return fetchAllRows<{ sap_code: string; quantity_kg: number; grupo_vendedor: string | null }>(() =>
-        supabase.from("radar_3m_ventas_dia").select("sap_code, quantity_kg").eq("product_id", PRODUCT_IDS.HARINA_PAN)
-      );
-    }),
+    fetchAllRows<{ sap_code: string; quantity_kg: number }>(() =>
+      supabase.from("radar_3m_ventas_dia").select("sap_code, quantity_kg").eq("product_id", PRODUCT_IDS.HARINA_PAN)
+    ),
     fetchAllRows<{ location_id: string; quantity_kg: number; date_of_sale: string }>(() =>
       supabase
         .from("sap_sell_in_records")
@@ -563,19 +551,9 @@ export async function getCombinacionesPiloto(
     const n = combiPorLoc.get(r.location_id);
     if (n != null) acc(n).mayo += Number(r.quantity_kg);
   }
-  // Harina PAN: TODOS los clientes del Radar 3M con el grupo vendedor de la
-  // combinación, estén o no en la cartera (DIENN, 17-09-2026). Recortado a una
-  // tanda (soloCohorte) sigue siendo solo cartera: la tanda es una lista de PDV
-  // y fuera de la cartera no hay a quién asignarla. Las filas sin grupo
-  // (cargadas antes del migration 025) caen a la cartera.
   for (const r of harinaPan) {
-    let n: number | null | undefined;
-    if (!soloCohorte && r.grupo_vendedor) {
-      n = combinacionDeGrupo(r.grupo_vendedor);
-    } else {
-      const locId = locIdBySapCode.get(r.sap_code.trim());
-      n = locId ? combiPorLoc.get(locId) : undefined;
-    }
+    const locId = locIdBySapCode.get(r.sap_code.trim());
+    const n = locId ? combiPorLoc.get(locId) : undefined;
     if (n != null) acc(n).pan += Number(r.quantity_kg);
   }
   // Panquecitas POR DÍA y por combinación: el ratio universal es el promedio

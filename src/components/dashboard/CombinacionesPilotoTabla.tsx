@@ -140,11 +140,7 @@ export function CombinacionesPilotoTabla({
           vendedores de esa fila, en los dos lados: las Panquecitas de esos grupos ÷ {data.diasPanquecitas} días
           hábiles transcurridos desde el {data.desdePanquecitas}, contra la venta de esa categoría de esos mismos
           grupos ÷ {data.diasReferencia} días hábiles de mayo–julio. La Harina PAN es la suma de todas las filas del
-          Radar últimos 3 Meses, no el último corte de cada mes
-          {data.cohorte == null
-            ? ", y cuenta a todos los clientes que el Radar trae en esos grupos vendedores, estén o no en la cartera"
-            : ", solo de los PDV de la tanda"}
-          . Nada usa el total de la ciudad ni del piloto.{" "}
+          Radar últimos 3 Meses, no el último corte de cada mes. Nada usa el total de la ciudad ni del piloto.{" "}
           <span className="font-medium text-slate-600">El divisor de Panquecitas es el mismo para las cuatro filas</span>{" "}
           — a diferencia del ratio de los gráficos de rendimiento, que divide entre los días con venta de su propio
           corte. Acá el punto es comparar las combinaciones entre sí, y con divisores distintos la que vendió

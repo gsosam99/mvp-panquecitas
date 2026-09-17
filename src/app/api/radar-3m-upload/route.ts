@@ -202,8 +202,6 @@ export async function POST(req: Request) {
           quantity_kg: number;
           date_of_sale: string;
           upload_batch_id: string;
-          /** Del archivo, no de la cartera: cubre también a los clientes fuera de ella (migration 025). */
-          grupo_vendedor: string | null;
         }
       >();
       for (const r of rows) {
@@ -220,35 +218,16 @@ export async function POST(req: Request) {
           quantity_kg: r.quantity_kg,
           date_of_sale: r.fecha,
           upload_batch_id: batchId,
-          grupo_vendedor: (r.grupo_vendedor ?? "").trim().toUpperCase() || null,
         });
       }
       const filasDia = [...porDia.values()];
-      // Si todavía no corrió el migration 025, la columna no existe: se guarda
-      // sin el grupo en vez de perder las filas diarias.
-      let conGrupo = true;
       for (let i = 0; i < filasDia.length; i += TANDA_FILAS) {
-        const tanda = filasDia.slice(i, i + TANDA_FILAS);
-        const upsertDia = (filas: Record<string, unknown>[]) =>
-          supabase.from("radar_3m_ventas_dia").upsert(filas, {
+        const { error: diaError } = await supabase
+          .from("radar_3m_ventas_dia")
+          .upsert(filasDia.slice(i, i + TANDA_FILAS), {
             onConflict: "sap_code,material_code,date_of_sale",
             ignoreDuplicates: false,
           });
-        const sinGrupo = () =>
-          tanda.map((f) => ({
-            sap_code: f.sap_code,
-            material_code: f.material_code,
-            product_id: f.product_id,
-            quantity_kg: f.quantity_kg,
-            date_of_sale: f.date_of_sale,
-            upload_batch_id: f.upload_batch_id,
-          }));
-        let { error: diaError } = await upsertDia(conGrupo ? tanda : sinGrupo());
-        if (diaError && conGrupo && diaError.message?.includes("grupo_vendedor")) {
-          console.error("[POST /api/radar-3m-upload] falta el migration 025 (grupo_vendedor):", diaError);
-          conGrupo = false;
-          ({ error: diaError } = await upsertDia(sinGrupo()));
-        }
         if (diaError) throw diaError;
       }
       // Igual que arriba: el borrado de la carga anterior solo en la última tanda.
