@@ -9,6 +9,7 @@ import {
 } from "@/lib/universe";
 import { DIAS_HABILES_3M, contarDiasHabiles, diasHabilesEntre, siguienteDiaHabil } from "@/lib/business-days";
 import { COMBINACIONES, combinacionDeGrupo, nombreCombinacion } from "@/lib/combinaciones";
+import { COHORTES } from "@/lib/cohortes";
 import { bucketLabelFor, todayISO } from "@/lib/date-buckets";
 import { PRODUCT_IDS } from "@/data/catalog";
 import { getVolumenRadarAcumulado, getRendimiento3M } from "@/lib/dienn-queries";
@@ -428,6 +429,15 @@ export interface CombinacionRow {
    * pueden rendir distinto.
    */
   diasConVenta: number;
+  /** PDV de la combinación que ya compraron Panquecitas al menos una vez. */
+  activos: number;
+  /**
+   * PDV con compra de Panquecitas en 2 o más FECHAS distintas — la recompra
+   * se mide sobre los activos, no sobre la cartera: un PDV que nunca compró
+   * no pudo recomprar y meterlo en el denominador mide activación, no
+   * recompra (DIENN, 17-09-2026).
+   */
+  conRecompra: number;
 }
 
 export interface CombinacionesResult {
@@ -450,6 +460,22 @@ export interface CombinacionesResult {
 }
 
 /**
+ * Todo lo que se lee de la base para armar las combinaciones. Se carga UNA
+ * vez y se reutiliza para cada tanda: la tabla por tanda pide seis cortes de
+ * los mismos datos, y volver a leer las cuatro tablas por cada uno multiplica
+ * por seis el tiempo de la página sin cambiar un solo número.
+ */
+interface DatosCombinaciones {
+  hoy: string;
+  diasPanquecitas: number;
+  universoTotal: Awaited<ReturnType<typeof getUniverseLocations>>;
+  margarina: { location_id: string; quantity_kg: number }[];
+  mayonesa: { location_id: string; quantity_kg: number }[];
+  harinaPan: { sap_code: string; quantity_kg: number }[];
+  panquecitas: { location_id: string; quantity_kg: number; date_of_sale: string }[];
+}
+
+/**
  * @param opciones.soloCohorte Recorta la cartera a UNA tanda (ej. "Piloto
  *   original", los 358 del arranque). Sin él, la cartera vigente completa —
  *   el comportamiento de siempre de la tabla de combinaciones.
@@ -457,9 +483,56 @@ export interface CombinacionesResult {
 export async function getCombinacionesPiloto(
   opciones: { soloCohorte?: string } = {}
 ): Promise<CombinacionesResult> {
-  const { soloCohorte } = opciones;
+  return calcularCombinaciones(await cargarDatosCombinaciones(), opciones.soloCohorte);
+}
+
+async function cargarDatosCombinaciones(): Promise<DatosCombinaciones> {
   const hoy = todayISO();
-  const diasPanquecitas = contarDiasHabiles(RENDIMIENTO_DIARIO_DESDE, hoy);
+  const supabase = createSupabaseServiceClient();
+  const [universoTotal, margarina, mayonesa, harinaPan, panquecitas] = await Promise.all([
+    getUniverseLocations(),
+    fetchAllRows<{ location_id: string; quantity_kg: number }>(() =>
+      supabase
+        .from(REFERENCIA_TABLA.margarina)
+        .select("location_id, quantity_kg")
+        .eq("product_id", PRODUCT_IDS.MARGARINA)
+    ),
+    fetchAllRows<{ location_id: string; quantity_kg: number }>(() =>
+      supabase
+        .from(REFERENCIA_TABLA.mayonesa)
+        .select("location_id, quantity_kg")
+        .eq("product_id", PRODUCT_IDS.MAYONESA)
+    ),
+    // Harina PAN = SUMA de todas las filas del Radar 3M (radar_3m_ventas_dia),
+    // no el último corte del mes de radar_3m_records (DIENN, 17-09-2026). En el
+    // archivo cada fila es el despacho de ese día —el valor baja de una fecha a
+    // otra dentro del mismo mes—, así que el último corte se quedaba con ~40%
+    // de los kilos e inflaba el ratio. Solo esta tabla: los gráficos de ratio
+    // 3M siguen con su propia lectura.
+    fetchAllRows<{ sap_code: string; quantity_kg: number }>(() =>
+      supabase.from("radar_3m_ventas_dia").select("sap_code, quantity_kg").eq("product_id", PRODUCT_IDS.HARINA_PAN)
+    ),
+    fetchAllRows<{ location_id: string; quantity_kg: number; date_of_sale: string }>(() =>
+      supabase
+        .from("sap_sell_in_records")
+        .select("location_id, quantity_kg, date_of_sale")
+        .eq("product_id", PRODUCT_IDS.PANQUECITAS)
+    ),
+  ]);
+
+  return {
+    hoy,
+    diasPanquecitas: contarDiasHabiles(RENDIMIENTO_DIARIO_DESDE, hoy),
+    universoTotal,
+    margarina,
+    mayonesa,
+    harinaPan,
+    panquecitas,
+  };
+}
+
+function calcularCombinaciones(datos: DatosCombinaciones, soloCohorte?: string): CombinacionesResult {
+  const { hoy, diasPanquecitas, universoTotal, margarina, mayonesa, harinaPan, panquecitas } = datos;
   const vacio: CombinacionesResult = {
     filas: [],
     sinCombinacion: 0,
@@ -471,7 +544,6 @@ export async function getCombinacionesPiloto(
     cohorte: soloCohorte ?? null,
   };
 
-  const universoTotal = await getUniverseLocations();
   // El recorte por tanda se aplica ANTES de todo lo demás, así que alcanza a
   // los dos lados del ratio (Panquecitas y la categoría de referencia) y al
   // conteo de PDV. Un cliente sin cohorte registrada no cae en ninguna tanda.
@@ -502,37 +574,6 @@ export async function getCombinacionesPiloto(
     clientesPorCombi.set(numero, (clientesPorCombi.get(numero) ?? 0) + 1);
   }
 
-  const supabase = createSupabaseServiceClient();
-  const [margarina, mayonesa, harinaPan, panquecitas] = await Promise.all([
-    fetchAllRows<{ location_id: string; quantity_kg: number }>(() =>
-      supabase
-        .from(REFERENCIA_TABLA.margarina)
-        .select("location_id, quantity_kg")
-        .eq("product_id", PRODUCT_IDS.MARGARINA)
-    ),
-    fetchAllRows<{ location_id: string; quantity_kg: number }>(() =>
-      supabase
-        .from(REFERENCIA_TABLA.mayonesa)
-        .select("location_id, quantity_kg")
-        .eq("product_id", PRODUCT_IDS.MAYONESA)
-    ),
-    // Harina PAN = SUMA de todas las filas del Radar 3M (radar_3m_ventas_dia),
-    // no el último corte del mes de radar_3m_records (DIENN, 17-09-2026). En el
-    // archivo cada fila es el despacho de ese día —el valor baja de una fecha a
-    // otra dentro del mismo mes—, así que el último corte se quedaba con ~40%
-    // de los kilos e inflaba el ratio. Solo esta tabla: los gráficos de ratio
-    // 3M siguen con su propia lectura.
-    fetchAllRows<{ sap_code: string; quantity_kg: number }>(() =>
-      supabase.from("radar_3m_ventas_dia").select("sap_code, quantity_kg").eq("product_id", PRODUCT_IDS.HARINA_PAN)
-    ),
-    fetchAllRows<{ location_id: string; quantity_kg: number; date_of_sale: string }>(() =>
-      supabase
-        .from("sap_sell_in_records")
-        .select("location_id, quantity_kg, date_of_sale")
-        .eq("product_id", PRODUCT_IDS.PANQUECITAS)
-    ),
-  ]);
-
   const locIdBySapCode = new Map(universo.map((l) => [l.sap_code.trim(), l.id]));
   const kg = new Map<number, { marg: number; mayo: number; pan: number; panq: number }>();
   const acc = (numero: number) => {
@@ -560,11 +601,20 @@ export async function getCombinacionesPiloto(
   // de los ratios diarios, así que hace falta el detalle día a día y no solo
   // el acumulado.
   const panqPorDia = new Map<number, Map<string, number>>();
+  // Fechas DISTINTAS con compra por PDV: 1 = activo, ≥2 = recompró. Una
+  // devolución (kg ≤ 0) no es una compra, mismo criterio que el resto del
+  // dashboard.
+  const fechasCompraPorLoc = new Map<string, Set<string>>();
   let totalPanquecitasKg = 0;
   for (const r of panquecitas) {
     const fecha = r.date_of_sale.slice(0, 10);
     if (fecha < RENDIMIENTO_DIARIO_DESDE) continue;
     if (enAlcance.has(r.location_id)) totalPanquecitasKg += Number(r.quantity_kg);
+    if (Number(r.quantity_kg) > 0 && combiPorLoc.has(r.location_id)) {
+      const fechas = fechasCompraPorLoc.get(r.location_id) ?? new Set<string>();
+      fechas.add(fecha);
+      fechasCompraPorLoc.set(r.location_id, fechas);
+    }
     // Fin de semana → lunes siguiente, igual que las series diarias: así
     // `diasConVenta` se cuenta en días hábiles (ver siguienteDiaHabil).
     const dia = siguienteDiaHabil(fecha);
@@ -580,6 +630,16 @@ export async function getCombinacionesPiloto(
   }
 
   const r1 = (v: number) => Math.round(v * 10) / 10;
+
+  // Activos y recompra POR COMBINACIÓN, contando PDV y no filas.
+  const activosPorCombi = new Map<number, number>();
+  const recompraPorCombi = new Map<number, number>();
+  for (const [locId, fechas] of fechasCompraPorLoc) {
+    const n = combiPorLoc.get(locId);
+    if (n == null) continue;
+    activosPorCombi.set(n, (activosPorCombi.get(n) ?? 0) + 1);
+    if (fechas.size >= 2) recompraPorCombi.set(n, (recompraPorCombi.get(n) ?? 0) + 1);
+  }
 
   const filas = COMBINACIONES.map((c) => {
     const a = kg.get(c.numero) ?? { marg: 0, mayo: 0, pan: 0, panq: 0 };
@@ -627,6 +687,8 @@ export async function getCombinacionesPiloto(
       margarinaKgDia: r1(margDia),
       mayonesaKgDia: r1(mayoDia),
       diasConVenta,
+      activos: activosPorCombi.get(c.numero) ?? 0,
+      conRecompra: recompraPorCombi.get(c.numero) ?? 0,
     };
   });
 
@@ -640,6 +702,45 @@ export async function getCombinacionesPiloto(
     totalPanquecitasKg: r1(totalPanquecitasKg),
     cohorte: soloCohorte ?? null,
   };
+}
+
+// ── La misma tabla, una por TANDA de incorporación ─────────────────
+// (pedido de DIENN, 17-09-2026)
+//
+// La cartera no entró toda el mismo día: arrancó con 358 el 03-08 y se amplió
+// en cuatro hitos más (ver src/lib/cohortes.ts). Mezclarlas en una sola tabla
+// compara PDV con seis semanas de venta contra PDV con una: el filtro de tanda
+// deja ver cada una con su propia activación, recompra, ratio y kilos.
+//
+// Todas las tandas salen de UNA sola lectura de la base — de ahí el refactor
+// de arriba en cargar/calcular.
+
+export interface CombinacionesTanda {
+  /** Nombre de la tanda, o `null` para la cartera completa. */
+  cohorte: string | null;
+  /** Etiqueta del filtro ("Cartera completa", "Piloto original"...). */
+  etiqueta: string;
+  /** Desde cuándo cuentan sus PDV ("YYYY-MM-DD"); null en la cartera completa. */
+  desde: string | null;
+  resultado: CombinacionesResult;
+}
+
+export async function getCombinacionesPorTanda(): Promise<CombinacionesTanda[]> {
+  const datos = await cargarDatosCombinaciones();
+  return [
+    {
+      cohorte: null,
+      etiqueta: "Cartera completa",
+      desde: null,
+      resultado: calcularCombinaciones(datos),
+    },
+    ...COHORTES.map((c) => ({
+      cohorte: c.nombre,
+      etiqueta: c.nombre,
+      desde: c.desde,
+      resultado: calcularCombinaciones(datos, c.nombre),
+    })),
+  ];
 }
 
 // ── Venta diaria por SEGMENTO de cliente y categoría ───────────────

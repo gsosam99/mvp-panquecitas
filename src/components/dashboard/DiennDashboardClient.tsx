@@ -36,6 +36,7 @@ import {
   type VentaSegmentoPunto,
 } from "@/components/dashboard/VentaDiariaPorSegmentoChart";
 import { CombinacionesPilotoTabla } from "@/components/dashboard/CombinacionesPilotoTabla";
+import { TandasClientesTabla } from "@/components/dashboard/TandasClientesTabla";
 import { CombinacionesParticipacionCharts } from "@/components/dashboard/CombinacionesParticipacionCharts";
 import { CruceMercaderistaRadar } from "@/components/dashboard/CruceMercaderistaRadar";
 import type { CruceInventarioRadarResult } from "@/lib/cruce-mercaderista-radar";
@@ -93,6 +94,7 @@ import type {
   Ventas3MesesRow,
   VentaPorSegmentoResult,
   CombinacionesResult,
+  CombinacionesTanda,
 } from "@/lib/mavesa-queries";
 
 export interface SectorBundle {
@@ -257,6 +259,8 @@ interface Props {
   combinacionesPiloto: CombinacionesResult;
   /** Las mismas combinaciones, solo con la cartera del piloto inicial (tanda "Piloto original"). Global. */
   combinacionesPilotoOriginal: CombinacionesResult;
+  /** La misma tabla de combinaciones, una por tanda de incorporación, para el filtro de tandas. Global. */
+  tandasClientes: CombinacionesTanda[];
   /** Inventario reportado por mercaderistas vs venta Radar, por PDV. Global; se corta por ciudad en el cliente. */
   cruceMercaderistaRadar: CruceInventarioRadarResult;
 }
@@ -278,6 +282,7 @@ export function DiennDashboardClient({
   ventaDiariaPorSegmento,
   combinacionesPiloto,
   combinacionesPilotoOriginal,
+  tandasClientes,
   cruceMercaderistaRadar,
 }: Props) {
   const [filter, setFilter] = useState<FilterKey>("TOTAL");
@@ -2690,6 +2695,9 @@ export function DiennDashboardClient({
         titulo="Piloto inicial — ventas por precio y comunicación"
         alcance="los PDV del piloto inicial"
       />
+
+      {/* ── Activación, recompra, ratio y kilos por TANDA de incorporación ── */}
+      <TandasClientesTabla tandas={tandasClientes} />
 
       {/* ── Promedio de venta diaria por SEGMENTO y categoría ──────────── */}
       <Card className="mb-6 print-avoid-break">

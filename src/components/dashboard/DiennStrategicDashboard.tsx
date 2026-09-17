@@ -34,7 +34,7 @@ import {
   getComparativaPortafolioPorCiudad,
   getVentas3MesesPorCiudad,
   getVentaDiariaPorSegmento,
-  getCombinacionesPiloto,
+  getCombinacionesPorTanda,
 } from "@/lib/mavesa-queries";
 import { DiennDashboardClient, type SectorBundle } from "@/components/dashboard/DiennDashboardClient";
 
@@ -123,7 +123,7 @@ async function getBundle(sector?: Sector): Promise<SectorBundle> {
 // Sell-Out completo (sin filtrar), y se le pasan al cliente, que decide
 // qué mostrar sin volver a pedir datos.
 export async function DiennStrategicDashboard() {
-  const [total, cumana, barquisimetoEste, coberturaComunicacion, tiendaIdeal, sellOutClientes, universo, motivosNoVenta, posicionPorCliente, carteraPorSegmento, precioCorrecto, portafolioPorCiudad, ventas3MesesPorCiudad, ventaDiariaPorSegmento, combinacionesPiloto, combinacionesPilotoOriginal, cruceMercaderistaRadar] =
+  const [total, cumana, barquisimetoEste, coberturaComunicacion, tiendaIdeal, sellOutClientes, universo, motivosNoVenta, posicionPorCliente, carteraPorSegmento, precioCorrecto, portafolioPorCiudad, ventas3MesesPorCiudad, ventaDiariaPorSegmento, tandasClientes, cruceMercaderistaRadar] =
     await Promise.all([
       getBundle(undefined),
       getBundle("cumana"),
@@ -139,11 +139,17 @@ export async function DiennStrategicDashboard() {
       getComparativaPortafolioPorCiudad(),
       getVentas3MesesPorCiudad(),
       getVentaDiariaPorSegmento(),
-      getCombinacionesPiloto(),
-      // Misma tabla, solo con la cartera del arranque (los 358).
-      getCombinacionesPiloto({ soloCohorte: COHORTE_PILOTO_ORIGINAL.nombre }),
+      // Una sola lectura para los tres usos: la tabla de combinaciones de la
+      // cartera completa, la de la tanda del arranque (los 358) y la tabla por
+      // tanda con su filtro.
+      getCombinacionesPorTanda(),
       getCruceInventarioRadar(),
     ]);
+
+  const combinacionesPiloto = tandasClientes.find((t) => t.cohorte === null)!.resultado;
+  const combinacionesPilotoOriginal = tandasClientes.find(
+    (t) => t.cohorte === COHORTE_PILOTO_ORIGINAL.nombre
+  )!.resultado;
 
   const { zonas, asesores } = getAvailableZonasYAsesores(universo);
 
@@ -166,6 +172,7 @@ export async function DiennStrategicDashboard() {
       ventaDiariaPorSegmento={ventaDiariaPorSegmento}
       combinacionesPiloto={combinacionesPiloto}
       combinacionesPilotoOriginal={combinacionesPilotoOriginal}
+      tandasClientes={tandasClientes}
       cruceMercaderistaRadar={cruceMercaderistaRadar}
     />
   );
