@@ -1938,9 +1938,19 @@ export async function getDemandaInsatisfecha(sector?: Sector): Promise<Record<Ti
 // ── 9. Stock Out (DIENN) ────────────────────────────────────────────
 // Clientes CON VENTA (Radar de Panquecitas > 0) cuya cantidad de producto en
 // tienda queda en/bajo el umbral de stock out. "En tienda" = anaquel +
-// depósito; si el mercaderista no tuvo acceso al depósito, solo anaquel. Se usa
-// la última visita por PDV. La lista incluye la ubicación (anaquel) donde se
-// encontró/debe ir el producto.
+// depósito. Se usa la última visita por PDV. La lista incluye la ubicación
+// (anaquel) donde se encontró/debe ir el producto.
+//
+// SOLO LA CARTERA DEL PLAN PILOTO (17-09-2026): los mercaderistas visitan
+// únicamente la tanda "Piloto original" (los 358 del arranque, ver
+// cohortes.ts), así que las tandas posteriores no pueden tener visita y solo
+// inflaban el denominador. El universo es esa tanda, con Radar > 0.
+//
+// SOLO CLIENTES VERIFICABLES (17-09-2026): si en la última visita el
+// mercaderista NO tuvo acceso al depósito, no se puede afirmar que falte
+// producto en la tienda, así que ese PDV queda fuera del conteo Y del universo.
+// Antes se evaluaba con el anaquel solo y contaba como stock out aunque el
+// depósito pudiera estar lleno.
 //
 // El umbral depende del modelo de atención (esquema_atencion de SAP): modelo
 // DIRECTO (y Mixto/otros) → ≤ 3 unidades; modelo INDIRECTO → ≤ 2 unidades
@@ -1959,14 +1969,15 @@ export interface StockOutClientePoint {
   sapCode: string | null;
   name: string;
   unidadesTienda: number;
-  /** true si el total incluye depósito (hubo acceso); false = solo anaquel. */
-  depositoIncluido: boolean;
   ubicacion: string;
 }
 
 export interface StockOutResult {
   enStockOut: number;
-  /** Compradores con visita considerados (denominador de contexto). */
+  /**
+   * Compradores verificables: los del plan piloto con Radar > 0 que tienen
+   * visita y en ella hubo acceso al depósito (denominador de contexto).
+   */
   universo: number;
   clientes: StockOutClientePoint[];
 }
@@ -1982,7 +1993,9 @@ export async function getStockOut(sector?: Sector): Promise<StockOutResult> {
   const empty: StockOutResult = { enStockOut: 0, universo: 0, clientes: [] };
   const universo = await getUniverseLocations();
   const delSector = sector ? universo.filter((l) => sectorGroup(l.oficina_venta) === sector) : universo;
-  const universoFiltrado = vigentesAl(delSector, todayISO());
+  // Solo la cartera que los mercaderistas visitan: la tanda "Piloto original".
+  const delPiloto = delSector.filter((l) => (l.cohorte ?? "").trim() === COHORTE_PILOTO_ORIGINAL.nombre);
+  const universoFiltrado = vigentesAl(delPiloto, todayISO());
   const ids = new Set(universoFiltrado.map((l) => l.id));
   if (ids.size === 0) return empty;
 
@@ -2001,7 +2014,8 @@ export async function getStockOut(sector?: Sector): Promise<StockOutResult> {
   );
   if (compradorIds.size === 0) return empty;
 
-  // Última visita por PDV comprador.
+  // Última visita por PDV comprador. Si en ella no hubo acceso al depósito el
+  // PDV no es verificable y se descarta (no entra ni al conteo ni al universo).
   const visitsData = await fetchAllRows<unknown>(() =>
     supabase
       .from("mercaderista_visits")
@@ -2017,11 +2031,16 @@ export async function getStockOut(sector?: Sector): Promise<StockOutResult> {
     product_location: string[] | null;
     product_location_other: string | null;
   };
-  const lastVisit = new Map<string, Visita>();
+  const ultimaVisitaPorPdv = new Map<string, Visita>();
   for (const v of (visitsData ?? []) as Visita[]) {
     if (!compradorIds.has(v.location_id)) continue;
-    if (!lastVisit.has(v.location_id)) lastVisit.set(v.location_id, v);
+    if (!ultimaVisitaPorPdv.has(v.location_id)) ultimaVisitaPorPdv.set(v.location_id, v);
   }
+  const lastVisit = new Map<string, Visita>();
+  for (const [locId, v] of ultimaVisitaPorPdv) {
+    if (v.deposit_access) lastVisit.set(locId, v);
+  }
+  if (lastVisit.size === 0) return empty;
 
   // Unidades en depósito (BODEGA) de esas últimas visitas — bultos→unidades.
   const visitIds = Array.from(lastVisit.values()).map((v) => v.id);
@@ -2052,7 +2071,7 @@ export async function getStockOut(sector?: Sector): Promise<StockOutResult> {
   for (const [locId, v] of lastVisit) {
     const loc = locById.get(locId);
     const anaquel = v.total_units_anaquel ?? 0;
-    const deposito = v.deposit_access ? unidadesDepositoByVisit.get(v.id) ?? 0 : 0;
+    const deposito = unidadesDepositoByVisit.get(v.id) ?? 0;
     const unidadesTienda = anaquel + deposito;
     const umbral = esModeloIndirecto(loc) ? STOCK_OUT_UMBRAL_INDIRECTO : STOCK_OUT_UMBRAL_DIENN;
     if (unidadesTienda <= umbral) {
@@ -2061,14 +2080,13 @@ export async function getStockOut(sector?: Sector): Promise<StockOutResult> {
         sapCode: loc?.sap_code ?? null,
         name: loc?.name ?? "",
         unidadesTienda,
-        depositoIncluido: !!v.deposit_access,
         ubicacion: formatUbicacionProducto(v.product_location, v.product_location_other),
       });
     }
   }
   clientes.sort((a, b) => a.unidadesTienda - b.unidadesTienda);
 
-  return { enStockOut: clientes.length, universo: compradorIds.size, clientes };
+  return { enStockOut: clientes.length, universo: lastVisit.size, clientes };
 }
 
 // ── 10. Material POP con Preciador (DIENN) ──────────────────────────

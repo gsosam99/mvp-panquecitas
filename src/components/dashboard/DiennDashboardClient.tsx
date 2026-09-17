@@ -2280,7 +2280,7 @@ export function DiennDashboardClient({
         <KpiCard
           title="Clientes en Stock Out"
           value={String(bundle.stockOut.enStockOut)}
-          subtitle={`≤ ${STOCK_OUT_UMBRAL_DIENN} unid. (directo) / ≤ ${STOCK_OUT_UMBRAL_INDIRECTO} (indirecto) en tienda · de ${bundle.stockOut.universo} clientes con venta`}
+          subtitle={`≤ ${STOCK_OUT_UMBRAL_DIENN} unid. (directo) / ≤ ${STOCK_OUT_UMBRAL_INDIRECTO} (indirecto) en anaquel + depósito · de ${bundle.stockOut.universo} clientes del piloto con venta y acceso al depósito`}
           critical={bundle.stockOut.enStockOut > 0}
         />
         <KpiCard
@@ -2303,9 +2303,11 @@ export function DiennDashboardClient({
             <div>
               <CardTitle>Clientes en Stock Out ({bundle.stockOut.enStockOut})</CardTitle>
               <p className="text-xs text-slate-400 mt-1">
-                Clientes con venta con pocas unidades en tienda (anaquel + depósito; solo anaquel si no hubo acceso al
-                depósito): ≤ {STOCK_OUT_UMBRAL_DIENN} en modelo directo, ≤ {STOCK_OUT_UMBRAL_INDIRECTO} en modelo
-                indirecto. Incluye la ubicación del producto.
+                Clientes con venta con pocas unidades en tienda (anaquel + depósito): ≤ {STOCK_OUT_UMBRAL_DIENN} en
+                modelo directo, ≤ {STOCK_OUT_UMBRAL_INDIRECTO} en modelo indirecto. Solo entra la cartera del plan
+                piloto (la tanda &quot;Piloto original&quot;), que es la única que visitan los mercaderistas, y dentro
+                de ella solo los PDV cuya última visita tuvo acceso al depósito: sin ese acceso no se puede afirmar que
+                falte producto, así que quedan fuera del conteo y del universo. Incluye la ubicación del producto.
               </p>
             </div>
           </button>
@@ -2316,7 +2318,6 @@ export function DiennDashboardClient({
               { header: "Código SAP", value: (r) => r.sapCode ?? "", width: 16 },
               { header: "Cliente", value: (r) => r.name, width: 34 },
               { header: "Unidades en tienda", value: (r) => r.unidadesTienda, width: 18 },
-              { header: "Incluye depósito", value: (r) => (r.depositoIncluido ? "Sí" : "No (sin acceso)"), width: 18 },
               { header: "Ubicación", value: (r) => r.ubicacion, width: 40 },
             ]}
           />
@@ -2341,10 +2342,7 @@ export function DiennDashboardClient({
                     {bundle.stockOut.clientes.map((c: StockOutClientePoint) => (
                       <TableRow key={c.locationId}>
                         <TableCell className="font-medium">{c.name}</TableCell>
-                        <TableCell className="text-right">
-                          {c.unidadesTienda}
-                          {!c.depositoIncluido && <span className="text-xs text-slate-400"> (solo anaquel)</span>}
-                        </TableCell>
+                        <TableCell className="text-right">{c.unidadesTienda}</TableCell>
                         <TableCell className="text-slate-500">{c.ubicacion}</TableCell>
                       </TableRow>
                     ))}
