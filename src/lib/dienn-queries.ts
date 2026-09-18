@@ -2638,7 +2638,7 @@ export async function getCarteraPorSegmento(): Promise<CarteraSegmentoResult> {
     for (const r of radar) {
       const b = bucketKeyFor(r.date_of_sale.slice(0, 10), granularity);
       if (!radarByBucket.has(b)) radarByBucket.set(b, []);
-      radarByBucket.get(b)!.push({ locId: r.location_id, kg: r.quantity_kg });
+      radarByBucket.get(b)!.push({ locId: r.location_id, kg: Math.max(0, r.quantity_kg) });
     }
     const factByBucket = new Map<string, string[]>();
     for (const r of fact) {
@@ -2721,11 +2721,13 @@ export async function getCarteraPorSegmento(): Promise<CarteraSegmentoResult> {
     const activosAlFinal = new Set(radarScope.filter((r) => r.quantity_kg > 0).map((r) => r.location_id));
     const carteraHoyVendible = carteraHoy.filter((c) => !c.noVendible || activosAlFinal.has(c.locId)).length;
 
+    // Devoluciones (kg negativos) cuentan como 0 en las barras: no restan
+    // volumen del período (DIENN, 18-09-2026 — Cabudare salía en negativo).
     const radarByBucket = new Map<string, { locId: string; kg: number }[]>();
     for (const r of radarScope) {
       const b = bucketKeyFor(r.date_of_sale.slice(0, 10), granularity);
       if (!radarByBucket.has(b)) radarByBucket.set(b, []);
-      radarByBucket.get(b)!.push({ locId: r.location_id, kg: r.quantity_kg });
+      radarByBucket.get(b)!.push({ locId: r.location_id, kg: Math.max(0, r.quantity_kg) });
     }
     const factByBucket = new Map<string, string[]>();
     for (const r of factScope) {
@@ -2747,7 +2749,7 @@ export async function getCarteraPorSegmento(): Promise<CarteraSegmentoResult> {
     const fueraByBucket = new Map<string, number>();
     for (const r of radarFueraScope) {
       const b = bucketKeyFor(r.date_of_sale.slice(0, 10), granularity);
-      fueraByBucket.set(b, (fueraByBucket.get(b) ?? 0) + r.quantity_kg);
+      fueraByBucket.set(b, (fueraByBucket.get(b) ?? 0) + Math.max(0, r.quantity_kg));
     }
 
     const buckets = Array.from(
