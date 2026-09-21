@@ -74,6 +74,7 @@ import type {
   Rendimiento3MResult,
   MaterialPopPreciadorResult,
   RunningVentasResult,
+  RecompraFranquiciadosResult,
   StockOutClientePoint,
   StockOutResult,
   TimeGranularity,
@@ -113,6 +114,8 @@ export interface SectorBundle {
   /** Panquecitas vs Harina PAN, AMBOS desde Carga Radar (misma fuente para que sean comparables). */
   panVsHarinaPan: Record<PanComparisonPoblacion, Record<PanComparisonGranularity, PanVsHarinaPanPoint[]>>;
   runningVentas: RunningVentasResult;
+  /** Recompra de las franquiciadas (≥2 fechas de facturación), desde Pedidos y Facturado. */
+  recompraFranquiciados: RecompraFranquiciadosResult;
   /** Venta acumulada (Radar) + tasa de recompra + % activación de clientes, por día/semana/mes. */
   ventaRecompraActivacion: Record<TimeGranularity, VentaRecompraActivacionPoint[]>;
   /** Comparativa de penetración Radar Panquecitas vs. HPM sobre la lista objetivo. */
@@ -864,6 +867,31 @@ export function DiennDashboardClient({
     };
     return [...top.map(({ _peso: _, ...p }) => p), otros];
   }, [ventaDiariaPorSegmento, segCiudad, segPorPdv, segTodos]);
+
+  // Potencial 3M: Harina PAN del reporte de 3 meses de la cartera de hoy
+  // (resuelto por sap_code contra la cartera actual), promedio por mes, y el 4%
+  // de eso como venta teórica de Panquecitas. Se parte en dos: los clientes
+  // que ya compran Panquecitas (rendimiento3M.clientes) y los que no (cartera
+  // completa menos esos) — "clientes" es un subconjunto de "universo".
+  const potencial3M = useMemo(() => {
+    const { universo, clientes } = bundle.rendimiento3M;
+    if (universo.totalPanKg <= 0 || !universo.desde || !universo.hasta) return null;
+    const [y1, m1] = universo.desde.split("-").map(Number);
+    const [y2, m2] = universo.hasta.split("-").map(Number);
+    const meses = Math.max(1, (y2 - y1) * 12 + (m2 - m1) + 1);
+    const armar = (panKg: number, clientesPoblacion: number) => ({
+      kgMes: (panKg / meses) * 0.04,
+      kgPeriodo: panKg * 0.04,
+      clientes: clientesPoblacion,
+    });
+    const con = armar(clientes.totalPanKg, clientes.clientesPoblacion);
+    const sin = armar(
+      Math.max(0, universo.totalPanKg - clientes.totalPanKg),
+      Math.max(0, universo.clientesPoblacion - clientes.clientesPoblacion)
+    );
+    const total = armar(universo.totalPanKg, universo.clientesPoblacion);
+    return { meses, desde: universo.desde, hasta: universo.hasta, con, sin, total };
+  }, [bundle.rendimiento3M]);
 
   const comboPoints = bundle.ventaRecompraActivacion[comboGranularity];
   // Kg de PDV fuera de cartera incluidos en el volumen. Es acumulado, así que
@@ -2231,6 +2259,72 @@ export function DiennDashboardClient({
                 </span>
               </div>
             </div>
+          </CardContent>
+        </Card>
+
+        <KpiCard
+          title="Recompra de Franquiciados"
+          value={bundle.recompraFranquiciados.compradoras > 0 ? `${bundle.recompraFranquiciados.recompraPct}%` : "s/d"}
+          annotation={[
+            `${bundle.recompraFranquiciados.conRecompra} con ≥2 fechas de facturación`,
+            `${bundle.recompraFranquiciados.compradoras} de ${bundle.recompraFranquiciados.total} franquiciados han facturado`,
+          ]}
+          subtitle={`Pedidos y Facturado (Cantidad Facturada > 0) — ${filtroTexto}`}
+          product="panquecitas"
+        />
+
+        <Card>
+          <CardContent className="pt-5">
+            <p className="text-xs font-semibold uppercase tracking-widest mb-2 text-muted-foreground">
+              Potencial 3M con la cartera actual
+            </p>
+            {potencial3M ? (
+              <>
+                <div className="space-y-1 text-sm">
+                  {(
+                    [
+                      ["Clientes con Panquecitas", potencial3M.con],
+                      ["Clientes sin Panquecitas", potencial3M.sin],
+                      ["Cartera completa", potencial3M.total],
+                    ] as const
+                  ).map(([label, p]) => (
+                    <div key={label} className="flex justify-between gap-2">
+                      <span className="text-slate-500">
+                        {label} <span className="text-xs text-slate-400">({p.clientes.toLocaleString("es-VE")})</span>
+                      </span>
+                      <span className="font-bold text-slate-900 whitespace-nowrap">
+                        {Math.round(p.kgPeriodo).toLocaleString("es-VE")} kg
+                        <span className="text-xs font-normal text-slate-400">
+                          {" "}
+                          · {Math.round(p.kgMes).toLocaleString("es-VE")}/mes
+                        </span>
+                      </span>
+                    </div>
+                  ))}
+                  <div className="flex justify-between gap-2 border-t pt-1 mt-1">
+                    <span className="text-slate-500">Vendido (Radar)</span>
+                    <span className="font-bold text-slate-900 whitespace-nowrap">
+                      {Math.round(bundle.volumenRadarAcumulado.panquecitasTon * 1000).toLocaleString("es-VE")} kg
+                      <span className="text-xs font-normal text-slate-400">
+                        {" "}
+                        ·{" "}
+                        {Math.round(
+                          ((bundle.volumenRadarAcumulado.panquecitasTon * 1000) / potencial3M.total.kgPeriodo) * 100
+                        )}
+                        % del potencial
+                      </span>
+                    </span>
+                  </div>
+                </div>
+                <p className="text-xs text-slate-400 mt-2">
+                  4% de la Harina PAN de {potencial3M.meses} meses ({potencial3M.desde} a {potencial3M.hasta}) de los
+                  clientes de la cartera de hoy, como si hubiesen estado desde el inicio. Lo vendido es el Radar de
+                  Panquecitas acumulado desde el arranque (incluye PDV fuera de cartera) — {filtroTexto}
+                </p>
+              </>
+            ) : (
+              <p className="text-sm text-slate-400">Sin reporte PAN 3M cargado.</p>
+            )}
           </CardContent>
         </Card>
 

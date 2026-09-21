@@ -32,6 +32,7 @@ import {
   type TimeGranularity,
 } from "@/lib/date-buckets";
 import { estabaIncorporado, vigentesAl } from "@/lib/cohortes";
+import { DISTRIBUIDORAS_INTERMEDIARIAS_SAP_CODES, FRANQUICIADAS_INDIRECTO_SAP_CODES } from "@/lib/sectors";
 import { esSegmentoSinAlimentos, SEGMENTO_SIN_DATO } from "@/lib/segmentos";
 import type { Location, LocationType } from "@/types";
 
@@ -439,6 +440,71 @@ export async function getRunningVentas(sector?: Sector): Promise<RunningVentasRe
     diasInventario,
     proyeccionToneladas: Math.round((proyeccionKg / 1000) * 100) / 100,
     proyeccionMeses: PROYECCION_MESES,
+  };
+}
+
+// ── 2b. Recompra de franquiciados (Pedidos y Facturado) ─────────────
+// Las franquiciadas del modelo indirecto (Cumaná) y las que abastecen a
+// Cabudare no son población del piloto, pero sí le compran a DIENN: su
+// recompra se mide con lo FACTURADO, no con Radar. Misma definición que la
+// recompra del gráfico combinado — clientes con ≥2 fechas distintas de
+// facturación ÷ clientes con al menos una —, aplicada a la lista fija de
+// códigos SAP de sectors.ts. `cantidad_facturada_kg > 0`: una nota de
+// crédito no es una compra.
+
+export interface RecompraFranquiciadosResult {
+  /** Franquiciadas del sector (cargadas en `locations`). */
+  total: number;
+  /** Con al menos una fecha de facturación. */
+  compradoras: number;
+  /** Con ≥2 fechas distintas de facturación. */
+  conRecompra: number;
+  /** conRecompra ÷ compradoras, en %. */
+  recompraPct: number;
+}
+
+const FRANQUICIADAS_SAP_CODES: string[] = [
+  ...FRANQUICIADAS_INDIRECTO_SAP_CODES,
+  ...DISTRIBUIDORAS_INTERMEDIARIAS_SAP_CODES,
+];
+
+export async function getRecompraFranquiciados(sector?: Sector): Promise<RecompraFranquiciadosResult> {
+  const supabase = createSupabaseServiceClient();
+  const { data: locs } = await supabase
+    .from("locations")
+    .select("id, oficina_venta")
+    .in("sap_code", FRANQUICIADAS_SAP_CODES);
+  const ids = new Set(
+    ((locs ?? []) as { id: string; oficina_venta: string | null }[])
+      .filter((l) => (sector ? sectorGroup(l.oficina_venta) === sector : true))
+      .map((l) => l.id)
+  );
+  if (ids.size === 0) return { total: 0, compradoras: 0, conRecompra: 0, recompraPct: 0 };
+
+  const data = await fetchAllRowsChunked<unknown>(
+    (lote) =>
+      supabase
+        .from("sap_pedidos_facturados")
+        .select("location_id, fecha")
+        .eq("product_id", PRODUCT_IDS.PANQUECITAS)
+        .gt("cantidad_facturada_kg", 0)
+        .in("location_id", lote),
+    Array.from(ids)
+  );
+
+  const fechasByLoc = new Map<string, Set<string>>();
+  for (const r of (data ?? []) as { location_id: string; fecha: string }[]) {
+    if (!fechasByLoc.has(r.location_id)) fechasByLoc.set(r.location_id, new Set());
+    fechasByLoc.get(r.location_id)!.add(r.fecha.slice(0, 10));
+  }
+  const compradoras = fechasByLoc.size;
+  const conRecompra = [...fechasByLoc.values()].filter((s) => s.size >= 2).length;
+
+  return {
+    total: ids.size,
+    compradoras,
+    conRecompra,
+    recompraPct: compradoras > 0 ? Math.round((conRecompra / compradoras) * 1000) / 10 : 0,
   };
 }
 
@@ -2156,7 +2222,10 @@ function stripAccents(s: string): string {
   return s.normalize("NFD").replace(/\p{Diacritic}/gu, "");
 }
 
-function agruparCategoriaAnaquel(raw: string): string {
+// Exportada además para el Reporte de Mercaderistas (reporte-mercaderistas.ts),
+// que muestra la misma ubicación de anaquel por PDV: la consolidación del texto
+// libre tiene que ser la misma en los dos lados o las categorías no cuadran.
+export function agruparCategoriaAnaquel(raw: string): string {
   const t = stripAccents(raw.toLowerCase());
   const has = (...kws: string[]) => kws.some((k) => t.includes(k));
   // Coincidencia por palabra completa: para tokens cortos (ej. "pan") que si
