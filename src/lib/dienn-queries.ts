@@ -1826,22 +1826,20 @@ export async function getDetalleClientesPorSegmento(sector?: Sector): Promise<De
   const supabase = createSupabaseServiceClient();
   const data = await fetchAllRows<unknown>(() =>
     supabase
-      .from("sap_sell_in_records")
-      .select("location_id, date_of_sale")
+      .from("radar_ventas_fechas")
+      .select("location_id, fecha")
       .eq("product_id", PRODUCT_IDS.PANQUECITAS)
-      .gt("quantity_kg", 0)
   );
 
-  const salesRows = (data ?? []) as { location_id: string; date_of_sale: string }[];
+  const fechasRows = (data ?? []) as { location_id: string; fecha: string }[];
   // Recompra de esta tabla (Detalle por segmento) = clientes con Radar en ≥2
-  // MESES distintos ÷ clientes con ≥1 compra. Es un rate por CLIENTE y sigue
-  // usando meses (sap_sell_in_records ya está colapsado por mes). Es distinto
-  // de la recompra del gráfico combinado (esa es por fechas, ver
-  // radar_ventas_fechas / computeVentaRecompraActivacionPoints).
-  const monthsByLocation = new Map<string, Set<string>>();
-  for (const r of salesRows) {
-    if (!monthsByLocation.has(r.location_id)) monthsByLocation.set(r.location_id, new Set());
-    monthsByLocation.get(r.location_id)!.add(r.date_of_sale.slice(0, 7));
+  // FECHAS distintas ÷ clientes con ≥1 compra (DIENN, 22-09-2026: antes eran
+  // meses distintos y dos pedidos en el mismo mes no contaban como recompra).
+  // Cuenta todo el histórico del cliente, también lo anterior a su incorporación.
+  const fechasByLocation = new Map<string, Set<string>>();
+  for (const r of fechasRows) {
+    if (!fechasByLocation.has(r.location_id)) fechasByLocation.set(r.location_id, new Set());
+    fechasByLocation.get(r.location_id)!.add(r.fecha.slice(0, 10));
   }
 
   const universoTotalHmpKg = universo.reduce((s, l) => s + (hmpTotals.get(l.id) ?? 0), 0);
@@ -1856,7 +1854,7 @@ export async function getDetalleClientesPorSegmento(sector?: Sector): Promise<De
   const rows: DetalleSegmentoRow[] = [];
   for (const [segmento, locs] of bySegmento.entries()) {
     const facturados = locs.filter((l) => (panqRadarTotals.get(l.id) ?? 0) > 0);
-    const conRecompra = facturados.filter((l) => (monthsByLocation.get(l.id)?.size ?? 0) >= 2);
+    const conRecompra = facturados.filter((l) => (fechasByLocation.get(l.id)?.size ?? 0) >= 2);
 
     const segHmpKg = locs.reduce((s, l) => s + (hmpTotals.get(l.id) ?? 0), 0);
     const segPanqKg = locs.reduce((s, l) => s + (panqPedidoTotals.get(l.id) ?? 0), 0);
