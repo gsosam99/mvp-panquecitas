@@ -134,7 +134,7 @@ export function ClientesSinRecompra({
       columns: [
         { header: "Ciudad", value: (r) => (r as (typeof porCiudad)[number]).label, width: 22 },
         { header: "Clientes con compra", value: (r) => (r as (typeof porCiudad)[number]).compradores, width: 18 },
-        { header: "En alerta", value: (r) => (r as (typeof porCiudad)[number]).total, width: 12 },
+        { header: "Total", value: (r) => (r as (typeof porCiudad)[number]).total, width: 12 },
         { header: "Solo 1 compra", value: (r) => (r as (typeof porCiudad)[number]).UNA_COMPRA, width: 14 },
         {
           header: "% Solo 1 compra",
@@ -160,7 +160,7 @@ export function ClientesSinRecompra({
       rows: porSegmento,
       columns: [
         { header: "Segmento", value: (r) => (r as (typeof porSegmento)[number]).segmento, width: 26 },
-        { header: "En alerta", value: (r) => (r as (typeof porSegmento)[number]).total, width: 12 },
+        { header: "Total", value: (r) => (r as (typeof porSegmento)[number]).total, width: 12 },
         { header: "Solo 1 compra", value: (r) => (r as (typeof porSegmento)[number]).UNA_COMPRA, width: 14 },
         {
           header: "% Solo 1 compra",
@@ -214,7 +214,7 @@ export function ClientesSinRecompra({
         {/* ── Indicadores del corte ─────────────────────────────────── */}
         <div className="grid grid-cols-1 sm:grid-cols-3 gap-4 mb-5">
           <Resumen
-            titulo="En alerta"
+            titulo="Total"
             valor={num(totalCorte.total)}
             nota={`${pct(totalCorte.total, compradoresCorte)} de ${num(compradoresCorte)} con compra`}
           />
@@ -237,8 +237,8 @@ export function ClientesSinRecompra({
               <TableRow>
                 <TableHead>Ciudad</TableHead>
                 <TableHead className="text-right">Con compra</TableHead>
-                <TableHead className="text-right">En alerta</TableHead>
-                <TableHead className="text-right">% alerta</TableHead>
+                <TableHead className="text-right">Total</TableHead>
+                <TableHead className="text-right">% total</TableHead>
                 {MOTIVOS.map((m) => (
                   <TableHead key={m} className="text-right">
                     {MOTIVO_LABELS[m]}
@@ -284,7 +284,7 @@ export function ClientesSinRecompra({
             <TableHeader>
               <TableRow>
                 <TableHead>Segmento</TableHead>
-                <TableHead className="text-right">En alerta</TableHead>
+                <TableHead className="text-right">Total</TableHead>
                 {MOTIVOS.map((m) => (
                   <TableHead key={m} className="text-right">
                     {MOTIVO_LABELS[m]}
