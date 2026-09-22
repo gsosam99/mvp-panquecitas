@@ -14,21 +14,20 @@ import {
   type MotivoAlerta,
 } from "@/lib/clientes-sin-recompra-utils";
 
-// Clientes que compraron Panquecitas pero no se consolidan: una sola compra,
-// +2 semanas sin pedir, o ambas. Arriba los indicadores por ciudad y por
-// segmento; abajo la lista desplegable. La query y el criterio están en
-// src/lib/clientes-sin-recompra.ts.
+// Clientes que compraron Panquecitas pero no se consolidan: una sola compra
+// hace 14+ días, o 2+ compras con la última hace 14+ días. Quien compró hace
+// menos de 14 días no es alerta. Query/criterio en clientes-sin-recompra.ts.
 
-const MOTIVOS: MotivoAlerta[] = ["UNA_COMPRA", "SIN_RECOMPRA", "AMBOS"];
+const MOTIVOS: MotivoAlerta[] = ["UNA_COMPRA", "SIN_RECOMPRA"];
 
 const MOTIVO_LABELS: Record<MotivoAlerta, string> = {
   UNA_COMPRA: "Solo 1 compra",
   SIN_RECOMPRA: "+2 semanas sin pedir",
-  AMBOS: "Ambos",
+  AMBOS: "Ambos", // deprecado — ya no se asigna
 };
 
 const MOTIVO_NOTAS: Record<MotivoAlerta, string> = {
-  UNA_COMPRA: `1 compra, hace menos de ${DIAS_SIN_RECOMPRA} días`,
+  UNA_COMPRA: `1 compra, hace ${DIAS_SIN_RECOMPRA}+ días`,
   SIN_RECOMPRA: `2+ compras, la última hace ${DIAS_SIN_RECOMPRA}+ días`,
   AMBOS: `1 compra, hace ${DIAS_SIN_RECOMPRA}+ días`,
 };
@@ -138,7 +137,6 @@ export function ClientesSinRecompra({
         { header: "En alerta", value: (r) => (r as (typeof porCiudad)[number]).total, width: 12 },
         { header: "Solo 1 compra", value: (r) => (r as (typeof porCiudad)[number]).UNA_COMPRA, width: 14 },
         { header: "+2 semanas sin pedir", value: (r) => (r as (typeof porCiudad)[number]).SIN_RECOMPRA, width: 20 },
-        { header: "Ambos", value: (r) => (r as (typeof porCiudad)[number]).AMBOS, width: 10 },
       ],
     },
     {
@@ -149,7 +147,6 @@ export function ClientesSinRecompra({
         { header: "En alerta", value: (r) => (r as (typeof porSegmento)[number]).total, width: 12 },
         { header: "Solo 1 compra", value: (r) => (r as (typeof porSegmento)[number]).UNA_COMPRA, width: 14 },
         { header: "+2 semanas sin pedir", value: (r) => (r as (typeof porSegmento)[number]).SIN_RECOMPRA, width: 20 },
-        { header: "Ambos", value: (r) => (r as (typeof porSegmento)[number]).AMBOS, width: 10 },
       ],
     },
     {
@@ -177,19 +174,19 @@ export function ClientesSinRecompra({
         <div>
           <CardTitle>Clientes sin Recompra</CardTitle>
           <p className="text-xs text-slate-400 mt-1">
-            PDV de la cartera que <span className="font-medium">ya compraron Panquecitas</span> pero compraron{" "}
-            <span className="font-medium">una sola vez</span> o llevan{" "}
-            <span className="font-medium">{DIAS_SIN_RECOMPRA} días o más sin pedir</span>. Una compra = una fecha
-            distinta con venta en Carga Radar. Los días se cuentan hasta la última fecha del Radar cargado (
-            <span className="font-medium">{fechaCorta(data.fechaCorte)}</span>). Las tres categorías no se solapan:
-            quien cumple las dos condiciones va en <span className="font-medium">Ambos</span>.
+            PDV de la cartera que <span className="font-medium">ya compraron Panquecitas</span> y llevan{" "}
+            <span className="font-medium">{DIAS_SIN_RECOMPRA} días o más sin pedir</span> (respecto de la última
+            fecha del Radar: <span className="font-medium">{fechaCorta(data.fechaCorte)}</span>).{" "}
+            <span className="font-medium">Solo 1 compra</span> = una sola fecha Radar hace {DIAS_SIN_RECOMPRA}+ días.{" "}
+            <span className="font-medium">+2 semanas sin pedir</span> = 2 o más fechas, la última hace{" "}
+            {DIAS_SIN_RECOMPRA}+ días. Quien compró hace menos de {DIAS_SIN_RECOMPRA} días no cuenta como alerta.
           </p>
         </div>
         <ExportExcelMultiButton filename={`Clientes sin recompra — ${filtroTexto}`} sheets={hojas} />
       </CardHeader>
       <CardContent>
         {/* ── Indicadores del corte ─────────────────────────────────── */}
-        <div className="grid grid-cols-2 md:grid-cols-4 gap-4 mb-5">
+        <div className="grid grid-cols-1 sm:grid-cols-3 gap-4 mb-5">
           <Resumen
             titulo="En alerta"
             valor={num(totalCorte.total)}

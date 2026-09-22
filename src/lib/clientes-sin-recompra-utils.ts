@@ -7,6 +7,7 @@ import type { Sector } from "@/lib/sectors";
 /** Días corridos sin pedir a partir de los cuales el cliente está en alerta. */
 export const DIAS_SIN_RECOMPRA = 14;
 
+/** Motivos de alerta. AMBOS quedó deprecado (ya no se asigna); se conserva en el tipo por filas históricas / Excel. */
 export type MotivoAlerta = "UNA_COMPRA" | "SIN_RECOMPRA" | "AMBOS";
 
 export interface ClienteAlertaRow {

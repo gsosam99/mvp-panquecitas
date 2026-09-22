@@ -11,28 +11,21 @@ import {
   type MotivoAlerta,
 } from "@/lib/clientes-sin-recompra-utils";
 
-// ── Clientes en alerta de recompra (DIENN, 22-09-2026) ────────────────
-// Clientes de la cartera que YA compraron Panquecitas pero no se consolidan:
+// ── Clientes en alerta de recompra (DIENN, 22-09-2026; ajuste 22-09-2026) ─
+// Clientes de la cartera que YA compraron Panquecitas pero no se consolidan.
+// Umbral común: la última compra tiene 14+ días respecto de la FECHA DE CORTE
+// (última fecha del Radar cargado, no "hoy"). Quien compró hace menos de 14
+// días NO entra en alerta — aunque solo tenga una compra.
 //
-//   - "Solo 1 compra": una sola fecha de venta Radar en todo el histórico.
-//   - "+2 semanas sin pedir": su última fecha de venta Radar tiene 14 días o
-//     más respecto de la FECHA DE CORTE (la última fecha que trae el Radar
-//     cargado, no hoy: si el reporte se carga con atraso, todos parecerían
-//     parados).
+// Categorías excluyentes (su suma = total en alerta):
+//   - "Solo 1 compra": exactamente una fecha Radar y esa compra hace 14+ días.
+//   - "+2 semanas sin pedir": 2 o más fechas Radar y la última hace 14+ días.
 //
-// Un cliente puede cumplir las dos (compró una sola vez y hace +2 semanas):
-// se clasifica en "Ambos". Las tres categorías son excluyentes y su suma es el
-// total en alerta.
+// "Ambos" ya no se usa: antes mezclaba "1 compra + 14 días" (que es Solo 1
+// compra) con un cruce que dejaba a los de 1 compra reciente como alerta.
 //
-// Fuente de las compras: radar_ventas_fechas (una fila por cliente + producto
-// + fecha con venta Radar, migration 013) — la misma que usa la tasa de
-// recompra. Se cuentan TODAS las fechas del cliente, también las anteriores a
-// su incorporación: para saber si el PDV repone lo que importa es su historia
-// real de pedidos, no la ventana de las tasas.
-//
-// Universo: la cartera vigente hoy (sin "Fuera de cartera"). Los inactivos
-// (cero compras) no entran — ya tienen su tarjeta en "Clientes Inactivos por
-// Segmento".
+// Fuente: radar_ventas_fechas (migration 013), misma que la tasa de recompra.
+// Universo: cartera vigente hoy. Cero compras no entran (van a Inactivos).
 
 export type { ClienteAlertaRow, ClientesSinRecompraResult, MotivoAlerta };
 
@@ -81,10 +74,10 @@ export async function getClientesSinRecompra(): Promise<ClientesSinRecompraResul
     const ordenadas = [...fechas].sort();
     const ultimaCompra = ordenadas[ordenadas.length - 1];
     const diasSinPedir = diasEntre(ultimaCompra, fechaCorte);
-    const unaCompra = ordenadas.length === 1;
-    const sinRecompra = diasSinPedir >= DIAS_SIN_RECOMPRA;
-    if (!unaCompra && !sinRecompra) continue;
+    // Sin alerta si aún está dentro de la ventana de 14 días desde la última compra.
+    if (diasSinPedir < DIAS_SIN_RECOMPRA) continue;
 
+    const unaCompra = ordenadas.length === 1;
     clientes.push({
       locationId: l.id,
       sapCode: l.sap_code,
@@ -93,7 +86,8 @@ export async function getClientesSinRecompra(): Promise<ClientesSinRecompraResul
       municipio: l.municipio,
       segmento: l.segmento_cliente?.trim() || SEGMENTO_SIN_DATO,
       cohorte: l.cohorte,
-      motivo: unaCompra && sinRecompra ? "AMBOS" : unaCompra ? "UNA_COMPRA" : "SIN_RECOMPRA",
+      // 1 compra + 14 días → Solo 1 compra; 2+ compras + 14 días → sin pedir.
+      motivo: unaCompra ? "UNA_COMPRA" : "SIN_RECOMPRA",
       compras: ordenadas.length,
       primeraCompra: ordenadas[0],
       ultimaCompra,
