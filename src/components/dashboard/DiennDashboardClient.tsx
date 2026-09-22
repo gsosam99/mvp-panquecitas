@@ -39,7 +39,11 @@ import { CombinacionesPilotoTabla } from "@/components/dashboard/CombinacionesPi
 import { TandasClientesTabla } from "@/components/dashboard/TandasClientesTabla";
 import { CombinacionesParticipacionCharts } from "@/components/dashboard/CombinacionesParticipacionCharts";
 import { CruceMercaderistaRadar } from "@/components/dashboard/CruceMercaderistaRadar";
+import { ReporteMercaderistas } from "@/components/dashboard/ReporteMercaderistas";
 import type { CruceInventarioRadarResult } from "@/lib/cruce-mercaderista-radar";
+import type { ReporteMercaderistasResult } from "@/lib/reporte-mercaderistas";
+import { ClientesSinRecompra } from "@/components/dashboard/ClientesSinRecompra";
+import type { ClientesSinRecompraResult } from "@/lib/clientes-sin-recompra-utils";
 import { resumirRotacion } from "@/lib/rotacion-utils";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Separator } from "@/components/ui/separator";
@@ -266,6 +270,10 @@ interface Props {
   tandasClientes: CombinacionesTanda[];
   /** Inventario reportado por mercaderistas vs venta Radar, por PDV. Global; se corta por ciudad en el cliente. */
   cruceMercaderistaRadar: CruceInventarioRadarResult;
+  /** Reporte de Mercaderistas: histórico de visitas + una fila por PDV del piloto. Global; se filtra en el cliente. */
+  reporteMercaderistas: ReporteMercaderistasResult;
+  /** Clientes con 1 sola compra o +2 semanas sin pedir. Global; se corta por ciudad en el cliente. */
+  clientesSinRecompra: ClientesSinRecompraResult;
 }
 
 export function DiennDashboardClient({
@@ -287,6 +295,8 @@ export function DiennDashboardClient({
   combinacionesPilotoOriginal,
   tandasClientes,
   cruceMercaderistaRadar,
+  reporteMercaderistas,
+  clientesSinRecompra,
 }: Props) {
   const [filter, setFilter] = useState<FilterKey>("TOTAL");
   const [zonaFilter, setZonaFilter] = useState("");
@@ -3078,6 +3088,24 @@ export function DiennDashboardClient({
         data={bundle.activacionAjustada}
         porCiudad={activacionPorCiudad}
         filtroTexto={filtroTexto}
+      />
+
+      {/* ── Clientes con 1 sola compra o +2 semanas sin pedir ── */}
+      <ClientesSinRecompra
+        data={clientesSinRecompra}
+        sector={filter}
+        filtroTexto={filtroTexto}
+        sectorLabels={sectorLabels}
+      />
+
+      <Separator className="mb-4 print:hidden" />
+
+      {/* ── Reporte de Mercaderistas: ejecución en PDV, global y por PDV ── */}
+      <ReporteMercaderistas
+        data={reporteMercaderistas}
+        sector={filter}
+        filtroTexto={filtroTexto}
+        sectorLabels={sectorLabels}
       />
 
     </div>

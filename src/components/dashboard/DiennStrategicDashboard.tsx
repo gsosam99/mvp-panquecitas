@@ -30,6 +30,8 @@ import { getSellOutPorClienteDiff } from "@/lib/sellout-queries";
 import { getAvailableZonasYAsesores } from "@/lib/sellout-utils";
 import { getUniverseLocations, COHORTE_PILOTO_ORIGINAL, SECTOR_LABELS, type Sector } from "@/lib/universe";
 import { getCruceInventarioRadar } from "@/lib/cruce-mercaderista-radar";
+import { getReporteMercaderistas } from "@/lib/reporte-mercaderistas";
+import { getClientesSinRecompra } from "@/lib/clientes-sin-recompra";
 import {
   getRendimientoVsMavesa,
   getComparativaPortafolioPorCiudad,
@@ -127,7 +129,7 @@ async function getBundle(sector?: Sector): Promise<SectorBundle> {
 // Sell-Out completo (sin filtrar), y se le pasan al cliente, que decide
 // qué mostrar sin volver a pedir datos.
 export async function DiennStrategicDashboard() {
-  const [total, cumana, barquisimetoEste, coberturaComunicacion, tiendaIdeal, sellOutClientes, universo, motivosNoVenta, posicionPorCliente, carteraPorSegmento, precioCorrecto, portafolioPorCiudad, ventas3MesesPorCiudad, ventaDiariaPorSegmento, tandasClientes, cruceMercaderistaRadar] =
+  const [total, cumana, barquisimetoEste, coberturaComunicacion, tiendaIdeal, sellOutClientes, universo, motivosNoVenta, posicionPorCliente, carteraPorSegmento, precioCorrecto, portafolioPorCiudad, ventas3MesesPorCiudad, ventaDiariaPorSegmento, tandasClientes, cruceMercaderistaRadar, reporteMercaderistas, clientesSinRecompra] =
     await Promise.all([
       getBundle(undefined),
       getBundle("cumana"),
@@ -148,6 +150,13 @@ export async function DiennStrategicDashboard() {
       // tanda con su filtro.
       getCombinacionesPorTanda(),
       getCruceInventarioRadar(),
+      // Reporte de Mercaderistas: histórico completo de visitas + una fila por
+      // PDV del piloto (ver src/lib/reporte-mercaderistas.ts). Global; el
+      // recorte por ciudad, mercaderista y fecha se hace en el cliente.
+      getReporteMercaderistas(),
+      // Clientes con 1 sola compra o +2 semanas sin pedir (ver
+      // src/lib/clientes-sin-recompra.ts). Global; se corta por ciudad en el cliente.
+      getClientesSinRecompra(),
     ]);
 
   const combinacionesPiloto = tandasClientes.find((t) => t.cohorte === null)!.resultado;
@@ -178,6 +187,8 @@ export async function DiennStrategicDashboard() {
       combinacionesPilotoOriginal={combinacionesPilotoOriginal}
       tandasClientes={tandasClientes}
       cruceMercaderistaRadar={cruceMercaderistaRadar}
+      reporteMercaderistas={reporteMercaderistas}
+      clientesSinRecompra={clientesSinRecompra}
     />
   );
 }

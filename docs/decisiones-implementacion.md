@@ -191,6 +191,28 @@ lista se actualiza con el tiempo.
     Sell-Out real (Sell-Out total ÷ (14 días × número de pares de rondas con dato)), mismo estilo
     que el cálculo ya existente de "Días de inv." en la tarjeta Running de Ventas.
 
+25. **Reporte de Mercaderistas (DIENN, 17-09-2026)**: la sección del final del dashboard DIENN
+    (`ReporteMercaderistas.tsx`) no agrega datos nuevos, reúne lo que ya captura el wizard de
+    auditoría. Decisiones: (a) los porcentajes globales se miden sobre la **última visita de cada
+    PDV** del período, para que un PDV visitado muchas veces no pese más que los demás — el corte
+    por mercaderista sí usa todas sus visitas, porque ahí se evalúa el trabajo hecho; (b) el
+    universo es **toda la cartera del piloto vigente hoy**, así se ve quién no ha sido visitado
+    (cobertura) y quién fue visitado pero **no compró Panquecitas** (Radar acumulado = 0); (c) los
+    PDV "Fuera de cartera" se incluyen marcados y quedan fuera por defecto (no son población, ver
+    `cohortes.ts`); (d) la presencia por presentación sale de la casilla "no disponible"
+    (`price_400_na`/`price_800_na`), el único dato por presentación que se captura — no hay
+    presencia por SKU, ni fotos, ni precios de competencia en el formulario.
+
+26. **Clientes sin Recompra (DIENN, 22-09-2026)**: tarjeta al final del dashboard DIENN
+    (`ClientesSinRecompra.tsx`, query en `src/lib/clientes-sin-recompra.ts`) con los PDV de la
+    cartera vigente que ya compraron Panquecitas pero (a) compraron **una sola vez** o (b) llevan
+    **14 días o más sin pedir**. Decisiones: una compra = una fecha distinta en
+    `radar_ventas_fechas`, contando todo el histórico del cliente (también lo anterior a su
+    incorporación); los días se miden hasta la **última fecha del Radar cargado**, no hasta hoy,
+    para que un reporte cargado con atraso no ponga a todos en alerta; las categorías son
+    excluyentes (1 compra reciente / +2 semanas con 2+ compras / ambos). Los inactivos no entran:
+    ya están en "Clientes Inactivos por Segmento".
+
 ## Qué falta confirmar con el equipo
 
 - Formato real del reporte SAP de pedidos pendientes (columnas exactas).
