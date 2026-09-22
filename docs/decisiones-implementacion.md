@@ -205,13 +205,16 @@ lista se actualiza con el tiempo.
 
 26. **Clientes sin Recompra (DIENN, 22-09-2026)**: tarjeta al final del dashboard DIENN
     (`ClientesSinRecompra.tsx`, query en `src/lib/clientes-sin-recompra.ts`) con los PDV de la
-    cartera vigente que ya compraron Panquecitas pero (a) compraron **una sola vez** o (b) llevan
-    **14 días o más sin pedir**. Decisiones: una compra = una fecha distinta en
-    `radar_ventas_fechas`, contando todo el histórico del cliente (también lo anterior a su
-    incorporación); los días se miden hasta la **última fecha del Radar cargado**, no hasta hoy,
-    para que un reporte cargado con atraso no ponga a todos en alerta; las categorías son
-    excluyentes (1 compra reciente / +2 semanas con 2+ compras / ambos). Los inactivos no entran:
-    ya están en "Clientes Inactivos por Segmento".
+    cartera vigente que ya compraron Panquecitas y llevan **14 días o más sin pedir**. Decisiones:
+    una compra = una fecha distinta en `radar_ventas_fechas`, contando todo el histórico del
+    cliente (también lo anterior a su incorporación); los días se miden hasta la **última fecha del
+    Radar cargado**, no hasta hoy, para que un reporte cargado con atraso no ponga a todos en
+    alerta; los 14 días son la ÚNICA condición de entrada — un cliente con una sola compra reciente
+    no está en alerta, todavía puede estar vendiéndola (corrección de DIENN el 22-09-2026, antes
+    entraba por tener 1 sola compra aunque fuera de anteayer); dentro de la alerta hay dos
+    categorías excluyentes según el historial: "Solo 1 compra" (probó y no repuso) y "+2 semanas
+    sin pedir" (2+ compras y paró). Los inactivos no entran: ya están en "Clientes Inactivos por
+    Segmento".
 
 ## Qué falta confirmar con el equipo
 
