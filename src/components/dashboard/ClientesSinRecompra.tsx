@@ -134,9 +134,25 @@ export function ClientesSinRecompra({
       columns: [
         { header: "Ciudad", value: (r) => (r as (typeof porCiudad)[number]).label, width: 22 },
         { header: "Clientes con compra", value: (r) => (r as (typeof porCiudad)[number]).compradores, width: 18 },
-        { header: "En alerta", value: (r) => (r as (typeof porCiudad)[number]).total, width: 12 },
+        { header: "Total", value: (r) => (r as (typeof porCiudad)[number]).total, width: 12 },
         { header: "Solo 1 compra", value: (r) => (r as (typeof porCiudad)[number]).UNA_COMPRA, width: 14 },
+        {
+          header: "% Solo 1 compra",
+          value: (r) => {
+            const row = r as (typeof porCiudad)[number];
+            return pct(row.UNA_COMPRA, row.compradores);
+          },
+          width: 14,
+        },
         { header: "+2 semanas sin pedir", value: (r) => (r as (typeof porCiudad)[number]).SIN_RECOMPRA, width: 20 },
+        {
+          header: "% +2 semanas sin pedir",
+          value: (r) => {
+            const row = r as (typeof porCiudad)[number];
+            return pct(row.SIN_RECOMPRA, row.compradores);
+          },
+          width: 18,
+        },
       ],
     },
     {
@@ -144,9 +160,19 @@ export function ClientesSinRecompra({
       rows: porSegmento,
       columns: [
         { header: "Segmento", value: (r) => (r as (typeof porSegmento)[number]).segmento, width: 26 },
-        { header: "En alerta", value: (r) => (r as (typeof porSegmento)[number]).total, width: 12 },
+        { header: "Total", value: (r) => (r as (typeof porSegmento)[number]).total, width: 12 },
         { header: "Solo 1 compra", value: (r) => (r as (typeof porSegmento)[number]).UNA_COMPRA, width: 14 },
+        {
+          header: "% Solo 1 compra",
+          value: (r) => pct((r as (typeof porSegmento)[number]).UNA_COMPRA, compradoresCorte),
+          width: 14,
+        },
         { header: "+2 semanas sin pedir", value: (r) => (r as (typeof porSegmento)[number]).SIN_RECOMPRA, width: 20 },
+        {
+          header: "% +2 semanas sin pedir",
+          value: (r) => pct((r as (typeof porSegmento)[number]).SIN_RECOMPRA, compradoresCorte),
+          width: 18,
+        },
       ],
     },
     {
@@ -188,7 +214,7 @@ export function ClientesSinRecompra({
         {/* ── Indicadores del corte ─────────────────────────────────── */}
         <div className="grid grid-cols-1 sm:grid-cols-3 gap-4 mb-5">
           <Resumen
-            titulo="En alerta"
+            titulo="Total"
             valor={num(totalCorte.total)}
             nota={`${pct(totalCorte.total, compradoresCorte)} de ${num(compradoresCorte)} con compra`}
           />
@@ -197,7 +223,7 @@ export function ClientesSinRecompra({
               key={m}
               titulo={MOTIVO_LABELS[m]}
               valor={num(totalCorte[m])}
-              nota={MOTIVO_NOTAS[m]}
+              nota={`${pct(totalCorte[m], compradoresCorte)} de ${num(compradoresCorte)} con compra · ${MOTIVO_NOTAS[m]}`}
               clase={MOTIVO_BADGES[m]}
             />
           ))}
@@ -211,11 +237,16 @@ export function ClientesSinRecompra({
               <TableRow>
                 <TableHead>Ciudad</TableHead>
                 <TableHead className="text-right">Con compra</TableHead>
-                <TableHead className="text-right">En alerta</TableHead>
-                <TableHead className="text-right">%</TableHead>
+                <TableHead className="text-right">Total</TableHead>
+                <TableHead className="text-right">% total</TableHead>
                 {MOTIVOS.map((m) => (
                   <TableHead key={m} className="text-right">
                     {MOTIVO_LABELS[m]}
+                  </TableHead>
+                ))}
+                {MOTIVOS.map((m) => (
+                  <TableHead key={`${m}-pct`} className="text-right">
+                    % {MOTIVO_LABELS[m]}
                   </TableHead>
                 ))}
               </TableRow>
@@ -230,6 +261,11 @@ export function ClientesSinRecompra({
                   {MOTIVOS.map((m) => (
                     <TableCell key={m} className="text-right">
                       {num(f[m])}
+                    </TableCell>
+                  ))}
+                  {MOTIVOS.map((m) => (
+                    <TableCell key={`${m}-pct`} className="text-right text-slate-500">
+                      {pct(f[m], f.compradores)}
                     </TableCell>
                   ))}
                 </TableRow>
@@ -248,10 +284,15 @@ export function ClientesSinRecompra({
             <TableHeader>
               <TableRow>
                 <TableHead>Segmento</TableHead>
-                <TableHead className="text-right">En alerta</TableHead>
+                <TableHead className="text-right">Total</TableHead>
                 {MOTIVOS.map((m) => (
                   <TableHead key={m} className="text-right">
                     {MOTIVO_LABELS[m]}
+                  </TableHead>
+                ))}
+                {MOTIVOS.map((m) => (
+                  <TableHead key={`${m}-pct`} className="text-right">
+                    % {MOTIVO_LABELS[m]}
                   </TableHead>
                 ))}
               </TableRow>
@@ -268,6 +309,11 @@ export function ClientesSinRecompra({
                       <Numero valor={f[m]} onClick={() => abrirLista(f.segmento, m)} />
                     </TableCell>
                   ))}
+                  {MOTIVOS.map((m) => (
+                    <TableCell key={`${m}-pct`} className="text-right text-slate-500">
+                      {pct(f[m], compradoresCorte)}
+                    </TableCell>
+                  ))}
                 </TableRow>
               ))}
               <TableRow className="bg-slate-50 font-semibold">
@@ -278,6 +324,11 @@ export function ClientesSinRecompra({
                 {MOTIVOS.map((m) => (
                   <TableCell key={m} className="text-right">
                     <Numero valor={totalCorte[m]} onClick={() => abrirLista("", m)} />
+                  </TableCell>
+                ))}
+                {MOTIVOS.map((m) => (
+                  <TableCell key={`${m}-pct`} className="text-right text-slate-500">
+                    {pct(totalCorte[m], compradoresCorte)}
                   </TableCell>
                 ))}
               </TableRow>
