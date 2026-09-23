@@ -64,20 +64,69 @@ interface SemanaPunto {
   label: string;
   kg400: number;
   kg800: number;
+  total: number;
 }
 
 const SemanalChart = dynamic(
   async () => {
-    const { ResponsiveContainer, BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ReferenceLine } =
-      await import("recharts");
+    const {
+      ResponsiveContainer,
+      BarChart,
+      Bar,
+      XAxis,
+      YAxis,
+      CartesianGrid,
+      Tooltip,
+      Legend,
+      ReferenceLine,
+      LabelList,
+    } = await import("recharts");
+
+    const kgTxt = (v: number) => `${v.toLocaleString("es-VE", { maximumFractionDigits: 0 })} kg`;
+
+    // Alto mínimo (px) de un tramo para que su número quepa adentro.
+    const ALTO_MIN_ETIQUETA = 16;
+
+    /**
+     * kg de un tramo de la pila, centrado adentro. Si el tramo es muy bajo para
+     * que el número quepa sin pisar al de al lado, va a la derecha de la barra,
+     * a la altura del tramo — el hueco entre barras está libre.
+     */
+    function etiquetaTramo(colorTexto: string) {
+      return function EtiquetaTramo(props: unknown) {
+        const { x, y, width, height, value } = props as {
+          x: number;
+          y: number;
+          width: number;
+          height: number;
+          value: number;
+        };
+        if (!value || value <= 0) return null;
+        const cabe = height >= ALTO_MIN_ETIQUETA;
+        return (
+          <text
+            x={cabe ? x + width / 2 : x + width + 4}
+            y={y + height / 2}
+            textAnchor={cabe ? "middle" : "start"}
+            dominantBaseline="central"
+            fontSize={10}
+            fontWeight={600}
+            fill={cabe ? "#ffffff" : colorTexto}
+          >
+            {kgTxt(value)}
+          </text>
+        );
+      };
+    }
 
     function SemanalInner({ data, semanaBloqueo }: { data: SemanaPunto[]; semanaBloqueo: string }) {
       return (
         <ResponsiveContainer width="100%" height={300}>
-          <BarChart data={data} margin={{ top: 20, right: 16, left: 0, bottom: 5 }}>
+          <BarChart data={data} margin={{ top: 24, right: 16, left: 16, bottom: 5 }}>
             <CartesianGrid strokeDasharray="3 3" stroke="#f1f5f9" vertical={false} />
             <XAxis dataKey="label" tick={{ fontSize: 11, fill: "#64748b" }} />
-            <YAxis tick={{ fontSize: 11, fill: "#94a3b8" }} width={56} unit=" kg" />
+            {/* Sin escala: cada barra lleva sus números. Holgura arriba para el total. */}
+            <YAxis hide domain={[0, (dataMax: number) => dataMax * 1.12]} />
             <Tooltip
               contentStyle={{ fontSize: 12, borderRadius: 8, border: "1px solid #e2e8f0" }}
               labelFormatter={(label) => `Semana del ${String(label)}`}
@@ -96,8 +145,21 @@ const SemanalChart = dynamic(
               strokeDasharray="4 4"
               label={{ value: "Bloqueo 400g", position: "top", fontSize: 11, fill: "#e11d48" }}
             />
-            <Bar dataKey="kg400" stackId="presentacion" fill={COLOR_400} maxBarSize={48} />
-            <Bar dataKey="kg800" stackId="presentacion" fill={COLOR_800} radius={[3, 3, 0, 0]} maxBarSize={48} />
+            <Bar dataKey="kg400" stackId="presentacion" fill={COLOR_400} maxBarSize={48}>
+              <LabelList dataKey="kg400" content={etiquetaTramo("#b45309")} />
+            </Bar>
+            <Bar dataKey="kg800" stackId="presentacion" fill={COLOR_800} radius={[3, 3, 0, 0]} maxBarSize={48}>
+              <LabelList dataKey="kg800" content={etiquetaTramo(COLOR_800)} />
+              {/* Total de la semana, encima de la pila. */}
+              <LabelList
+                dataKey="total"
+                position="top"
+                fill="#334155"
+                fontSize={11}
+                fontWeight={700}
+                formatter={(v) => (Number(v ?? 0) > 0 ? kgTxt(Number(v ?? 0)) : "")}
+              />
+            </Bar>
           </BarChart>
         </ResponsiveContainer>
       );
@@ -159,13 +221,18 @@ export function Impacto400g({
     for (const d of dias) {
       const lunes = lunesDe(d.fecha);
       let s = porSemana.get(lunes);
-      if (!s) porSemana.set(lunes, (s = { lunes, label: fechaCorta(lunes), kg400: 0, kg800: 0 }));
+      if (!s) porSemana.set(lunes, (s = { lunes, label: fechaCorta(lunes), kg400: 0, kg800: 0, total: 0 }));
       s.kg400 += d.kg400;
       s.kg800 += d.kg800;
     }
     return [...porSemana.values()]
       .sort((a, b) => a.lunes.localeCompare(b.lunes))
-      .map((s) => ({ ...s, kg400: Math.round(s.kg400 * 10) / 10, kg800: Math.round(s.kg800 * 10) / 10 }));
+      .map((s) => ({
+        ...s,
+        kg400: Math.round(s.kg400 * 10) / 10,
+        kg800: Math.round(s.kg800 * 10) / 10,
+        total: Math.round((s.kg400 + s.kg800) * 10) / 10,
+      }));
   }, [dias]);
 
   const porGrupo = useMemo<FilaGrupo[]>(
