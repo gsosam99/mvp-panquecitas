@@ -355,7 +355,7 @@ export function Impacto400g({
 
         {/* ── Semanal 400g / 800g ────────────────────────────────────── */}
         <p className="text-xs font-semibold uppercase tracking-wide text-slate-400 mb-2">
-          kg Radar por semana (lunes a domingo) — 400g vs 800g
+          kg Radar por semana — 400g vs 800g
         </p>
         <div className="mb-5">
           <SemanalChart data={semanas} semanaBloqueo={semanaBloqueo} />
