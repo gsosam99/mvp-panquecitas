@@ -99,45 +99,36 @@ const Inner = dynamic(
       const hayDesglose = showVentasDirecto || showVentasIndirecto || showVentasCumana || showVentasCabudare;
 
       // Margen superior del gráfico: hace falta para reconstruir dónde cae cada
-      // ratio en píxeles (ver etiquetaKgEnExtremoLibre).
+      // ratio en píxeles (ver tramoKg).
       const MARGEN_TOP = 32;
 
       // Distancia (px) del centro de las etiquetas de Directo / Indirecto
       // aterrizado a su línea: van pegadas, Directo arriba e Indirecto abajo.
       const ETIQUETA_MODELO_PX = 14;
 
-      // Con muchos días no caben todos los números: cada barra mide ~35 px y un
-      // "1.266 kg" ocupa más que eso, así que los textos se enciman. Pasados los
-      // 20 puntos se rotula uno de cada N, contando desde el último (el dato más
-      // reciente siempre lleva número). El tooltip sigue mostrando todos.
-      const MAX_ETIQUETAS = 20;
-      const pasoEtiquetas = Math.max(1, Math.ceil(data.length / MAX_ETIQUETAS));
-      const conEtiqueta = (index: number) => (data.length - 1 - index) % pasoEtiquetas === 0;
+      // Los kg del total van en VERTICAL dentro de la barra: en horizontal un
+      // "1.266 kg" es más ancho que la barra (~35 px con un mes de días) y los
+      // números de barras vecinas se encimaban. Así todas las barras llevan su kg.
+      const KG_FONT = 10;
+      const KG_PX_POR_CARACTER = 5.8;
+      const KG_MARGEN = 4;
+      const textoKg = (kg: number) => `${kg.toLocaleString("es-VE", { maximumFractionDigits: 0 })} kg`;
 
       /**
-       * Dibuja los kg de una barra en el extremo — arriba o abajo — que quede
-       * más lejos de los ratios de ese día.
+       * Tramo vertical [desde, hasta] (px) que ocupan los kg del total en una
+       * barra, en el extremo — base o tope — que quede más lejos de los ratios
+       * de ese día. Lo usan la etiqueta de kg y las etiquetas de % (para
+       * esquivarlo), así que ambas calculan exactamente el mismo lugar.
        *
        * Los % viven en el eje 0–100 y los kg en el suyo, así que la distancia
        * entre ambos cambia día a día: no hay posición fija que sirva siempre.
-       * Acá se convierte cada ratio visible a su píxel y se elige el extremo de
-       * la barra cuya distancia al ratio más cercano sea mayor.
        */
-      function etiquetaKgEnExtremoLibre(props: unknown) {
-        const { x, y, width, height, index, value } = props as {
-          x: number;
-          y: number;
-          width: number;
-          height: number;
-          index: number;
-          value: number;
-        };
-        if (!value || !conEtiqueta(index)) return null;
-
+      function tramoKg(index: number, base: number, altoArea: number) {
         const punto = data[index];
-        const base = y + height; // la base de la barra ES la línea del eje X
-        const altoArea = Math.max(base - MARGEN_TOP, 1);
+        if (hayDesglose || !(punto.radarKgDia > 0) || kgMax <= 0) return null;
         const pixelDeRatio = (pct: number) => base - (pct / 100) * altoArea;
+        const largo = textoKg(punto.radarKgDia).length * KG_PX_POR_CARACTER;
+        const tope = base - (punto.radarKgDia / kgMax) * altoArea;
 
         const ratios: number[] = [];
         if (showEfectividad) ratios.push(punto.efectividad);
@@ -166,27 +157,54 @@ const Inner = dynamic(
         if (showAterrizadaIndirecto && punto.efectIndirectoAterrizada != null)
           etiquetasPx.push(pixelDeRatio(punto.efectIndirectoAterrizada) + ETIQUETA_MODELO_PX);
 
-        const yArriba = y + 12;
-        const yAbajo = base - 6;
-        // Sin nada visible que esquivar se deja arriba. Se esquivan las líneas y
+        // Abajo: desde la base hacia arriba (si la barra es baja, sobresale por
+        // encima — el halo blanco lo mantiene legible). Arriba: desde el tope
+        // hacia abajo, solo si el texto cabe dentro de la barra.
+        const abajo = { desde: base - KG_MARGEN - largo, hasta: base - KG_MARGEN, lado: "abajo" as const };
+        const arriba = { desde: tope + KG_MARGEN, hasta: tope + KG_MARGEN + largo, lado: "arriba" as const };
+        const cabeArriba = arriba.hasta <= base - KG_MARGEN;
+
+        // Sin nada visible que esquivar se deja abajo. Se esquivan las líneas y
         // también las etiquetas pegadas a su línea (aterrizadas por modelo).
         const ocupados = [...ratios.map((r) => pixelDeRatio(r)), ...etiquetasPx];
-        const holgura = (yTexto: number) =>
-          ocupados.length === 0 ? Infinity : Math.min(...ocupados.map((p) => Math.abs(p - yTexto)));
-        const yTexto = holgura(yArriba) >= holgura(yAbajo) ? yArriba : yAbajo;
+        const holgura = (t: { desde: number; hasta: number }) =>
+          ocupados.length === 0
+            ? Infinity
+            : Math.min(...ocupados.map((p) => (p < t.desde ? t.desde - p : p > t.hasta ? p - t.hasta : 0)));
+        return cabeArriba && holgura(arriba) > holgura(abajo) ? arriba : abajo;
+      }
 
+      function etiquetaKgVertical(props: unknown) {
+        const { x, y, width, height, index, value } = props as {
+          x: number;
+          y: number;
+          width: number;
+          height: number;
+          index: number;
+          value: number;
+        };
+        if (!value) return null;
+        const base = y + height; // la base de la barra ES la línea del eje X
+        const tramo = tramoKg(index, base, Math.max(base - MARGEN_TOP, 1));
+        if (!tramo) return null;
+
+        // Rotado -90°: el texto corre de abajo hacia arriba. Se ancla en el
+        // extremo inferior del tramo con textAnchor "start".
+        const cx = x + width / 2;
         return (
           <text
-            x={x + width / 2}
-            y={yTexto}
-            textAnchor="middle"
+            x={cx}
+            y={tramo.hasta}
+            transform={`rotate(-90 ${cx} ${tramo.hasta})`}
+            dy="0.35em"
+            textAnchor="start"
             fill="#1e3a8a"
-            fontSize={10}
+            fontSize={KG_FONT}
             stroke="#ffffff"
             strokeWidth={3}
             paintOrder="stroke"
           >
-            {`${Number(value).toLocaleString("es-VE", { maximumFractionDigits: 0 })} kg`}
+            {textoKg(Number(value))}
           </text>
         );
       }
@@ -237,7 +255,7 @@ const Inner = dynamic(
           const x = lp.x ?? lp.viewBox?.x;
           const y = lp.y ?? lp.viewBox?.y;
           const { index, value } = lp;
-          if (value == null || x == null || y == null || !conEtiqueta(index)) return null;
+          if (value == null || x == null || y == null) return null;
           const punto = data[index];
 
           // Píxeles del área de trazado reconstruidos desde este mismo punto
@@ -255,11 +273,9 @@ const Inner = dynamic(
             const kgEnCentro = (desde: number, kg: number) => {
               if (kg > 0) obstaculos.push({ py: pixelKg(desde + kg / 2), medio: 12 });
             };
-            if (!hayDesglose && punto.radarKgDia > 0) {
-              // Los kg del total van en un extremo u otro: se esquivan ambos.
-              obstaculos.push({ py: pixelKg(punto.radarKgDia) + 12, medio: 7 });
-              obstaculos.push({ py: base - 6, medio: 7 });
-            }
+            // Los kg del total (vertical): se esquiva el tramo exacto que ocupan.
+            const tramo = tramoKg(index, base, altoArea);
+            if (tramo) obstaculos.push({ py: (tramo.desde + tramo.hasta) / 2, medio: (tramo.hasta - tramo.desde) / 2 });
             const dir = showVentasDirecto ? punto.radarKgDiaDirecto : 0;
             if (showVentasDirecto) kgEnCentro(0, dir);
             if (showVentasIndirecto) kgEnCentro(dir, punto.radarKgDiaIndirecto);
@@ -292,8 +308,11 @@ const Inner = dynamic(
             obstaculos.length === 0
               ? Infinity
               : Math.min(...obstaculos.map((o) => Math.abs(o.py - py) - o.medio - MEDIO_TEXTO));
-          // Centro del texto: arriba / abajo pegado, y luego un poco más lejos.
-          const candidatos = [y - 11, y + 12, y - 24, y + 25];
+          // Centro del texto: pegado arriba / abajo, y luego un poco más lejos.
+          // Los días pares prefieren arriba y los impares abajo: un "66.1%" es
+          // casi tan ancho como el espacio entre dos días, así que alternar
+          // evita que los % de días vecinos se toquen.
+          const candidatos = index % 2 === 0 ? [y - 11, y + 12, y - 24, y + 25] : [y + 12, y - 11, y + 25, y - 24];
           const libre = candidatos.find((c) => holgura(c) >= 1);
           const yCentro = libre ?? candidatos.reduce((a, b) => (holgura(b) > holgura(a) ? b : a));
 
@@ -320,15 +339,7 @@ const Inner = dynamic(
         <ResponsiveContainer width="100%" height={400}>
           <ComposedChart data={data} margin={{ top: MARGEN_TOP, right: 12, left: 10, bottom: 5 }}>
             <CartesianGrid strokeDasharray="3 3" stroke="#f1f5f9" vertical={false} />
-            {/* Las fechas del eje son las mismas que llevan número (conEtiqueta):
-                con el salto automático de Recharts no coincidían y parecía que a
-                un día —p. ej. el 21 sep— le faltaba su %. */}
-            <XAxis
-              dataKey="label"
-              tick={{ fontSize: 10, fill: "#94a3b8" }}
-              ticks={data.filter((_, i) => conEtiqueta(i)).map((p) => p.label)}
-              interval={0}
-            />
+            <XAxis dataKey="label" tick={{ fontSize: 10, fill: "#94a3b8" }} minTickGap={16} />
             {/* Ejes ocultos: escalan las series pero no muestran números. */}
             <YAxis yAxisId="kg" hide domain={kgMax > 0 ? [0, kgMax] : undefined} />
             <YAxis yAxisId="pct" hide domain={[0, 100]} />
@@ -419,11 +430,11 @@ const Inner = dynamic(
             {!hayDesglose && (
               <Bar yAxisId="kg" dataKey="radarKgDia" fill="#bfdbfe" radius={[3, 3, 0, 0]}>
                 {/* Los kg se colocan en el extremo de la barra que le deje espacio
-                    al ratio, decidido punto por punto (ver etiquetaKgEnExtremoLibre).
+                    al ratio, decidido punto por punto (ver tramoKg).
                     Una posición fija no sirve: los % viven en otro eje, así que en
                     unos días caen cerca del tope de la barra y en otros cerca de la
                     base — el 17 de agosto tapaban el ratio del modelo. */}
-                <LabelList dataKey="radarKgDia" content={etiquetaKgEnExtremoLibre} />
+                <LabelList dataKey="radarKgDia" content={etiquetaKgVertical} />
               </Bar>
             )}
             {showVentasDirecto && (
