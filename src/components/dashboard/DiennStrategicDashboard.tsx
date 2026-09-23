@@ -32,6 +32,7 @@ import { getUniverseLocations, COHORTE_PILOTO_ORIGINAL, SECTOR_LABELS, type Sect
 import { getCruceInventarioRadar } from "@/lib/cruce-mercaderista-radar";
 import { getReporteMercaderistas } from "@/lib/reporte-mercaderistas";
 import { getClientesSinRecompra } from "@/lib/clientes-sin-recompra";
+import { getImpacto400g } from "@/lib/impacto-400g";
 import {
   getRendimientoVsMavesa,
   getComparativaPortafolioPorCiudad,
@@ -129,7 +130,7 @@ async function getBundle(sector?: Sector): Promise<SectorBundle> {
 // Sell-Out completo (sin filtrar), y se le pasan al cliente, que decide
 // qué mostrar sin volver a pedir datos.
 export async function DiennStrategicDashboard() {
-  const [total, cumana, barquisimetoEste, coberturaComunicacion, tiendaIdeal, sellOutClientes, universo, motivosNoVenta, posicionPorCliente, carteraPorSegmento, precioCorrecto, portafolioPorCiudad, ventas3MesesPorCiudad, ventaDiariaPorSegmento, tandasClientes, cruceMercaderistaRadar, reporteMercaderistas, clientesSinRecompra] =
+  const [total, cumana, barquisimetoEste, coberturaComunicacion, tiendaIdeal, sellOutClientes, universo, motivosNoVenta, posicionPorCliente, carteraPorSegmento, precioCorrecto, portafolioPorCiudad, ventas3MesesPorCiudad, ventaDiariaPorSegmento, tandasClientes, cruceMercaderistaRadar, reporteMercaderistas, clientesSinRecompra, impacto400g] =
     await Promise.all([
       getBundle(undefined),
       getBundle("cumana"),
@@ -157,6 +158,9 @@ export async function DiennStrategicDashboard() {
       // Clientes con 1 sola compra o +2 semanas sin pedir (ver
       // src/lib/clientes-sin-recompra.ts). Global; se corta por ciudad en el cliente.
       getClientesSinRecompra(),
+      // Impacto del bloqueo del 400g (15-09): Radar 400g/800g antes y después
+      // (ver src/lib/impacto-400g.ts). Global; se corta por ciudad en el cliente.
+      getImpacto400g(),
     ]);
 
   const combinacionesPiloto = tandasClientes.find((t) => t.cohorte === null)!.resultado;
@@ -189,6 +193,7 @@ export async function DiennStrategicDashboard() {
       cruceMercaderistaRadar={cruceMercaderistaRadar}
       reporteMercaderistas={reporteMercaderistas}
       clientesSinRecompra={clientesSinRecompra}
+      impacto400g={impacto400g}
     />
   );
 }

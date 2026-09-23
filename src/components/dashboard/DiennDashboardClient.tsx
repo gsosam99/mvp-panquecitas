@@ -44,6 +44,8 @@ import type { CruceInventarioRadarResult } from "@/lib/cruce-mercaderista-radar"
 import type { ReporteMercaderistasResult } from "@/lib/reporte-mercaderistas";
 import { ClientesSinRecompra } from "@/components/dashboard/ClientesSinRecompra";
 import type { ClientesSinRecompraResult } from "@/lib/clientes-sin-recompra-utils";
+import { Impacto400g } from "@/components/dashboard/Impacto400g";
+import type { Impacto400gResult } from "@/lib/impacto-400g-utils";
 import { resumirRotacion } from "@/lib/rotacion-utils";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Separator } from "@/components/ui/separator";
@@ -274,6 +276,8 @@ interface Props {
   reporteMercaderistas: ReporteMercaderistasResult;
   /** Clientes con 1 sola compra o +2 semanas sin pedir. Global; se corta por ciudad en el cliente. */
   clientesSinRecompra: ClientesSinRecompraResult;
+  /** Impacto del bloqueo del 400g (Radar 400g/800g antes y después del 15-09). Global; se corta por ciudad en el cliente. */
+  impacto400g: Impacto400gResult;
 }
 
 export function DiennDashboardClient({
@@ -297,6 +301,7 @@ export function DiennDashboardClient({
   cruceMercaderistaRadar,
   reporteMercaderistas,
   clientesSinRecompra,
+  impacto400g,
 }: Props) {
   const [filter, setFilter] = useState<FilterKey>("TOTAL");
   const [zonaFilter, setZonaFilter] = useState("");
@@ -2394,6 +2399,9 @@ export function DiennDashboardClient({
           product="panquecitas"
         />
       </div>
+
+      {/* ── Impacto del bloqueo del 400g (15-09) ── */}
+      <Impacto400g data={impacto400g} sector={filter} filtroTexto={filtroTexto} sectorLabels={sectorLabels} />
 
       {/* ── Lista desplegable: Stock Out (con ubicación) ───────────────── */}
       <Card className="mb-6 print:hidden">
