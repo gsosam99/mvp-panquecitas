@@ -208,11 +208,11 @@ export function ReporteMercaderistas({
   const [hasta, setHasta] = useState("");
   const [estado, setEstado] = useState<EstadoPdv | "TODOS">("TODOS");
   const [busqueda, setBusqueda] = useState("");
-  const [incluirFueraDeCartera, setIncluirFueraDeCartera] = useState(false);
+  const [incluirFueraDelPiloto, setIncluirFueraDelPiloto] = useState(false);
   const [expandido, setExpandido] = useState<string | null>(null);
 
-  const fueraDeCartera = useMemo(
-    () => data.pdv.filter((p) => !p.enCartera && (sector === "TOTAL" || p.sector === sector)).length,
+  const fueraDelPiloto = useMemo(
+    () => data.pdv.filter((p) => !p.enPiloto && (sector === "TOTAL" || p.sector === sector)).length,
     [data.pdv, sector]
   );
 
@@ -223,7 +223,7 @@ export function ReporteMercaderistas({
     hasta: hasta || null,
     estado,
     busqueda,
-    incluirFueraDeCartera,
+    incluirFueraDelPiloto,
   };
 
   // `filas` = universo filtrado (base de los indicadores); `visibles` = lo que
@@ -232,7 +232,7 @@ export function ReporteMercaderistas({
     () => filtrarReporte(data.pdv, data.visitas, filtro),
     // El objeto `filtro` se arma en cada render; las dependencias son sus campos.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-    [data.pdv, data.visitas, sector, mercaderista, desde, hasta, estado, busqueda, incluirFueraDeCartera]
+    [data.pdv, data.visitas, sector, mercaderista, desde, hasta, estado, busqueda, incluirFueraDelPiloto]
   );
 
   const resumen = useMemo(() => resumirGlobal(filas, visitasPeriodo), [filas, visitasPeriodo]);
@@ -256,7 +256,11 @@ export function ReporteMercaderistas({
       filaResumen("Ciudad", filtroTexto),
       filaResumen("Período", rangoTexto),
       filaResumen("Mercaderista", mercaderista ?? "Todos"),
-      filaResumen("PDV del universo", resumen.pdvUniverso, incluirFueraDeCartera ? "incluye fuera de cartera" : "solo cartera del piloto"),
+      filaResumen(
+        "PDV del universo",
+        resumen.pdvUniverso,
+        incluirFueraDelPiloto ? "incluye visitas fuera del piloto inicial" : "solo los del piloto inicial"
+      ),
       filaResumen("PDV visitados", resumen.visitados, `${pct(resumen.pctCobertura)} de cobertura`),
       filaResumen("PDV sin visitar", resumen.noVisitados, ""),
       filaResumen("Visitas registradas", resumen.visitasTotales, `${porMercaderista.length} mercaderistas`),
@@ -317,7 +321,7 @@ export function ReporteMercaderistas({
       { header: "Acceso a depósito", value: (r) => (r.ultimaPeriodo ? si(r.ultimaPeriodo.accesoDeposito) : ""), width: 14 },
       { header: "Unidades en depósito", value: (r) => r.ultimaPeriodo?.unidadesDeposito ?? "", width: 16 },
       { header: "Radar acumulado (kg)", value: (r) => r.radarKg, width: 18 },
-      { header: "En cartera", value: (r) => (r.enCartera ? "sí" : "no (fuera de cartera)"), width: 18 },
+      { header: "Del piloto inicial", value: (r) => (r.enPiloto ? "sí" : "no (visita fuera del piloto)"), width: 20 },
     ];
 
     const colVisitas: ExcelColumn<ReporteVisitaRow>[] = [
@@ -389,7 +393,7 @@ export function ReporteMercaderistas({
     filtroTexto,
     rangoTexto,
     mercaderista,
-    incluirFueraDeCartera,
+    incluirFueraDelPiloto,
   ]);
 
   const COLUMNAS_TABLA = 11;
@@ -403,7 +407,8 @@ export function ReporteMercaderistas({
           <p className="text-xs text-slate-400 mt-1">
             Lo que reportaron los mercaderistas en los PDV del plan piloto. Los porcentajes se miden sobre la{" "}
             <span className="font-medium">última visita de cada PDV</span> en el período; el corte por mercaderista usa
-            todas sus visitas. El universo es toda la cartera del piloto, así que también se ve quién{" "}
+            todas sus visitas. El universo son los <span className="font-medium">PDV del piloto inicial</span> (los 358
+            de la tanda de arranque, lo único que visitan los mercaderistas), así que también se ve quién{" "}
             <span className="font-medium">no ha sido visitado</span> y quién fue visitado pero{" "}
             <span className="font-medium">no ha comprado Panquecitas</span> (Radar acumulado = 0). Objetivo de PVP:{" "}
             {sectorLabels.cumana} ${PVP_TARGETS.cumana.p400}/${PVP_TARGETS.cumana.p800} ·{" "}
@@ -490,14 +495,14 @@ export function ReporteMercaderistas({
               limpiar filtros
             </button>
           )}
-          {fueraDeCartera > 0 && (
+          {fueraDelPiloto > 0 && (
             <label className="flex items-center gap-1.5 text-xs text-slate-500">
               <input
                 type="checkbox"
-                checked={incluirFueraDeCartera}
-                onChange={(e) => setIncluirFueraDeCartera(e.target.checked)}
+                checked={incluirFueraDelPiloto}
+                onChange={(e) => setIncluirFueraDelPiloto(e.target.checked)}
               />
-              Incluir {fueraDeCartera} PDV fuera de cartera
+              Incluir {fueraDelPiloto} PDV visitados fuera del piloto inicial
             </label>
           )}
         </div>
@@ -656,7 +661,7 @@ export function ReporteMercaderistas({
                           {f.cliente}
                           <p className="text-[11px] font-normal text-slate-400">
                             {f.sapCode} · {ciudad(f.sector)} · {f.segmento ?? SEGMENTO_SIN_DATO}
-                            {!f.enCartera && " · fuera de cartera"}
+                            {!f.enPiloto && ` · fuera del piloto inicial (${f.cohorte ?? "sin tanda"})`}
                           </p>
                         </TableCell>
                         <TableCell>

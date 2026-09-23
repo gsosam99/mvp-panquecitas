@@ -196,10 +196,13 @@ lista se actualiza con el tiempo.
     auditoría. Decisiones: (a) los porcentajes globales se miden sobre la **última visita de cada
     PDV** del período, para que un PDV visitado muchas veces no pese más que los demás — el corte
     por mercaderista sí usa todas sus visitas, porque ahí se evalúa el trabajo hecho; (b) el
-    universo es **toda la cartera del piloto vigente hoy**, así se ve quién no ha sido visitado
-    (cobertura) y quién fue visitado pero **no compró Panquecitas** (Radar acumulado = 0); (c) los
-    PDV "Fuera de cartera" se incluyen marcados y quedan fuera por defecto (no son población, ver
-    `cohortes.ts`); (d) la presencia por presentación sale de la casilla "no disponible"
+    universo son **los 358 del piloto inicial** (cohorte "Piloto original"), NO la cartera
+    ampliada: los mercaderistas solo visitan esos PDV, así que medir la cobertura contra los 1100+
+    de la cartera la hundiría con PDV que nadie se propuso visitar. Se incluyen todos, visitados o
+    no, para ver quién no ha sido visitado y quién fue visitado pero **no compró Panquecitas**
+    (Radar acumulado = 0); (c) un PDV de otra tanda solo aparece si tiene visitas registradas (la
+    app de campo le lista al mercaderista todos los PDV de su sector), marcado y fuera de los
+    denominadores por defecto; (d) la presencia por presentación sale de la casilla "no disponible"
     (`price_400_na`/`price_800_na`), el único dato por presentación que se captura — no hay
     presencia por SKU, ni fotos, ni precios de competencia en el formulario.
 

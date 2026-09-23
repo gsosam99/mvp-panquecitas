@@ -88,7 +88,7 @@ export interface ResumenEjecucion {
 }
 
 export interface ResumenGlobal extends ResumenEjecucion {
-  /** PDV del universo filtrado (denominador de la cobertura). */
+  /** PDV del universo filtrado — los 358 del piloto inicial, salvo que se pidan también los de fuera. */
   pdvUniverso: number;
   visitados: number;
   noVisitados: number;
@@ -269,8 +269,11 @@ export interface FiltroReporte {
   estado: EstadoPdv | "TODOS";
   /** Texto libre: código SAP o nombre del cliente. */
   busqueda: string;
-  /** Los "Fuera de cartera" quedan fuera por defecto (no son población). */
-  incluirFueraDeCartera: boolean;
+  /**
+   * Los PDV visitados que NO son de los 358 del piloto inicial quedan fuera por
+   * defecto: no son universo de mercaderistas y no pueden entrar en las tasas.
+   */
+  incluirFueraDelPiloto: boolean;
 }
 
 /**
@@ -294,7 +297,7 @@ export function filtrarReporte(
 
   const base = pdv.filter((p) => {
     if (filtro.sector !== "TOTAL" && p.sector !== filtro.sector) return false;
-    if (!filtro.incluirFueraDeCartera && !p.enCartera) return false;
+    if (!filtro.incluirFueraDelPiloto && !p.enPiloto) return false;
     if (busqueda && !`${p.sapCode} ${p.cliente}`.toLowerCase().includes(busqueda)) return false;
     return true;
   });

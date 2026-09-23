@@ -4,7 +4,7 @@ import { PRODUCT_IDS } from "@/data/catalog";
 import { PVP_TARGETS, PVP_TOLERANCE } from "@/data/pvp-thresholds";
 import { getBcvRateLookup, precioVisitaEnUsd } from "@/lib/bcv";
 import { getSellInTotalsByLocation, getVolumenLocations, vigentesAl } from "@/lib/universe";
-import { esFueraDeCartera } from "@/lib/cohortes";
+import { COHORTE_PILOTO_ORIGINAL } from "@/lib/cohortes";
 import { sectorGroup, type Sector } from "@/lib/sectors";
 import { todayISO } from "@/lib/date-buckets";
 import { agruparCategoriaAnaquel, type EstadoPrecio } from "@/lib/dienn-queries";
@@ -34,14 +34,17 @@ import type { Location, PopMaterialOption, PopMessageOption } from "@/types";
 //      Cobertura/Comunicación). Contar todas las visitas haría que un PDV
 //      visitado 5 veces pesara 5 veces. El corte por mercaderista sí usa
 //      todas sus visitas: ahí lo que se evalúa es el trabajo hecho.
-//   2. El universo es TODA la cartera del piloto vigente hoy, no solo los PDV
-//      visitados: hace falta ver quién NO ha sido visitado (cobertura) y quién
+//   2. El universo son los 358 del PILOTO INICIAL (cohorte "Piloto original",
+//      ver cohortes.ts), no la cartera completa: los mercaderistas solo visitan
+//      esos PDV, así que medir la cobertura contra los 1100+ de la cartera
+//      ampliada la hundiría con PDV que nadie se propuso visitar. Se incluyen
+//      todos, visitados o no, para poder ver quién NO ha sido visitado y quién
 //      fue visitado pero NO compró Panquecitas (Radar = 0).
-//   3. Los PDV "Fuera de cartera" (ver cohortes.ts) entran marcados con
-//      enCartera=false y el dashboard los deja fuera por defecto: su volumen
-//      cuenta, pero no son población y no pueden entrar en ningún denominador.
-//      Se incluyen igual para que una visita registrada en campo nunca
-//      desaparezca del reporte.
+//   3. Un PDV de fuera de los 358 solo aparece si TIENE visitas registradas
+//      (la app de campo lista todos los PDV del sector del mercaderista, así
+//      que puede pasar). Entra marcado con enPiloto=false y el dashboard lo
+//      deja fuera por defecto: así no entra en ningún denominador, pero una
+//      visita hecha en campo nunca desaparece del reporte.
 //
 // Las funciones puras de agregación viven en reporte-mercaderistas-utils.ts,
 // para poder correr también en el cliente (este archivo es server-only).
@@ -138,8 +141,12 @@ export interface ReportePdvRow {
   asesor: string | null;
   grupoVendedor: string | null;
   cohorte: string | null;
-  /** false = "Fuera de cartera": no entra en denominadores (ver cohortes.ts). */
-  enCartera: boolean;
+  /**
+   * true = es uno de los 358 del piloto inicial, el universo que visitan los
+   * mercaderistas. false = PDV de otra tanda con visitas registradas: se
+   * muestra, pero no entra en denominadores.
+   */
+  enPiloto: boolean;
   visitas: number;
   primeraVisita: string | null;
   /** Última visita registrada (histórico completo, sin recortar por fecha). */
@@ -176,6 +183,11 @@ function ubicacionesDe(v: VisitaCruda): string[] {
   return out;
 }
 
+/** ¿Es uno de los 358 del arranque? Ver COHORTE_PILOTO_ORIGINAL en cohortes.ts. */
+function esPilotoOriginal(cohorte: string | null | undefined): boolean {
+  return (cohorte ?? "").trim() === COHORTE_PILOTO_ORIGINAL.nombre;
+}
+
 function nombreMercaderista(v: VisitaCruda): string {
   const nombre = `${v.worker_first_name ?? ""} ${v.worker_last_name ?? ""}`.trim();
   return nombre.length > 0 ? nombre : "Sin identificar";
@@ -184,8 +196,10 @@ function nombreMercaderista(v: VisitaCruda): string {
 export async function getReporteMercaderistas(): Promise<ReporteMercaderistasResult> {
   const supabase = createSupabaseServiceClient();
 
-  // Cartera vigente hoy (ver cohortes.ts) más los PDV "Fuera de cartera", que
-  // getVolumenLocations() sí trae y quedan marcados con enCartera=false.
+  // Se leen las visitas de TODOS los PDV de los sectores piloto, no solo de los
+  // 358: la app de campo le lista al mercaderista todos los PDV de su sector,
+  // así que puede haber visitas fuera del universo y hay que poder mostrarlas.
+  // El recorte a los 358 se hace al armar las filas, más abajo.
   const universo = vigentesAl(await getVolumenLocations(), todayISO());
   if (universo.length === 0) return { pdv: [], visitas: [], mercaderistas: [] };
 
@@ -294,6 +308,11 @@ export async function getReporteMercaderistas(): Promise<ReporteMercaderistasRes
     const sector = sectorGroup(l.oficina_venta);
     if (!sector) continue;
     const suyas = porPdv.get(l.id) ?? [];
+    const enPiloto = esPilotoOriginal(l.cohorte);
+    // Fuera de los 358 solo entra el que tenga visitas registradas: el resto de
+    // la cartera ampliada no es universo de mercaderistas y solo ensuciaría la
+    // lista con cientos de PDV "no visitados" que nadie tenía que visitar.
+    if (!enPiloto && suyas.length === 0) continue;
     const radarKg = radarTotals.get(l.id) ?? 0;
 
     pdv.push({
@@ -310,7 +329,7 @@ export async function getReporteMercaderistas(): Promise<ReporteMercaderistasRes
       asesor: l.asesor_encargado,
       grupoVendedor: l.grupo_vendedor,
       cohorte: l.cohorte,
-      enCartera: !esFueraDeCartera(l.cohorte),
+      enPiloto,
       visitas: suyas.length,
       primeraVisita: suyas.length > 0 ? suyas[suyas.length - 1].fecha : null,
       ultima: suyas[0] ?? null,
