@@ -31,7 +31,7 @@ import {
   type PanComparisonGranularity,
   type TimeGranularity,
 } from "@/lib/date-buckets";
-import { estabaIncorporado, vigentesAl } from "@/lib/cohortes";
+import { estabaIncorporado, sinAmpliacionFranquiciados, vigentesAl } from "@/lib/cohortes";
 import { DISTRIBUIDORAS_INTERMEDIARIAS_SAP_CODES, FRANQUICIADAS_INDIRECTO_SAP_CODES } from "@/lib/sectors";
 import { esSegmentoSinAlimentos, SEGMENTO_SIN_DATO } from "@/lib/segmentos";
 import type { Location, LocationType } from "@/types";
@@ -1192,9 +1192,11 @@ const RENDIMIENTO_3M_VACIO: Rendimiento3MResult = {
 
 export async function getRendimiento3M(
   poblacion: Pan3MPoblacion,
-  sector?: Sector
+  sector?: Sector,
+  /** Sin la tanda "Indirecto Cumaná 2" (botón de los gráficos de ratios). */
+  excluirAmpliacion = false
 ): Promise<Rendimiento3MResult> {
-  const universoTotal = await getUniverseLocations();
+  const universoTotal = sinAmpliacionFranquiciados(await getUniverseLocations(), excluirAmpliacion);
   const delSector = sector ? universoTotal.filter((l) => sectorGroup(l.oficina_venta) === sector) : universoTotal;
   // Cartera vigente hoy: una tanda con fecha futura no entra al promedio.
   const universo = vigentesAl(delSector, todayISO());
@@ -1398,13 +1400,15 @@ export type BasePan = "cartera" | "recompraPan" | "recompraPanquecitas";
 export type SeriePanq = "totales" | "recompra";
 
 export async function getRendimiento3MFocoRecompra(
-  sector?: Sector
+  sector?: Sector,
+  /** Sin la tanda "Indirecto Cumaná 2" (botón de los gráficos de ratios). */
+  excluirAmpliacion = false
 ): Promise<Record<AlcanceCartera, Record<SegmentoRecompra, Record<BasePan, Record<SeriePanq, Rendimiento3MResult>>>>> {
   const vacioSerie = { totales: RENDIMIENTO_3M_VACIO, recompra: RENDIMIENTO_3M_VACIO };
   const vacioBase = { cartera: vacioSerie, recompraPan: vacioSerie, recompraPanquecitas: vacioSerie };
   const vacioSegmento = { foco: vacioBase, todos: vacioBase };
   const vacio = { completa: vacioSegmento, piloto: vacioSegmento };
-  const universoTotal = await getUniverseLocations();
+  const universoTotal = sinAmpliacionFranquiciados(await getUniverseLocations(), excluirAmpliacion);
   const delSector = sector ? universoTotal.filter((l) => sectorGroup(l.oficina_venta) === sector) : universoTotal;
   const vigentes = vigentesAl(delSector, todayISO());
   if (vigentes.length === 0) return vacio;

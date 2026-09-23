@@ -6,6 +6,9 @@ export const metadata: Metadata = { title: "Resumen del Piloto — Panquecitas" 
 
 export default async function ResumenPilotoPage() {
   const resumen = await getResumenPiloto();
+  const cartera = resumen.composicionCartera;
+  const pct = (n: number) =>
+    cartera.total > 0 ? (Math.round((n / cartera.total) * 1000) / 10).toLocaleString("es-VE") : "0";
 
   return (
     <div>
@@ -73,6 +76,65 @@ export default async function ResumenPilotoPage() {
           </CardContent>
         </Card>
       </div>
+
+      <Card className="mb-6">
+        <CardHeader>
+          <CardTitle>Composición de la cartera</CardTitle>
+          <p className="text-xs text-slate-400 mt-1">
+            Sobre los {cartera.total} PDV en cartera (sin los &quot;Fuera de cartera&quot;). &quot;Mixto&quot; cuenta como
+            Directo.
+          </p>
+        </CardHeader>
+        <CardContent>
+          <div className="grid grid-cols-1 gap-4 sm:grid-cols-3 mb-6">
+            {[
+              { label: "Modelo directo", n: cartera.directos },
+              { label: "Modelo indirecto", n: cartera.indirectos },
+              ...(cartera.sinEsquema > 0 ? [{ label: "Sin esquema cargado", n: cartera.sinEsquema }] : []),
+            ].map((m) => (
+              <div key={m.label} className="rounded-lg border border-slate-100 p-4">
+                <p className="text-sm text-slate-500">{m.label}</p>
+                <p className="text-2xl font-bold text-slate-900">
+                  {m.n} <span className="text-base font-medium text-slate-500">· {pct(m.n)}%</span>
+                </p>
+              </div>
+            ))}
+          </div>
+          <div className="overflow-x-auto">
+            <table className="w-full text-sm">
+              <thead>
+                <tr className="border-b border-slate-200 text-left text-slate-500">
+                  <th className="py-2 pr-4 font-medium">Segmento</th>
+                  <th className="py-2 px-2 text-right font-medium">PDV</th>
+                  <th className="py-2 px-2 text-right font-medium">% cartera</th>
+                  <th className="py-2 px-2 text-right font-medium">Directos</th>
+                  <th className="py-2 pl-2 text-right font-medium">Indirectos</th>
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-slate-100">
+                {cartera.segmentos.map((s) => (
+                  <tr key={s.segmento}>
+                    <td className="py-2 pr-4 text-slate-900">{s.segmento}</td>
+                    <td className="py-2 px-2 text-right font-medium text-slate-900">{s.cantidad}</td>
+                    <td className="py-2 px-2 text-right text-slate-700">{s.pct.toLocaleString("es-VE")}%</td>
+                    <td className="py-2 px-2 text-right text-slate-700">{s.directos}</td>
+                    <td className="py-2 pl-2 text-right text-slate-700">{s.indirectos}</td>
+                  </tr>
+                ))}
+              </tbody>
+              <tfoot>
+                <tr className="border-t border-slate-200 font-semibold text-slate-900">
+                  <td className="py-2 pr-4">Total</td>
+                  <td className="py-2 px-2 text-right">{cartera.total}</td>
+                  <td className="py-2 px-2 text-right">100%</td>
+                  <td className="py-2 px-2 text-right">{cartera.directos}</td>
+                  <td className="py-2 pl-2 text-right">{cartera.indirectos}</td>
+                </tr>
+              </tfoot>
+            </table>
+          </div>
+        </CardContent>
+      </Card>
 
       <Card className="mb-6">
         <CardHeader>

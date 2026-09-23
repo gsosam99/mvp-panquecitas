@@ -44,6 +44,24 @@ export interface ResumenPiloto {
   distribuidorasIntermediarias: number;
   porCohorte: CohorteResumen[];
   porSector: SectorResumen[];
+  composicionCartera: ComposicionCartera;
+}
+
+/** Un segmento de cliente de la cartera, con su peso y su partición por modelo. */
+export interface SegmentoCarteraResumen extends EsquemaAtencionResumen {
+  segmento: string;
+  cantidad: number;
+  /** % sobre el total de la cartera. */
+  pct: number;
+}
+
+/**
+ * Composición de la CARTERA (sin los "Fuera de cartera"): modelo de atención y
+ * segmento de cliente, en número y % del total (pedido del usuario, 23-09-2026).
+ */
+export interface ComposicionCartera extends EsquemaAtencionResumen {
+  total: number;
+  segmentos: SegmentoCarteraResumen[];
 }
 
 const PILOT_SECTOR_KEYS: Sector[] = ["cumana", "barquisimeto_este"];
@@ -120,6 +138,29 @@ export async function getResumenPiloto(): Promise<ResumenPiloto> {
     };
   });
 
+  // Composición de la cartera: misma base que "en cartera" de la tarjeta de
+  // arriba (universo), no el total con los fuera de cartera.
+  const locsPorSegmento = new Map<string, Location[]>();
+  for (const l of universo) {
+    const segmento = l.segmento_cliente?.trim() || "Sin segmento";
+    const grupo = locsPorSegmento.get(segmento);
+    if (grupo) grupo.push(l);
+    else locsPorSegmento.set(segmento, [l]);
+  }
+  const pctDeCartera = (n: number) => (universo.length > 0 ? Math.round((n / universo.length) * 1000) / 10 : 0);
+  const composicionCartera: ComposicionCartera = {
+    total: universo.length,
+    ...contarEsquemas(universo),
+    segmentos: [...locsPorSegmento.entries()]
+      .map(([segmento, locs]) => ({
+        segmento,
+        cantidad: locs.length,
+        pct: pctDeCartera(locs.length),
+        ...contarEsquemas(locs),
+      }))
+      .sort((a, b) => b.cantidad - a.cantidad),
+  };
+
   return {
     totalPdv: volumen.length,
     pdvEnCartera: universo.length,
@@ -130,5 +171,6 @@ export async function getResumenPiloto(): Promise<ResumenPiloto> {
     distribuidorasIntermediarias: DISTRIBUIDORAS_INTERMEDIARIAS_SAP_CODES.length,
     porCohorte,
     porSector,
+    composicionCartera,
   };
 }

@@ -92,6 +92,22 @@ export const COHORTES_NUEVAS: readonly Cohorte[] = [
   { nombre: "Ampliación", desde: "2026-08-24", gruposVendedores: [] },
 ];
 
+/**
+ * La última ampliación de cartera: los ~975 PDV de los 7 franquiciados de
+ * Cumaná (08-09-2026). Los gráficos de ratios del dashboard de DIENN tienen un
+ * botón para verlos sin esta tanda (pedido del usuario, 23-09-2026).
+ */
+export const COHORTE_AMPLIACION_FRANQUICIADOS_CUMANA = "Indirecto Cumaná 2";
+
+/** Recorta la tanda de la ampliación de franquiciados de Cumaná, si `excluir`. */
+export function sinAmpliacionFranquiciados<T extends { cohorte?: string | null }>(
+  items: readonly T[],
+  excluir: boolean
+): T[] {
+  if (!excluir) return [...items];
+  return items.filter((i) => (i.cohorte ?? "").trim() !== COHORTE_AMPLIACION_FRANQUICIADOS_CUMANA);
+}
+
 /** Todas las tandas, en orden — alimenta el filtro de cohorte del dashboard. */
 export const COHORTES: readonly Cohorte[] = [COHORTE_PILOTO_ORIGINAL, ...COHORTES_NUEVAS];
 

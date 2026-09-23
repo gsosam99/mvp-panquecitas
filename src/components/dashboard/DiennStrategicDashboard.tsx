@@ -70,6 +70,10 @@ async function getBundle(sector?: Sector): Promise<SectorBundle> {
     rendimientoVsMayonesa,
     activacionAjustada,
     recompraFranquiciados,
+    rendimiento3MUniversoSinAmpl,
+    rendimiento3MFocoRecompraSinAmpl,
+    rendimientoVsMargarinaSinAmpl,
+    rendimientoVsMayonesaSinAmpl,
   ] = await Promise.all([
     getTotalToneladas(sector),
     getTotalToneladasPedidas(sector),
@@ -95,6 +99,12 @@ async function getBundle(sector?: Sector): Promise<SectorBundle> {
     getRendimientoVsMavesa("mayonesa", sector),
     getActivacionAjustada(sector),
     getRecompraFranquiciados(sector),
+    // Los mismos ratios sin la ampliación de franquiciados de Cumaná
+    // ("Indirecto Cumaná 2"), para el botón de los gráficos de ratios.
+    getRendimiento3M("universo", sector, true),
+    getRendimiento3MFocoRecompra(sector, true),
+    getRendimientoVsMavesa("margarina", sector, true),
+    getRendimientoVsMavesa("mayonesa", sector, true),
   ]);
 
   return {
@@ -119,6 +129,11 @@ async function getBundle(sector?: Sector): Promise<SectorBundle> {
     rendimientoVsMavesa: { margarina: rendimientoVsMargarina, mayonesa: rendimientoVsMayonesa },
     activacionAjustada,
     recompraFranquiciados,
+    ratiosSinAmpliacion: {
+      rendimiento3MUniverso: rendimiento3MUniversoSinAmpl,
+      rendimiento3MFocoRecompra: rendimiento3MFocoRecompraSinAmpl,
+      rendimientoVsMavesa: { margarina: rendimientoVsMargarinaSinAmpl, mayonesa: rendimientoVsMayonesaSinAmpl },
+    },
   };
 }
 

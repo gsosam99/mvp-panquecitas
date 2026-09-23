@@ -44,6 +44,9 @@ import type { ClientesSinRecompraResult } from "@/lib/clientes-sin-recompra-util
 import { Impacto400g } from "@/components/dashboard/Impacto400g";
 import type { Impacto400gResult } from "@/lib/impacto-400g-utils";
 import { resumirRotacion } from "@/lib/rotacion-utils";
+import { FiltroFechas } from "@/components/dashboard/FiltroFechas";
+import { siguienteDiaHabil } from "@/lib/business-days";
+import { PILOTO_INICIO } from "@/lib/cohortes";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Separator } from "@/components/ui/separator";
 import {
@@ -138,6 +141,12 @@ export interface SectorBundle {
   rendimiento3MFocoRecompra: Record<AlcanceCartera, Record<SegmentoRecompra, Record<BasePan, Record<SeriePanq, Rendimiento3MResult>>>>;
   /** Rendimiento diario de Panquecitas vs. promedio histórico de Margarina/Mayonesa (Mavesa), por categoría. */
   rendimientoVsMavesa: Record<MavesaCategoria, RendimientoVsMavesaResult>;
+  /** Los mismos ratios sin la tanda "Indirecto Cumaná 2" (ampliación de franquiciados, 08-09). */
+  ratiosSinAmpliacion: {
+    rendimiento3MUniverso: Rendimiento3MResult;
+    rendimiento3MFocoRecompra: SectorBundle["rendimiento3MFocoRecompra"];
+    rendimientoVsMavesa: Record<MavesaCategoria, RendimientoVsMavesaResult>;
+  };
   /** Conversión de degustaciones (tickets recibidos ÷ entregados) de la ciudad/sector. */
   conversionDegustaciones: { samples: number; conversions: number; rate: number };
   /** Inactivos por segmento, cuántos venden PAN, y la activación sin los PDV no alcanzables. */
@@ -222,6 +231,43 @@ const SECTOR_ACUM_COLUMNS: ExcelColumn<CarteraTotalDiaPunto>[] = [
   { header: "Radar Directo (kg)", value: (r) => r.radarKgDiaDirecto, width: 18 },
   { header: "Radar Indirecto (kg)", value: (r) => r.radarKgDiaIndirecto, width: 20 },
 ];
+
+// ── Filtro global de fechas (FiltroFechas) ─────────────────────────
+// null = todas las fechas. Solo recorta puntos DIARIOS: una clave de semana,
+// mes o trimestre pasa igual, así que con otra granularidad el gráfico no cambia.
+type DiasFiltro = ReadonlySet<string> | null;
+const ES_DIA = /^\d{4}-\d{2}-\d{2}$/;
+
+function filtrarPorDias<T>(puntos: T[], clave: (p: T) => string, dias: DiasFiltro): T[] {
+  if (dias === null) return puntos;
+  return puntos.filter((p) => {
+    const k = clave(p);
+    // Una venta de fin de semana se lee en el lunes siguiente, igual que en
+    // las series de rendimiento: el filtro solo ofrece días hábiles.
+    return !ES_DIA.test(k) || dias.has(siguienteDiaHabil(k));
+  });
+}
+
+/** Mismo resultado de rendimiento, con solo los días elegidos (el ratio acumulado se recalcula con ellos). */
+function conDias<R extends { puntos: { dia: string }[] }>(r: R, dias: DiasFiltro): R {
+  if (dias === null) return r;
+  return { ...r, puntos: r.puntos.filter((p) => dias.has(p.dia)) };
+}
+
+/**
+ * De dónde salen los gráficos de ratios: la cartera vigente o la misma sin la
+ * ampliación de franquiciados de Cumaná ("Indirecto Cumaná 2", 08-09-2026).
+ */
+function fuenteRatios(b: SectorBundle, sinAmpliacion: boolean) {
+  return sinAmpliacion
+    ? {
+        universo3M: b.ratiosSinAmpliacion.rendimiento3MUniverso,
+        focoRec: b.ratiosSinAmpliacion.rendimiento3MFocoRecompra,
+        mavesa: b.ratiosSinAmpliacion.rendimientoVsMavesa,
+      }
+    : { universo3M: b.rendimiento3M.universo, focoRec: b.rendimiento3MFocoRecompra, mavesa: b.rendimientoVsMavesa };
+}
+
 const sectorAcumChart = (label: string): ExcelChartConfig => ({
   categoryCol: 0,
   title: `Total acumulado ${label} — Radar (kg) y efectividad (%)`,
@@ -402,6 +448,42 @@ export function DiennDashboardClient({
   const [panGranularity, setPanGranularity] = useState<PanComparisonGranularity>("month");
   const bundle = bundles[filter];
 
+  // Filtro global de fechas: null = todas. Los días que ofrece son los días
+  // hábiles con serie desde el arranque del piloto (los mismos de los gráficos
+  // de rendimiento diario y de efectividad por día).
+  const [diasSel, setDiasSel] = useState<string[] | null>(null);
+  const diasFiltro = useMemo<DiasFiltro>(() => (diasSel === null ? null : new Set(diasSel)), [diasSel]);
+  const diasDisponibles = useMemo(() => {
+    const dias = new Set<string>();
+    const t = bundles.TOTAL;
+    for (const p of t.rendimiento3M.universo.puntos) dias.add(p.dia);
+    for (const p of t.rendimientoVsMavesa.margarina.puntos) dias.add(p.dia);
+    for (const p of t.rendimientoVsMavesa.mayonesa.puntos) dias.add(p.dia);
+    for (const p of carteraPorSegmento.totalPorDia.day) {
+      if (!ES_DIA.test(p.dia)) continue;
+      const dia = siguienteDiaHabil(p.dia);
+      if (dia >= PILOTO_INICIO) dias.add(dia);
+    }
+    return [...dias].sort();
+  }, [bundles, carteraPorSegmento]);
+
+  // Botón de los gráficos de ratios: sin la ampliación de franquiciados de
+  // Cumaná ("Indirecto Cumaná 2"). Un solo estado para todos los ratios.
+  const [sinAmpliacion, setSinAmpliacion] = useState(false);
+  const botonSinAmpliacion = (
+    <button
+      onClick={() => setSinAmpliacion((v) => !v)}
+      title="Recalcula los ratios sin los ~975 PDV de los franquiciados de Cumaná incorporados el 08-09 (tanda Indirecto Cumaná 2)"
+      className={`px-3 py-1.5 rounded-lg border text-xs font-medium transition-colors ${
+        sinAmpliacion
+          ? "border-rose-700 bg-rose-700 text-white"
+          : "border-slate-200 bg-white text-slate-500 hover:bg-slate-50"
+      }`}
+    >
+      {sinAmpliacion ? "Sin ampliación franquiciados Cumaná" : "Excluir ampliación franquiciados Cumaná"}
+    </button>
+  );
+
   const sellOutPorCliente = useMemo(
     () =>
       filterSellOutClientes(sellOutClientes, {
@@ -483,7 +565,7 @@ export function DiennDashboardClient({
   // Gráfico global: además de la línea total, se superponen (opcional) las
   // efectividades por ciudad — acumulada y/o diaria — mergeadas por bucket.
   const carteraTotalDiaData = useMemo(() => {
-    const base = carteraPorSegmento.totalPorDia[totalGranularity];
+    const base = filtrarPorDias(carteraPorSegmento.totalPorDia[totalGranularity], (p) => p.dia, diasFiltro);
     const cIdx = new Map(carteraPorSegmento.totalPorSector.cumana[totalGranularity].map((p) => [p.dia, p]));
     const bIdx = new Map(
       carteraPorSegmento.totalPorSector.barquisimeto_este[totalGranularity].map((p) => [p.dia, p])
@@ -549,7 +631,7 @@ export function DiennDashboardClient({
       };
     });
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [carteraPorSegmento, totalGranularity, carteraMetrica, efectividadAcum, modeloAcum, aterrizadaEscala]);
+  }, [carteraPorSegmento, totalGranularity, carteraMetrica, efectividadAcum, modeloAcum, aterrizadaEscala, diasFiltro]);
   // Un solo .xlsx con las 3 hojas (Total + cada ciudad), cada una con su gráfico
   // editable. Usa los datos crudos de la granularidad activa (no el mapeo del
   // gráfico), para incluir todas las columnas (día y acumulado).
@@ -558,17 +640,17 @@ export function DiennDashboardClient({
       {
         sheetName: "Total (ambas ciudades)",
         columns: TOTAL_ACUM_COLUMNS,
-        rows: carteraPorSegmento.totalPorDia[totalGranularity],
+        rows: filtrarPorDias(carteraPorSegmento.totalPorDia[totalGranularity], (p) => p.dia, diasFiltro),
         chart: TOTAL_ACUM_CHART,
       },
       ...pilotSectors.map((s) => ({
         sheetName: sectorLabels[s],
         columns: SECTOR_ACUM_COLUMNS,
-        rows: carteraPorSegmento.totalPorSector[s][totalGranularity],
+        rows: filtrarPorDias(carteraPorSegmento.totalPorSector[s][totalGranularity], (p) => p.dia, diasFiltro),
         chart: sectorAcumChart(sectorLabels[s]),
       })),
     ],
-    [carteraPorSegmento, totalGranularity, pilotSectors, sectorLabels]
+    [carteraPorSegmento, totalGranularity, pilotSectors, sectorLabels, diasFiltro]
   );
   // Días de inventario en calle: misma medición entre visitas que la tarjeta de
   // rotación (Σ inventario ÷ Σ ritmo), con los filtros de ciudad, zona y asesor.
@@ -612,7 +694,7 @@ export function DiennDashboardClient({
   // período son muy distintos. Sale de los bundles por sector, que ya vienen
   // calculados desde el servidor.
   const panPoints = useMemo<PanVsHarinaPanChartPoint[]>(() => {
-    const base = bundle.panVsHarinaPan[panPoblacion][panGranularity];
+    const base = filtrarPorDias(bundle.panVsHarinaPan[panPoblacion][panGranularity], (p) => p.bucket, diasFiltro);
     const idxPorSector = (s: Sector) =>
       new Map(bundles[s].panVsHarinaPan[panPoblacion][panGranularity].map((p) => [p.bucket, p]));
     const cIdx = idxPorSector("cumana");
@@ -639,15 +721,21 @@ export function DiennDashboardClient({
         ratioCabudareAcum: bHpm > 0 ? Math.round((bPanq / bHpm) * 1000) / 10 : null,
       };
     });
-  }, [bundle, bundles, panPoblacion, panGranularity]);
+  }, [bundle, bundles, panPoblacion, panGranularity, diasFiltro]);
 
   // Gráfico adicional de 3M (solo segmentos foco y solo recompra). Mismas
   // definiciones que el de arriba —ratio acumulado = promedio de los ratios
   // diarios, por ciudad contra su propio promedio de PAN—, sobre sus datos.
-  const focoRecData =
-    ciudadFocoRec === "TOTAL"
-      ? bundle.rendimiento3MFocoRecompra[focoRecCartera][focoRecSegmento][focoRecBasePan][focoRecSerie]
-      : bundles[ciudadFocoRec].rendimiento3MFocoRecompra[focoRecCartera][focoRecSegmento][focoRecBasePan][focoRecSerie];
+  const focoRecData = useMemo(
+    () =>
+      conDias(
+        fuenteRatios(ciudadFocoRec === "TOTAL" ? bundle : bundles[ciudadFocoRec], sinAmpliacion).focoRec[
+          focoRecCartera
+        ][focoRecSegmento][focoRecBasePan][focoRecSerie],
+        diasFiltro
+      ),
+    [bundle, bundles, ciudadFocoRec, sinAmpliacion, focoRecCartera, focoRecSegmento, focoRecBasePan, focoRecSerie, diasFiltro]
+  );
 
   // Cómo se nombran, en el pie, el tooltip y el Excel, los clientes de la serie
   // de Panquecitas y los del promedio de PAN.
@@ -670,7 +758,11 @@ export function DiennDashboardClient({
     const base = focoRecData.puntos;
     if (base.length === 0) return [];
     const porDia = (s: Sector) =>
-      new Map(bundles[s].rendimiento3MFocoRecompra[focoRecCartera][focoRecSegmento][focoRecBasePan][focoRecSerie].puntos.map((p) => [p.dia, p]));
+      new Map(
+        fuenteRatios(bundles[s], sinAmpliacion).focoRec[focoRecCartera][focoRecSegmento][focoRecBasePan][
+          focoRecSerie
+        ].puntos.map((p) => [p.dia, p])
+      );
     const c = porDia("cumana");
     const b = porDia("barquisimeto_este");
 
@@ -695,15 +787,19 @@ export function DiennDashboardClient({
         ratioCabudareAcum: bDias > 0 ? Math.round((bSuma / bDias) * 10) / 10 : null,
       };
     });
-  }, [focoRecData, bundles, focoRecCartera, focoRecSegmento, focoRecBasePan, focoRecSerie]);
+  }, [focoRecData, bundles, sinAmpliacion, focoRecCartera, focoRecSegmento, focoRecBasePan, focoRecSerie]);
 
   // Mismo patrón que el gráfico de 3M de PAN, pero para Margarina/Mayonesa
   // (sección "Rendimiento vs. Margarina/Mayonesa"): no hay distinción
   // clientes/universo, solo categoría seleccionada.
-  const rendimientoVsMavesaData: RendimientoVsMavesaResult =
-    ciudadMavesa === "TOTAL"
-      ? bundle.rendimientoVsMavesa[categoriaMavesa]
-      : bundles[ciudadMavesa].rendimientoVsMavesa[categoriaMavesa];
+  const rendimientoVsMavesaData = useMemo<RendimientoVsMavesaResult>(
+    () =>
+      conDias(
+        fuenteRatios(ciudadMavesa === "TOTAL" ? bundle : bundles[ciudadMavesa], sinAmpliacion).mavesa[categoriaMavesa],
+        diasFiltro
+      ),
+    [bundle, bundles, ciudadMavesa, sinAmpliacion, categoriaMavesa, diasFiltro]
+  );
 
   const ratioAcumuladoMavesa = useMemo(() => {
     const puntos = rendimientoVsMavesaData.puntos;
@@ -716,7 +812,7 @@ export function DiennDashboardClient({
     const base = rendimientoVsMavesaData.puntos;
     if (base.length === 0) return [];
     const porDia = (s: Sector) =>
-      new Map(bundles[s].rendimientoVsMavesa[categoriaMavesa].puntos.map((p) => [p.dia, p]));
+      new Map(fuenteRatios(bundles[s], sinAmpliacion).mavesa[categoriaMavesa].puntos.map((p) => [p.dia, p]));
     const c = porDia("cumana");
     const b = porDia("barquisimeto_este");
 
@@ -741,7 +837,7 @@ export function DiennDashboardClient({
         ratioCabudareAcum: bDias > 0 ? Math.round((bSuma / bDias) * 10) / 10 : null,
       };
     });
-  }, [rendimientoVsMavesaData, bundles, categoriaMavesa]);
+  }, [rendimientoVsMavesaData, bundles, sinAmpliacion, categoriaMavesa]);
 
   // Ratio ACUMULADO de Panquecitas contra cada categoría, por ciudad. No es un
   // cálculo nuevo: es exactamente el mismo número que ya muestran los gráficos
@@ -753,26 +849,30 @@ export function DiennDashboardClient({
   // que el gráfico (Margarina / Mayonesa / Harina PAN). Sale de los bundles por
   // sector, así que no depende de las pestañas de arriba — igual que las barras.
   const ratiosPanquecitas3Meses = useMemo<Record<string, number | null>>(() => {
-    const promedio = (puntos: readonly { ratioPct: number }[]) =>
-      puntos.length === 0
+    // Con el filtro de fechas, el promedio sale solo de los días elegidos.
+    const promedio = (todos: { dia: string; ratioPct: number }[]) => {
+      const puntos = filtrarPorDias(todos, (p) => p.dia, diasFiltro);
+      return puntos.length === 0
         ? null
         : Math.round((puntos.reduce((s, p) => s + p.ratioPct, 0) / puntos.length) * 10) / 10;
+    };
 
     const salida: Record<string, number | null> = {};
     for (const s of pilotSectors) {
-      salida[`Margarina|${s}`] = promedio(bundles[s].rendimientoVsMavesa.margarina.puntos);
-      salida[`Mayonesa|${s}`] = promedio(bundles[s].rendimientoVsMavesa.mayonesa.puntos);
+      const fuente = fuenteRatios(bundles[s], sinAmpliacion);
+      salida[`Margarina|${s}`] = promedio(fuente.mavesa.margarina.puntos);
+      salida[`Mayonesa|${s}`] = promedio(fuente.mavesa.mayonesa.puntos);
       // Harina PAN: con "cartera", el cálculo original (toda la cartera, sin
       // recompra); si no, el ratio acumulado del gráfico con PAN de recompra de
       // Panquecitas (cartera completa), con el corte foco / todos de esta tarjeta.
       salida[`Harina PAN|${s}`] = promedio(
         ventas3MesesSegmento === "cartera"
-          ? bundles[s].rendimiento3M.universo.puntos
-          : bundles[s].rendimiento3MFocoRecompra.completa[ventas3MesesSegmento].recompraPanquecitas.recompra.puntos
+          ? fuente.universo3M.puntos
+          : fuente.focoRec.completa[ventas3MesesSegmento].recompraPanquecitas.recompra.puntos
       );
     }
     return salida;
-  }, [bundles, pilotSectors, ventas3MesesSegmento]);
+  }, [bundles, pilotSectors, ventas3MesesSegmento, sinAmpliacion, diasFiltro]);
 
   // ── Promedio de venta diaria por segmento ────────────────────────
   // El servidor manda totales crudos por segmento × ciudad; acá se hace todo
@@ -876,10 +976,14 @@ export function DiennDashboardClient({
     return { meses, desde: universo.desde, hasta: universo.hasta, con, sin, total };
   }, [bundle.rendimiento3M]);
 
-  const comboPoints = bundle.ventaRecompraActivacion[comboGranularity];
+  const comboPointsTodos = bundle.ventaRecompraActivacion[comboGranularity];
+  // Filtro de fechas: solo recorta puntos diarios; los acumulados siguen siendo desde el arranque.
+  const comboPoints = filtrarPorDias(comboPointsTodos, (p) => p.bucket, diasFiltro);
+  const demandaPoints = filtrarPorDias(bundle.demandaInsatisfecha[granularity], (p) => p.bucket, diasFiltro);
   // Kg de PDV fuera de cartera incluidos en el volumen. Es acumulado, así que
   // el último punto trae el total del período.
-  const ventaFueraKg = comboPoints.length > 0 ? comboPoints[comboPoints.length - 1].ventaAcumuladaFueraKg : 0;
+  const ventaFueraKg =
+    comboPointsTodos.length > 0 ? comboPointsTodos[comboPointsTodos.length - 1].ventaAcumuladaFueraKg : 0;
 
   // Proporción de volumen Panquecitas sobre Harina PAN (Radar) — solo se
   // muestra como acotación en la tarjeta de volumen de Panquecitas.
@@ -929,6 +1033,8 @@ export function DiennDashboardClient({
           zonaFilter || "Todas las zonas",
           asesorFilter || "Todos los asesores",
           fuenteFilter === "TODOS" ? "Tradicional y cadenas" : fuenteFilter === "Calculado" ? "Solo tradicional" : "Solo cadenas",
+          diasSel === null ? "Todas las fechas" : `Fechas: ${diasSel.join(", ")}`,
+          ...(sinAmpliacion ? ["Ratios sin ampliación franquiciados Cumaná"] : []),
         ]}
       />
 
@@ -941,7 +1047,7 @@ export function DiennDashboardClient({
       </div>
 
       {/* ── Filtro reactivo de segmento ────────────────────────────────── */}
-      <div className="flex gap-2 mb-6 print:hidden">
+      <div className="flex flex-wrap gap-2 mb-6 print:hidden">
         <button
           onClick={() => setFilter("TOTAL")}
           className={`px-4 py-2 rounded-full text-sm font-semibold border transition-colors ${
@@ -965,6 +1071,8 @@ export function DiennDashboardClient({
             {sectorLabels[s]}
           </button>
         ))}
+        <span className="mx-1 hidden w-px self-stretch bg-slate-200 sm:block" />
+        <FiltroFechas dias={diasDisponibles} seleccion={diasSel} onChange={setDiasSel} />
       </div>
 
       {/* ── BLOQUE 1 · Tarjetas principales (KPI) ─────────────────────── */}
@@ -1161,6 +1269,7 @@ export function DiennDashboardClient({
             >
               Línea PAN: {showPanDiarioFocoRec ? "Visible" : "Oculta"}
             </button>
+            {botonSinAmpliacion}
             <button
               onClick={() => setRatioPorCiudadFocoRec((v) => !v)}
               title="Superpone el ratio acumulado de cada ciudad contra su propio promedio de PAN"
@@ -1319,6 +1428,7 @@ export function DiennDashboardClient({
             >
               Línea referencia: {showReferenciaMavesaDiario ? "Visible" : "Oculta"}
             </button>
+            {botonSinAmpliacion}
             <button
               onClick={() => setRatioPorCiudadMavesa((v) => !v)}
               title="Superpone el ratio acumulado de cada ciudad contra su propio promedio"
@@ -1732,7 +1842,7 @@ export function DiennDashboardClient({
               </div>
               <ExportExcelButton
                 filename="Cartera total acumulado"
-                rows={carteraPorSegmento.totalPorDia[totalGranularity]}
+                rows={filtrarPorDias(carteraPorSegmento.totalPorDia[totalGranularity], (p) => p.dia, diasFiltro)}
                 chart={TOTAL_ACUM_CHART}
                 columns={TOTAL_ACUM_COLUMNS}
               />
@@ -1798,7 +1908,7 @@ export function DiennDashboardClient({
           </div>
           <ExportExcelButton
             filename="datos_demanda_insatisfecha"
-            rows={bundle.demandaInsatisfecha[granularity]}
+            rows={demandaPoints}
             columns={[
               { header: "Período", value: (r) => r.label },
               { header: "Pedido (kg)", value: (r) => r.pedidoKg },
@@ -1808,8 +1918,8 @@ export function DiennDashboardClient({
           />
         </CardHeader>
         <CardContent>
-          {bundle.demandaInsatisfecha[granularity].length > 0 ? (
-            <DemandaInsatisfechaChart data={bundle.demandaInsatisfecha[granularity]} />
+          {demandaPoints.length > 0 ? (
+            <DemandaInsatisfechaChart data={demandaPoints} />
           ) : (
             <div className="h-[300px] flex items-center justify-center text-slate-400">
               <div className="text-center">
@@ -2563,6 +2673,7 @@ export function DiennDashboardClient({
             >
               Cumaná = 100%
             </button>
+            {botonSinAmpliacion}
           </div>
         </CardHeader>
         <CardContent>

@@ -9,7 +9,7 @@ import {
 } from "@/lib/universe";
 import { DIAS_HABILES_3M, contarDiasHabiles, diasHabilesEntre, siguienteDiaHabil } from "@/lib/business-days";
 import { COMBINACIONES, combinacionDeGrupo, nombreCombinacion } from "@/lib/combinaciones";
-import { COHORTES, cohortePorNombre } from "@/lib/cohortes";
+import { COHORTES, cohortePorNombre, sinAmpliacionFranquiciados } from "@/lib/cohortes";
 import { esSegmentoSinAlimentos } from "@/lib/segmentos";
 import { bucketLabelFor, todayISO } from "@/lib/date-buckets";
 import { PRODUCT_IDS } from "@/data/catalog";
@@ -109,9 +109,11 @@ const VACIO = (categoria: MavesaCategoria): RendimientoVsMavesaResult => ({
  */
 export async function getRendimientoVsMavesa(
   categoria: MavesaCategoria,
-  sector?: Sector
+  sector?: Sector,
+  /** Sin la tanda "Indirecto Cumaná 2" (botón de los gráficos de ratios). */
+  excluirAmpliacion = false
 ): Promise<RendimientoVsMavesaResult> {
-  const universoTotal = await getUniverseLocations();
+  const universoTotal = sinAmpliacionFranquiciados(await getUniverseLocations(), excluirAmpliacion);
   const delSectorCartera = sector
     ? universoTotal.filter((l) => sectorGroup(l.oficina_venta) === sector)
     : universoTotal;
