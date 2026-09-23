@@ -106,6 +106,14 @@ const Inner = dynamic(
       // aterrizado a su línea: van pegadas, Directo arriba e Indirecto abajo.
       const ETIQUETA_MODELO_PX = 14;
 
+      // Con muchos días no caben todos los números: cada barra mide ~35 px y un
+      // "1.266 kg" ocupa más que eso, así que los textos se enciman. Pasados los
+      // 20 puntos se rotula uno de cada N, contando desde el último (el dato más
+      // reciente siempre lleva número). El tooltip sigue mostrando todos.
+      const MAX_ETIQUETAS = 20;
+      const pasoEtiquetas = Math.max(1, Math.ceil(data.length / MAX_ETIQUETAS));
+      const conEtiqueta = (index: number) => (data.length - 1 - index) % pasoEtiquetas === 0;
+
       /**
        * Dibuja los kg de una barra en el extremo — arriba o abajo — que quede
        * más lejos de los ratios de ese día.
@@ -124,7 +132,7 @@ const Inner = dynamic(
           index: number;
           value: number;
         };
-        if (!value) return null;
+        if (!value || !conEtiqueta(index)) return null;
 
         const punto = data[index];
         const base = y + height; // la base de la barra ES la línea del eje X
@@ -214,7 +222,10 @@ const Inner = dynamic(
        * puntos de las otras líneas de ese día. Si ninguno de los dos lados cercanos
        * está libre, prueba un poco más lejos y se queda con el más despejado.
        */
-      function etiquetaPegadaALinea(propio: "efectCumanaAterrizada" | "efectCabudareAterrizada", color: string) {
+      function etiquetaPegadaALinea(
+        propio: "efectTotalAterrizada" | "efectCumanaAterrizada" | "efectCabudareAterrizada",
+        color: string
+      ) {
         return function EtiquetaPegada(props: unknown) {
           const lp = props as {
             x?: number;
@@ -226,7 +237,7 @@ const Inner = dynamic(
           const x = lp.x ?? lp.viewBox?.x;
           const y = lp.y ?? lp.viewBox?.y;
           const { index, value } = lp;
-          if (value == null || x == null || y == null) return null;
+          if (value == null || x == null || y == null || !conEtiqueta(index)) return null;
           const punto = data[index];
 
           // Píxeles del área de trazado reconstruidos desde este mismo punto
@@ -267,7 +278,7 @@ const Inner = dynamic(
             if (showEscalaCumana) otrasLineas.push(punto.efectCumanaEscala);
             if (showEscalaCabudare) otrasLineas.push(punto.efectCabudareEscala);
             if (showEscalaTotal) otrasLineas.push(punto.efectTotalEscala);
-            if (showAterrizadaTotal) otrasLineas.push(punto.efectTotalAterrizada);
+            if (showAterrizadaTotal && propio !== "efectTotalAterrizada") otrasLineas.push(punto.efectTotalAterrizada);
             if (showAterrizadaCumana && propio !== "efectCumanaAterrizada") otrasLineas.push(punto.efectCumanaAterrizada);
             if (showAterrizadaCabudare && propio !== "efectCabudareAterrizada")
               otrasLineas.push(punto.efectCabudareAterrizada);
@@ -745,7 +756,8 @@ const Inner = dynamic(
             )}
             {/* Activación ATERRIZADA del total: la cartera de hoy como si existiera
                 desde el día 1. Violeta y punteada para distinguirla de la acumulada
-                normal y de la "a escala"; etiqueta arriba con offset largo. */}
+                normal y de la "a escala". La etiqueta va pegada a la línea (antes
+                flotaba 70 px arriba y no se sabía a qué punto correspondía). */}
             {showAterrizadaTotal && (
               <Line
                 yAxisId="pct"
@@ -759,15 +771,7 @@ const Inner = dynamic(
               >
                 <LabelList
                   dataKey="efectTotalAterrizada"
-                  position="top"
-                  offset={70}
-                  fill="#6d28d9"
-                  fontSize={10}
-                  fontWeight={700}
-                  stroke="#ffffff"
-                  strokeWidth={3}
-                  paintOrder="stroke"
-                  formatter={(v) => (v == null ? "" : `${Number(v)}%`)}
+                  content={etiquetaPegadaALinea("efectTotalAterrizada", "#6d28d9")}
                 />
               </Line>
             )}
