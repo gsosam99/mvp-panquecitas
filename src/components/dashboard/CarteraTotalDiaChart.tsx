@@ -320,7 +320,15 @@ const Inner = dynamic(
         <ResponsiveContainer width="100%" height={400}>
           <ComposedChart data={data} margin={{ top: MARGEN_TOP, right: 12, left: 10, bottom: 5 }}>
             <CartesianGrid strokeDasharray="3 3" stroke="#f1f5f9" vertical={false} />
-            <XAxis dataKey="label" tick={{ fontSize: 10, fill: "#94a3b8" }} minTickGap={16} />
+            {/* Las fechas del eje son las mismas que llevan número (conEtiqueta):
+                con el salto automático de Recharts no coincidían y parecía que a
+                un día —p. ej. el 21 sep— le faltaba su %. */}
+            <XAxis
+              dataKey="label"
+              tick={{ fontSize: 10, fill: "#94a3b8" }}
+              ticks={data.filter((_, i) => conEtiqueta(i)).map((p) => p.label)}
+              interval={0}
+            />
             {/* Ejes ocultos: escalan las series pero no muestran números. */}
             <YAxis yAxisId="kg" hide domain={kgMax > 0 ? [0, kgMax] : undefined} />
             <YAxis yAxisId="pct" hide domain={[0, 100]} />
