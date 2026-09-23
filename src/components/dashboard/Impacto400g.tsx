@@ -283,6 +283,7 @@ export function Impacto400g({
   const ritmo400Semana = resumen.ritmo400Base * DIAS_HABILES_POR_SEMANA;
   const ritmo400Mes = resumen.ritmo400Base * DIAS_HABILES_MES;
   const solo400 = porGrupo.find((g) => g.grupo === "SOLO_400")!;
+  const kg400BaseGrupos = porGrupo.reduce((acc, g) => acc + g.kg400Base, 0);
   const hayPost = resumen.diasPost > 0;
 
   const hojas: ExcelSheetSpec<unknown>[] = [
@@ -329,6 +330,7 @@ export function Impacto400g({
         { header: "Grupo", value: (r) => GRUPO_LABELS[(r as FilaGrupo).grupo], width: 26 },
         { header: "Clientes", value: (r) => (r as FilaGrupo).clientes, width: 10 },
         { header: "400g base (kg)", value: (r) => Math.round((r as FilaGrupo).kg400Base * 10) / 10, width: 14 },
+        { header: "% del 400g", value: (r) => pct((r as FilaGrupo).kg400Base, kg400BaseGrupos), width: 12 },
         { header: "800g base (kg)", value: (r) => Math.round((r as FilaGrupo).kg800Base * 10) / 10, width: 14 },
         { header: "Compraron 800g después", value: (r) => (r as FilaGrupo).pasaron800, width: 20 },
         { header: "800g después (kg)", value: (r) => Math.round((r as FilaGrupo).kg800Post * 10) / 10, width: 16 },
@@ -439,6 +441,7 @@ export function Impacto400g({
                 <TableHead>Grupo</TableHead>
                 <TableHead className="text-right">Clientes</TableHead>
                 <TableHead className="text-right">400g base (kg)</TableHead>
+                <TableHead className="text-right">% del 400g</TableHead>
                 <TableHead className="text-right">800g base (kg)</TableHead>
                 <TableHead className="text-right">Compraron 800g después</TableHead>
                 <TableHead className="text-right">% que compró 800g</TableHead>
@@ -455,6 +458,7 @@ export function Impacto400g({
                   </TableCell>
                   <TableCell className="text-right font-semibold">{num(g.clientes, 0)}</TableCell>
                   <TableCell className="text-right">{num(g.kg400Base)}</TableCell>
+                  <TableCell className="text-right text-slate-500">{pct(g.kg400Base, kg400BaseGrupos)}</TableCell>
                   <TableCell className="text-right">{num(g.kg800Base)}</TableCell>
                   <TableCell className="text-right">{num(g.pasaron800, 0)}</TableCell>
                   <TableCell className="text-right text-slate-500">{pct(g.pasaron800, g.clientes)}</TableCell>
