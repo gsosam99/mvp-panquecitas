@@ -6,7 +6,6 @@ import { ExportExcelButton, ExportExcelMultiButton } from "@/components/dashboar
 import type { ExcelColumn, ExcelChartConfig, ExcelSheetSpec } from "@/lib/export-excel";
 import { ReportPrintButton } from "@/components/dashboard/ReportPrintButton";
 import { ReportPrintHeader } from "@/components/dashboard/ReportPrintHeader";
-import { CoberturaComunicacionChart } from "@/components/dashboard/CoberturaComunicacionChart";
 import { DemandaInsatisfechaChart } from "@/components/dashboard/DemandaInsatisfechaChart";
 import { VentaRecompraActivacionChart } from "@/components/dashboard/VentaRecompraActivacionChart";
 import { PosicionPdvChart } from "@/components/dashboard/PosicionPdvChart";
@@ -16,7 +15,6 @@ import {
   PanVsHarinaPanChart,
   type PanVsHarinaPanChartPoint,
 } from "@/components/dashboard/PanVsHarinaPanChart";
-import { RoundLegend } from "@/components/dashboard/RoundLegend";
 import { SellOutResumenChart } from "@/components/dashboard/SellOutResumenChart";
 import { PrecioCorrectoChart } from "@/components/dashboard/PrecioCorrectoChart";
 import { RankingSegmentoChart } from "@/components/dashboard/RankingSegmentoChart";
@@ -28,7 +26,6 @@ import {
   RendimientoVsMavesaChart,
   type RendimientoVsMavesaRatioCiudad,
 } from "@/components/dashboard/RendimientoVsMavesaChart";
-import { PortafolioPorCiudadChart } from "@/components/dashboard/PortafolioPorCiudadChart";
 import { Ventas3MesesPorCiudadChart } from "@/components/dashboard/Ventas3MesesPorCiudadChart";
 import { ClientesInactivosSegmentos } from "@/components/dashboard/ClientesInactivosSegmentos";
 import {
@@ -282,7 +279,6 @@ interface Props {
 
 export function DiennDashboardClient({
   bundles,
-  coberturaComunicacion,
   tiendaIdeal,
   sectorLabels,
   pilotSectors,
@@ -292,7 +288,6 @@ export function DiennDashboardClient({
   posicionPorCliente,
   carteraPorSegmento,
   precioCorrecto,
-  portafolioPorCiudad,
   ventas3MesesPorCiudad,
   ventaDiariaPorSegmento,
   combinacionesPiloto,
@@ -388,9 +383,6 @@ export function DiennDashboardClient({
   const [showReferenciaMavesaDiario, setShowReferenciaMavesaDiario] = useState(true);
   const [ratioPorCiudadMavesa, setRatioPorCiudadMavesa] = useState(false);
   const [ciudadMavesa, setCiudadMavesa] = useState<"TOTAL" | Sector>("TOTAL");
-  // Barras de totales por ciudad (Panquecitas/Margarina/Mayonesa + Harina PAN opcional).
-  const [portafolioComoPct, setPortafolioComoPct] = useState(false);
-  const [portafolioIncluirHarinaPan, setPortafolioIncluirHarinaPan] = useState(false);
   // Barras de Margarina/Mayonesa/Harina PAN de los últimos 3 meses (referencia).
   const [ventas3MesesComoPct, setVentas3MesesComoPct] = useState(false);
   // Línea opcional sobre esas barras: Cumaná = 100% y Cabudare como % de Cumaná.
@@ -409,11 +401,6 @@ export function DiennDashboardClient({
   const [rankingComoPct, setRankingComoPct] = useState(false);
   const [panGranularity, setPanGranularity] = useState<PanComparisonGranularity>("month");
   const bundle = bundles[filter];
-
-  const scatterSectors = useMemo<Sector[]>(
-    () => (filter === "TOTAL" ? [...pilotSectors] : [filter]),
-    [filter, pilotSectors]
-  );
 
   const sellOutPorCliente = useMemo(
     () =>
@@ -489,7 +476,6 @@ export function DiennDashboardClient({
     efectividadDirecto: modeloAcum ? p.efectividadDirectoAcum : p.efectividadDirecto,
     efectividadIndirecto: modeloAcum ? p.efectividadIndirectoAcum : p.efectividadIndirecto,
   });
-  const mapTotal = (puntos: CarteraTotalDiaPunto[]): CarteraTotalDiaChartPoint[] => puntos.map(mapTotalPoint);
   // Color de la línea de efectividad según la métrica: Radar rojo, Facturado
   // azul marino, Pedidos naranja.
   const efectividadColor =
@@ -564,24 +550,6 @@ export function DiennDashboardClient({
     });
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [carteraPorSegmento, totalGranularity, carteraMetrica, efectividadAcum, modeloAcum, aterrizadaEscala]);
-  const carteraTotalPorSectorData = useMemo(
-    () =>
-      pilotSectors.map((s) => ({
-        sector: s,
-        label: sectorLabels[s],
-        data: mapTotal(carteraPorSegmento.totalPorSector[s][totalGranularity]),
-      })),
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-    [
-      carteraPorSegmento.totalPorSector,
-      totalGranularity,
-      carteraMetrica,
-      efectividadAcum,
-      modeloAcum,
-      pilotSectors,
-      sectorLabels,
-    ]
-  );
   // Un solo .xlsx con las 3 hojas (Total + cada ciudad), cada una con su gráfico
   // editable. Usa los datos crudos de la granularidad activa (no el mapeo del
   // gráfico), para incluir todas las columnas (día y acumulado).
@@ -1798,42 +1766,6 @@ export function DiennDashboardClient({
         </Card>
       )}
 
-      {/* ── Comparativo por sector: mismo total acumulado, Cumaná vs Cabudare ── */}
-      {carteraTotalPorSectorData.some((s) => s.data.length > 0) && (
-        <div className="grid grid-cols-1 gap-6 mb-6 lg:grid-cols-2">
-          {carteraTotalPorSectorData.map((s) => (
-            <Card key={s.sector} className="print-avoid-break">
-              <CardHeader className="flex flex-row items-start justify-between gap-3 space-y-0">
-                <div>
-                  <CardTitle>Total acumulado — {s.label}</CardTitle>
-                  <p className="text-xs text-slate-400 mt-1">
-                    Mismo gráfico, acotado a {s.label}. Usa los filtros de arriba (métrica, granularidad y series por
-                    modelo).
-                  </p>
-                </div>
-                <ExportExcelButton
-                  filename={`Total acumulado — ${s.label}`}
-                  rows={carteraPorSegmento.totalPorSector[s.sector][totalGranularity]}
-                  chart={sectorAcumChart(s.label)}
-                  columns={SECTOR_ACUM_COLUMNS}
-                />
-              </CardHeader>
-              <CardContent>
-                <CarteraTotalDiaChart
-                  data={s.data}
-                  showEfectividad={showEfectividadTotal}
-                  showDirecto={showDirectoTotal}
-                  showIndirecto={showIndirectoTotal}
-                  efectividadColor={efectividadColor}
-                  showVentasDirecto={ventasDirecto}
-                  showVentasIndirecto={ventasIndirecto}
-                />
-              </CardContent>
-            </Card>
-          ))}
-        </div>
-      )}
-
       <Separator className="mb-6 print:hidden" />
 
       {/* ── Filtro de granularidad temporal (Demanda Insatisfecha y Cobertura) ── */}
@@ -1962,47 +1894,6 @@ export function DiennDashboardClient({
               <div className="text-center">
                 <p className="text-4xl mb-2">📈</p>
                 <p>Sin datos de Radar de Panquecitas. Carga el reporte SAP.</p>
-              </div>
-            </div>
-          )}
-        </CardContent>
-      </Card>
-
-      {/* ── Gráfico 2: Cobertura y Comunicación por Ciudad ────────────────── */}
-      <Card className="mb-6 print-avoid-break">
-        <CardHeader className="flex flex-row items-start justify-between gap-3 space-y-0">
-          <div>
-            <CardTitle>Cobertura y Comunicación por Ciudad</CardTitle>
-            <p className="text-xs text-slate-400 mt-1 mb-2">
-              Cobertura = % de la cartera (por zona) visitada. Comunicación = % con material POP entre los visitados con ventas en SAP (Radar &gt; 0).
-              {granularity === "month" && " Las rondas de auditoría no se distinguen en vista mensual — cambia a Día o Semana."}
-            </p>
-            <RoundLegend />
-          </div>
-          <ExportExcelButton
-            filename="datos_cobertura_comunicacion"
-            rows={coberturaComunicacion[granularity]}
-            columns={[
-              { header: "Período", value: (r) => r.label },
-              ...scatterSectors.flatMap((s) => [
-                { header: `Cobertura ${sectorLabels[s]} (%)`, value: (r: CoberturaComunicacionPoint) => r[`${s}_cobertura`] },
-                { header: `Comunicación ${sectorLabels[s]} (%)`, value: (r: CoberturaComunicacionPoint) => r[`${s}_comunicacion`] },
-              ]),
-            ]}
-          />
-        </CardHeader>
-        <CardContent>
-          {coberturaComunicacion[granularity].length > 0 ? (
-            <CoberturaComunicacionChart
-              data={coberturaComunicacion[granularity]}
-              sectors={scatterSectors}
-              granularity={granularity}
-            />
-          ) : (
-            <div className="h-[280px] flex items-center justify-center text-slate-400">
-              <div className="text-center">
-                <p className="text-4xl mb-2">🗺️</p>
-                <p>Sin visitas de mercaderista registradas aún.</p>
               </div>
             </div>
           )}
@@ -2592,68 +2483,6 @@ export function DiennDashboardClient({
                   ))}
                 </TableBody>
               </Table>
-            </div>
-          )}
-        </CardContent>
-      </Card>
-
-      {/* ── Comparativa de portafolio por ciudad (Mavesa) ──────────────── */}
-      <Card className="mb-6 print-avoid-break">
-        <CardHeader className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between space-y-0">
-          <div>
-            <CardTitle>Portafolio por Ciudad — Panquecitas, Margarina y Mayonesa</CardTitle>
-            <p className="text-xs text-slate-400 mt-1">
-              Volumen acumulado HASTA LA FECHA por ciudad, para ver si el comportamiento de Panquecitas es parecido al
-              de otras categorías del portafolio (Margarina y Mayonesa, marca Mavesa — solo comparativo, no es
-              competencia) o es un caso aparte. &quot;Comparar con Harina PAN&quot; agrega la Carga Radar del mes de
-              PAN a la comparación.
-            </p>
-          </div>
-          <div className="flex flex-wrap items-center gap-2 print:hidden">
-            <div className="flex rounded-lg border border-slate-200 overflow-hidden text-xs font-medium">
-              {(
-                [
-                  [false, "Kg"],
-                  [true, "% del total"],
-                ] as const
-              ).map(([key, label]) => (
-                <button
-                  key={label}
-                  onClick={() => setPortafolioComoPct(key)}
-                  className={`px-3 py-1.5 transition-colors ${
-                    portafolioComoPct === key ? "bg-slate-900 text-white" : "bg-white text-slate-500 hover:bg-slate-50"
-                  }`}
-                >
-                  {label}
-                </button>
-              ))}
-            </div>
-            <button
-              onClick={() => setPortafolioIncluirHarinaPan((v) => !v)}
-              title="Agrega la Carga Radar del mes de Harina PAN a la comparación"
-              className={`px-3 py-1.5 rounded-lg border text-xs font-medium transition-colors ${
-                portafolioIncluirHarinaPan
-                  ? "border-slate-900 bg-slate-900 text-white"
-                  : "border-slate-200 bg-white text-slate-500 hover:bg-slate-50"
-              }`}
-            >
-              Comparar con Harina PAN
-            </button>
-          </div>
-        </CardHeader>
-        <CardContent>
-          {portafolioPorCiudad.length > 0 ? (
-            <PortafolioPorCiudadChart
-              data={portafolioPorCiudad}
-              comoPct={portafolioComoPct}
-              incluirHarinaPan={portafolioIncluirHarinaPan}
-            />
-          ) : (
-            <div className="h-[320px] flex items-center justify-center text-slate-400">
-              <div className="text-center">
-                <p className="text-4xl mb-2">📊</p>
-                <p>Sin datos todavía.</p>
-              </div>
             </div>
           )}
         </CardContent>
