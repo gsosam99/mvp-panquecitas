@@ -178,6 +178,8 @@ interface FilaGrupo {
   clientes: number;
   kg400Base: number;
   kg800Base: number;
+  pasaron400: number;
+  kg400Post: number;
   pasaron800: number;
   kg800Post: number;
 }
@@ -244,6 +246,8 @@ export function Impacto400g({
           clientes: rows.length,
           kg400Base: rows.reduce((acc, c) => acc + c.kg400Base, 0),
           kg800Base: rows.reduce((acc, c) => acc + c.kg800Base, 0),
+          pasaron400: rows.filter((c) => c.kg400Post > 0).length,
+          kg400Post: rows.reduce((acc, c) => acc + c.kg400Post, 0),
           pasaron800: rows.filter((c) => c.kg800Post > 0).length,
           kg800Post: rows.reduce((acc, c) => acc + c.kg800Post, 0),
         };
@@ -284,6 +288,7 @@ export function Impacto400g({
   const ritmo400Mes = resumen.ritmo400Base * DIAS_HABILES_MES;
   const solo400 = porGrupo.find((g) => g.grupo === "SOLO_400")!;
   const kg400BaseGrupos = porGrupo.reduce((acc, g) => acc + g.kg400Base, 0);
+  const kg800BaseGrupos = porGrupo.reduce((acc, g) => acc + g.kg800Base, 0);
   const hayPost = resumen.diasPost > 0;
 
   const hojas: ExcelSheetSpec<unknown>[] = [
@@ -332,7 +337,12 @@ export function Impacto400g({
         { header: "400g base (kg)", value: (r) => Math.round((r as FilaGrupo).kg400Base * 10) / 10, width: 14 },
         { header: "% del 400g", value: (r) => pct((r as FilaGrupo).kg400Base, kg400BaseGrupos), width: 12 },
         { header: "800g base (kg)", value: (r) => Math.round((r as FilaGrupo).kg800Base * 10) / 10, width: 14 },
+        { header: "% del 800g", value: (r) => pct((r as FilaGrupo).kg800Base, kg800BaseGrupos), width: 12 },
+        { header: "Compraron 400g después", value: (r) => (r as FilaGrupo).pasaron400, width: 20 },
+        { header: "% que compró 400g", value: (r) => pct((r as FilaGrupo).pasaron400, (r as FilaGrupo).clientes), width: 16 },
+        { header: "400g después (kg)", value: (r) => Math.round((r as FilaGrupo).kg400Post * 10) / 10, width: 16 },
         { header: "Compraron 800g después", value: (r) => (r as FilaGrupo).pasaron800, width: 20 },
+        { header: "% que compró 800g", value: (r) => pct((r as FilaGrupo).pasaron800, (r as FilaGrupo).clientes), width: 16 },
         { header: "800g después (kg)", value: (r) => Math.round((r as FilaGrupo).kg800Post * 10) / 10, width: 16 },
       ],
     },
@@ -443,6 +453,10 @@ export function Impacto400g({
                 <TableHead className="text-right">400g base (kg)</TableHead>
                 <TableHead className="text-right">% del 400g</TableHead>
                 <TableHead className="text-right">800g base (kg)</TableHead>
+                <TableHead className="text-right">% del 800g</TableHead>
+                <TableHead className="text-right">Compraron 400g después</TableHead>
+                <TableHead className="text-right">% que compró 400g</TableHead>
+                <TableHead className="text-right">400g después (kg)</TableHead>
                 <TableHead className="text-right">Compraron 800g después</TableHead>
                 <TableHead className="text-right">% que compró 800g</TableHead>
                 <TableHead className="text-right">800g después (kg)</TableHead>
@@ -460,6 +474,10 @@ export function Impacto400g({
                   <TableCell className="text-right">{num(g.kg400Base)}</TableCell>
                   <TableCell className="text-right text-slate-500">{pct(g.kg400Base, kg400BaseGrupos)}</TableCell>
                   <TableCell className="text-right">{num(g.kg800Base)}</TableCell>
+                  <TableCell className="text-right text-slate-500">{pct(g.kg800Base, kg800BaseGrupos)}</TableCell>
+                  <TableCell className="text-right">{num(g.pasaron400, 0)}</TableCell>
+                  <TableCell className="text-right text-slate-500">{pct(g.pasaron400, g.clientes)}</TableCell>
+                  <TableCell className="text-right">{num(g.kg400Post)}</TableCell>
                   <TableCell className="text-right">{num(g.pasaron800, 0)}</TableCell>
                   <TableCell className="text-right text-slate-500">{pct(g.pasaron800, g.clientes)}</TableCell>
                   <TableCell className="text-right">{num(g.kg800Post)}</TableCell>
