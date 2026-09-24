@@ -7,10 +7,12 @@ import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Alert, AlertDescription } from "@/components/ui/alert";
 import type { ParseError } from "@/types";
+import { CIUDADES_COMPLETAS, type CiudadCompleta } from "@/lib/bqto-completo";
 
-// Carga del Radar de Harina PAN de 3 meses de Barquisimeto completo.
-// Mismo parser que "Radar 3 Meses"; va a su propia tabla (bqto_3m_ventas) y
-// solo alimenta la página /bqto-completo. Cada carga REEMPLAZA la anterior.
+// Carga del Radar de Harina PAN de 3 meses de una ciudad completa (Barquisimeto
+// o Cumaná). Mismo parser que "Radar 3 Meses"; va a su propia tabla
+// (bqto_3m_ventas) y solo alimenta la página /bqto-completo. Cada carga
+// REEMPLAZA la anterior de SU ciudad.
 
 type UploadState = "idle" | "parsing" | "previewing" | "uploading" | "done";
 
@@ -33,7 +35,8 @@ const FILAS_POR_TANDA = 3000;
 
 const kg = (n: number) => n.toLocaleString("es-VE", { maximumFractionDigits: 0 });
 
-export function Bqto3MDropzone() {
+export function Bqto3MDropzone({ ciudad }: { ciudad: CiudadCompleta }) {
+  const nombreCiudad = CIUDADES_COMPLETAS[ciudad].nombre;
   const router = useRouter();
   const [state, setState] = useState<UploadState>("idle");
   const [dragOver, setDragOver] = useState(false);
@@ -95,7 +98,7 @@ export function Bqto3MDropzone() {
         const res = await fetch("/api/bqto-3m-upload", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ rows: tandas[i], batchId, finalizar: i === tandas.length - 1 }),
+          body: JSON.stringify({ rows: tandas[i], batchId, ciudad, finalizar: i === tandas.length - 1 }),
         });
         const parcial = (await res.json()) as {
           inserted?: number;
@@ -162,6 +165,9 @@ export function Bqto3MDropzone() {
     const clientes = new Set(rows.map((r) => r.sap_code)).size;
     const meses = [...new Set(rows.map((r) => r.fecha.slice(0, 7)))].sort();
     const total = rows.reduce((s, r) => s + r.quantity_kg, 0);
+    // Oficinas de venta del archivo: la forma rápida de ver que no se está
+    // subiendo el reporte de la otra ciudad.
+    const oficinas = [...new Set(rows.map((r) => r.oficina_venta).filter(Boolean))].sort();
     return (
       <div className="space-y-4">
         <div className="flex flex-wrap items-center gap-3">
@@ -172,12 +178,13 @@ export function Bqto3MDropzone() {
             {meses.length} {meses.length === 1 ? "mes" : "meses"}: {meses.join(", ")}
           </Badge>
           <Badge variant="secondary">{kg(total)} kg</Badge>
+          <Badge variant="outline">Oficinas: {oficinas.join(", ") || "—"}</Badge>
           {errors.length > 0 && <Badge variant="destructive">{errors.length} errores</Badge>}
         </div>
         <Alert>
           <AlertDescription>
-            Esta carga <span className="font-medium">reemplaza por completo</span> la de Barquisimeto completo
-            anterior. No toca el piloto ni el Dashboard.
+            Esta carga <span className="font-medium">reemplaza por completo</span> la de {nombreCiudad} completo
+            anterior. No toca la otra ciudad, el piloto ni el Dashboard.
           </AlertDescription>
         </Alert>
         {errors.length > 0 && (
@@ -226,7 +233,7 @@ export function Bqto3MDropzone() {
       <p className="text-slate-600">
         {state === "parsing"
           ? "Leyendo el archivo…"
-          : "Arrastra aquí el Radar de Harina PAN de 3 meses de Barquisimeto completo"}
+          : `Arrastra aquí el Radar de Harina PAN de 3 meses de ${nombreCiudad} completo`}
       </p>
       <p className="text-xs text-slate-400 mt-1">
         Reporte N7_V_SD88_WEB_001 en .xls (&quot;Web Page, Single File&quot;) o guardado como .xlsx

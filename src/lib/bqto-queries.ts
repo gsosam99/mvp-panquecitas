@@ -7,7 +7,7 @@ import { getActivacionAjustada, type ActivacionAjustadaResult } from "@/lib/dien
 import { getUniverseLocations, sectorGroup, vigentesAl, type Sector } from "@/lib/universe";
 import { DIAS_HABILES_MES, type BqtoFila, type ReferenciaActivacion } from "@/lib/bqto-completo";
 
-// Lecturas del módulo "Barquisimeto completo" (ver src/lib/bqto-completo.ts).
+// Lecturas del módulo "Ciudades completas" (ver src/lib/bqto-completo.ts).
 // Nada de esto lo usa el Dashboard principal.
 
 /** Las filas de la última carga. `error` trae el motivo si la tabla no se pudo leer (p. ej. falta el migration 025). */
@@ -15,7 +15,7 @@ export async function getBqto3MFilas(): Promise<{ filas: BqtoFila[]; error: stri
   const supabase = createSupabaseServiceClient();
   try {
     const filas = await fetchAllRows<BqtoFila>(() =>
-      supabase.from("bqto_3m_ventas").select("sap_code, tipo_cliente, quantity_kg, date_of_sale")
+      supabase.from("bqto_3m_ventas").select("ciudad, sap_code, tipo_cliente, quantity_kg, date_of_sale")
     );
     return { filas, error: null };
   } catch (e) {
@@ -25,9 +25,12 @@ export async function getBqto3MFilas(): Promise<{ filas: BqtoFila[]; error: stri
   }
 }
 
+/** Referencias de activación: el piloto total y cada sector piloto. */
+export type ReferenciasPiloto = Record<"total" | Sector, ReferenciaActivacion>;
+
 /**
- * La activación de hoy del piloto completo y de Cabudare, con el volumen de
- * Panquecitas por cliente activo al mes.
+ * La activación de hoy del piloto completo, de Cabudare y de Cumaná, con el
+ * volumen de Panquecitas por cliente activo al mes.
  *
  * La activación sale de getActivacionAjustada, la misma función de la tarjeta
  * de activación del dashboard, para que los porcentajes sean idénticos: total
@@ -39,11 +42,12 @@ export async function getBqto3MFilas(): Promise<{ filas: BqtoFila[]; error: stri
  * completo castigaría a los clientes activados tarde, que todavía no tuvieron
  * tiempo de vender.
  */
-export async function getReferenciasPiloto(): Promise<ReferenciaActivacion[]> {
+export async function getReferenciasPiloto(): Promise<ReferenciasPiloto> {
   const supabase = createSupabaseServiceClient();
-  const [actTotal, actCabudare, universo, radar] = await Promise.all([
+  const [actTotal, actCabudare, actCumana, universo, radar] = await Promise.all([
     getActivacionAjustada(),
     getActivacionAjustada("barquisimeto_este"),
+    getActivacionAjustada("cumana"),
     getUniverseLocations(),
     fetchAllRows<{ location_id: string; quantity_kg: number; date_of_sale: string }>(() =>
       supabase
@@ -98,5 +102,9 @@ export async function getReferenciasPiloto(): Promise<ReferenciaActivacion[]> {
     };
   }
 
-  return [armar("Piloto total (Cumaná + Cabudare)", actTotal), armar("Cabudare", actCabudare, "barquisimeto_este")];
+  return {
+    total: armar("Piloto total (Cumaná + Cabudare)", actTotal),
+    barquisimeto_este: armar("Cabudare", actCabudare, "barquisimeto_este"),
+    cumana: armar("Cumaná (piloto)", actCumana, "cumana"),
+  };
 }

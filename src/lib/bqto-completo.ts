@@ -1,11 +1,12 @@
-// Barquisimeto completo — ratios aparte del piloto (DIENN, 24-09-2026).
+// Ciudades completas — ratios aparte del piloto (DIENN, 24-09-2026).
+// Empezó con Barquisimeto; Cumaná y la suma de las dos usan el mismo cálculo.
 //
 // Toma la Harina PAN de 3 meses de TODA la ciudad (reporte Radar
 // N7_V_SD88_WEB_001, tabla bqto_3m_ventas) y responde:
 //   1. cuánto se vendió en los 3 meses, por mes y por día;
 //   2. cuánto es el 4% de eso al mes y en 4 meses, para todos los clientes y
 //      solo para los segmentos foco;
-//   3. cuánto volumen daría activar Barquisimeto completo al % de activación
+//   3. cuánto volumen daría activar la ciudad completa al % de activación
 //      que el piloto tiene hoy, y cómo queda contra ese 4%.
 //
 // Puro, sin dependencias de servidor, igual que segmentos.ts: el cálculo se
@@ -13,6 +14,25 @@
 
 import { DIAS_HABILES_3M } from "@/lib/business-days";
 import { foldSegmento } from "@/lib/segmentos";
+import type { Sector } from "@/lib/sectors";
+
+/**
+ * Ciudades con reporte "completo" (toda la ciudad, no solo la cartera). Cada
+ * una se proyecta con la activación del piloto total y con la de su propio
+ * sector piloto (Barquisimeto con Cabudare, Cumaná con Cumaná).
+ */
+export const CIUDADES_COMPLETAS = {
+  barquisimeto: { nombre: "Barquisimeto", sector: "barquisimeto_este" },
+  cumana: { nombre: "Cumaná", sector: "cumana" },
+} as const satisfies Record<string, { nombre: string; sector: Sector }>;
+
+export type CiudadCompleta = keyof typeof CIUDADES_COMPLETAS;
+
+export const CIUDADES: CiudadCompleta[] = ["barquisimeto", "cumana"];
+
+export function esCiudadCompleta(valor: unknown): valor is CiudadCompleta {
+  return valor === "barquisimeto" || valor === "cumana";
+}
 
 /** Meta de Panquecitas: 4% del volumen de Harina PAN (la misma del dashboard). */
 export const META_PCT = 0.04;
@@ -55,6 +75,7 @@ export function esTipoFoco(tipo: string | null | undefined): boolean {
 
 /** Una fila del reporte tal como se guarda: cliente + material + día. */
 export interface BqtoFila {
+  ciudad: string;
   sap_code: string;
   tipo_cliente: string | null;
   quantity_kg: number;
@@ -103,9 +124,12 @@ export function resumenBqto(filas: BqtoFila[]): BqtoResumen | null {
     totalKg += kg;
     dias.add(dia);
     porMes.set(dia.slice(0, 7), (porMes.get(dia.slice(0, 7)) ?? 0) + kg);
-    const c = porCliente.get(f.sap_code);
+    // Llave con la ciudad: en la vista combinada un mismo código de dos
+    // ciudades no se funde en un solo cliente.
+    const llave = `${f.ciudad}|${f.sap_code}`;
+    const c = porCliente.get(llave);
     if (c) c.kg += kg;
-    else porCliente.set(f.sap_code, { kg, tipo: f.tipo_cliente?.trim() || SIN_TIPO });
+    else porCliente.set(llave, { kg, tipo: f.tipo_cliente?.trim() || SIN_TIPO });
   }
 
   // El corte foco se hace por CLIENTE (su tipo), no por fila: así kg y
@@ -146,6 +170,26 @@ export function resumenBqto(filas: BqtoFila[]): BqtoResumen | null {
     promedioMesFocoKg: totalFocoKg / meses,
     promedioDiaKg: totalKg / Math.max(1, dias.size),
     porTipo: [...porTipo.values()].sort((a, b) => b.kg - a.kg),
+  };
+}
+
+/**
+ * Resumen de varias ciudades juntas. Totales y clientes son la suma de todas
+ * las filas; los PROMEDIOS mensual y diario son la suma de los promedios de
+ * cada ciudad. Si los archivos no cubren los mismos meses, dividir el total
+ * combinado entre la unión de meses daría un promedio por debajo del real.
+ */
+export function resumenCombinado(filasPorCiudad: BqtoFila[][]): BqtoResumen | null {
+  const conDatos = filasPorCiudad.filter((f) => f.length > 0);
+  const combinado = resumenBqto(conDatos.flat());
+  if (!combinado) return null;
+  const partes = conDatos.map(resumenBqto).filter((r): r is BqtoResumen => r !== null);
+  const suma = (f: (r: BqtoResumen) => number) => partes.reduce((s, r) => s + f(r), 0);
+  return {
+    ...combinado,
+    promedioMesKg: suma((r) => r.promedioMesKg),
+    promedioMesFocoKg: suma((r) => r.promedioMesFocoKg),
+    promedioDiaKg: suma((r) => r.promedioDiaKg),
   };
 }
 
@@ -201,6 +245,28 @@ export function proyectar(
   return {
     clientesBase,
     activacionPct,
+    clientesActivados,
+    kgMes,
+    kgPeriodo: kgMes * MESES_PROYECCION,
+    metaMes,
+    metaPeriodo: metaMes * MESES_PROYECCION,
+    pctMeta: metaMes > 0 ? (kgMes / metaMes) * 100 : 0,
+  };
+}
+
+/**
+ * Suma de escenarios de varias ciudades (cada una con su propia activación).
+ * La activación que devuelve es la EFECTIVA: activados ÷ clientes de todas.
+ */
+export function sumarEscenarios(escenarios: EscenarioProyeccion[]): EscenarioProyeccion {
+  const suma = (f: (e: EscenarioProyeccion) => number) => escenarios.reduce((s, e) => s + f(e), 0);
+  const clientesBase = suma((e) => e.clientesBase);
+  const clientesActivados = suma((e) => e.clientesActivados);
+  const kgMes = suma((e) => e.kgMes);
+  const metaMes = suma((e) => e.metaMes);
+  return {
+    clientesBase,
+    activacionPct: clientesBase > 0 ? (clientesActivados / clientesBase) * 100 : 0,
     clientesActivados,
     kgMes,
     kgPeriodo: kgMes * MESES_PROYECCION,

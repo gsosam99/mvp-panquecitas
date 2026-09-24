@@ -1,17 +1,20 @@
 import { createSupabaseServiceClient } from "@/lib/supabase/server";
 import { getDashboardSession } from "@/lib/session";
 import { PRODUCT_IDS, SAP_RADAR_MATERIAL_PRODUCT_MAP } from "@/data/catalog";
+import { esCiudadCompleta } from "@/lib/bqto-completo";
 
-// ── Barquisimeto completo: Harina PAN de 3 meses ──────────────────────
-// Mismo reporte Radar que "Radar 3 Meses", pero de TODA la ciudad y a su propia
-// tabla (bqto_3m_ventas, migration 025). No se cruza con la cartera ni toca
-// ninguna tabla del piloto: solo alimenta la página /bqto-completo.
+// ── Ciudades completas: Harina PAN de 3 meses ─────────────────────────
+// Mismo reporte Radar que "Radar 3 Meses", pero de TODA una ciudad
+// (Barquisimeto o Cumaná, campo `ciudad`) y a su propia tabla (bqto_3m_ventas,
+// migrations 025 y 026). No se cruza con la cartera ni toca ninguna tabla del
+// piloto: solo alimenta la página /bqto-completo.
 //
 // Las filas se guardan tal cual (cliente + material + día, con la venta de ese
 // día): el total es la suma de las filas, como en el ratio 3M del dashboard.
 //
-// Cada carga REEMPLAZA la anterior. Llega en tandas (el archivo pasa el límite
-// de tamaño de Vercel); el borrado de lo viejo corre solo en la última.
+// Cada carga REEMPLAZA la anterior DE SU CIUDAD; la otra no se toca. Llega en
+// tandas (el archivo pasa el límite de tamaño de Vercel); el borrado de lo
+// viejo corre solo en la última.
 
 interface FilaCarga {
   sap_code: string;
@@ -39,10 +42,15 @@ export async function POST(req: Request) {
       return Response.json({ error: "No autorizado" }, { status: 401 });
     }
 
-    const body = (await req.json()) as { rows?: FilaCarga[]; batchId?: string; finalizar?: boolean };
-    const { rows, batchId, finalizar = true } = body;
+    const body = (await req.json()) as {
+      rows?: FilaCarga[];
+      batchId?: string;
+      ciudad?: string;
+      finalizar?: boolean;
+    };
+    const { rows, batchId, ciudad, finalizar = true } = body;
     // batchId viaja dentro del filtro .or() del borrado: se exige un UUID.
-    if (!rows?.length || !batchId || !UUID_RE.test(batchId)) {
+    if (!rows?.length || !batchId || !UUID_RE.test(batchId) || !esCiudadCompleta(ciudad)) {
       return Response.json({ error: "Datos inválidos" }, { status: 400 });
     }
 
@@ -70,6 +78,7 @@ export async function POST(req: Request) {
       if (!r.quantity_kg) continue;
       const sap_code = r.sap_code.trim();
       porLlave.set(`${sap_code}|${r.material_code}|${r.fecha}`, {
+        ciudad,
         sap_code,
         client_name: r.client_name || null,
         tipo_cliente: r.tipo_cliente || null,
@@ -89,7 +98,7 @@ export async function POST(req: Request) {
       const { error } = await supabase
         .from("bqto_3m_ventas")
         .upsert(toInsert.slice(i, i + TANDA_FILAS), {
-          onConflict: "sap_code,material_code,date_of_sale",
+          onConflict: "ciudad,sap_code,material_code,date_of_sale",
           ignoreDuplicates: false,
         });
       if (error) throw error;
@@ -100,6 +109,7 @@ export async function POST(req: Request) {
       const { data: borradas, error } = await supabase
         .from("bqto_3m_ventas")
         .delete()
+        .eq("ciudad", ciudad)
         .or(`upload_batch_id.is.null,upload_batch_id.neq.${batchId}`)
         .select("id");
       if (error) throw error;
