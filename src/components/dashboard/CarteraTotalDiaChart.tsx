@@ -106,13 +106,15 @@ const Inner = dynamic(
       // aterrizado a su línea: van pegadas, Directo arriba e Indirecto abajo.
       const ETIQUETA_MODELO_PX = 14;
 
-      // Los kg del total van en VERTICAL dentro de la barra: en horizontal un
-      // "1.266 kg" es más ancho que la barra (~35 px con un mes de días) y los
-      // números de barras vecinas se encimaban. Así todas las barras llevan su kg.
+      // Los kg del total van en DOS renglones horizontales: el número arriba y
+      // "kg" debajo. En un solo renglón un "1.266 kg" es más ancho que la barra
+      // (~35 px con un mes de días) y los de barras vecinas se encimaban; en
+      // vertical no se leían bien. Así todas las barras llevan su kg.
       const KG_FONT = 10;
-      const KG_PX_POR_CARACTER = 5.8;
-      const KG_MARGEN = 4;
-      const textoKg = (kg: number) => `${kg.toLocaleString("es-VE", { maximumFractionDigits: 0 })} kg`;
+      const KG_RENGLON = 11;
+      const KG_MARGEN = 3;
+      const KG_ALTO = KG_RENGLON * 2;
+      const numeroKg = (kg: number) => kg.toLocaleString("es-VE", { maximumFractionDigits: 0 });
 
       /**
        * Tramo vertical [desde, hasta] (px) que ocupan los kg del total en una
@@ -127,7 +129,7 @@ const Inner = dynamic(
         const punto = data[index];
         if (hayDesglose || !(punto.radarKgDia > 0) || kgMax <= 0) return null;
         const pixelDeRatio = (pct: number) => base - (pct / 100) * altoArea;
-        const largo = textoKg(punto.radarKgDia).length * KG_PX_POR_CARACTER;
+        const largo = KG_ALTO;
         const tope = base - (punto.radarKgDia / kgMax) * altoArea;
 
         const ratios: number[] = [];
@@ -174,7 +176,7 @@ const Inner = dynamic(
         return cabeArriba && holgura(arriba) > holgura(abajo) ? arriba : abajo;
       }
 
-      function etiquetaKgVertical(props: unknown) {
+      function etiquetaKgDosRenglones(props: unknown) {
         const { x, y, width, height, index, value } = props as {
           x: number;
           y: number;
@@ -188,23 +190,25 @@ const Inner = dynamic(
         const tramo = tramoKg(index, base, Math.max(base - MARGEN_TOP, 1));
         if (!tramo) return null;
 
-        // Rotado -90°: el texto corre de abajo hacia arriba. Se ancla en el
-        // extremo inferior del tramo con textAnchor "start".
+        // Número en el primer renglón del tramo y "kg" en el segundo.
         const cx = x + width / 2;
+        const centro1 = tramo.desde + KG_RENGLON / 2;
         return (
           <text
             x={cx}
-            y={tramo.hasta}
-            transform={`rotate(-90 ${cx} ${tramo.hasta})`}
+            y={centro1}
             dy="0.35em"
-            textAnchor="start"
+            textAnchor="middle"
             fill="#1e3a8a"
             fontSize={KG_FONT}
             stroke="#ffffff"
             strokeWidth={3}
             paintOrder="stroke"
           >
-            {textoKg(Number(value))}
+            {numeroKg(Number(value))}
+            <tspan x={cx} dy={KG_RENGLON}>
+              kg
+            </tspan>
           </text>
         );
       }
@@ -273,7 +277,7 @@ const Inner = dynamic(
             const kgEnCentro = (desde: number, kg: number) => {
               if (kg > 0) obstaculos.push({ py: pixelKg(desde + kg / 2), medio: 12 });
             };
-            // Los kg del total (vertical): se esquiva el tramo exacto que ocupan.
+            // Los kg del total (dos renglones): se esquiva el tramo exacto que ocupan.
             const tramo = tramoKg(index, base, altoArea);
             if (tramo) obstaculos.push({ py: (tramo.desde + tramo.hasta) / 2, medio: (tramo.hasta - tramo.desde) / 2 });
             const dir = showVentasDirecto ? punto.radarKgDiaDirecto : 0;
@@ -434,7 +438,7 @@ const Inner = dynamic(
                     Una posición fija no sirve: los % viven en otro eje, así que en
                     unos días caen cerca del tope de la barra y en otros cerca de la
                     base — el 17 de agosto tapaban el ratio del modelo. */}
-                <LabelList dataKey="radarKgDia" content={etiquetaKgVertical} />
+                <LabelList dataKey="radarKgDia" content={etiquetaKgDosRenglones} />
               </Bar>
             )}
             {showVentasDirecto && (
