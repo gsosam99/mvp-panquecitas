@@ -8,6 +8,7 @@ import { KpiCard } from "@/components/dashboard/KpiCard";
 import { Bqto3MDropzone } from "@/components/admin/Bqto3MDropzone";
 import { getBqto3MFilas, getReferenciasPiloto } from "@/lib/bqto-queries";
 import {
+  CIUDAD_FIJA,
   CIUDADES,
   CIUDADES_COMPLETAS,
   DIAS_HABILES_MES,
@@ -19,6 +20,8 @@ import {
   resumenCombinado,
   sumarEscenarios,
   TIPOS_NO_FOCO,
+  ZONAS_VARIABLES,
+  type BqtoFila,
   type BqtoResumen,
   type CiudadCompleta,
   type EscenarioProyeccion,
@@ -28,9 +31,10 @@ import {
 export const metadata: Metadata = { title: "Ciudades completas — Panquecitas" };
 
 // Módulo aparte de DIENN (24-09-2026): ratios de ciudades completas con la
-// Harina PAN de 3 meses de toda la ciudad — Barquisimeto, Cumaná y las dos
-// juntas. No sale en el Dashboard principal ni se mezcla con los datos del
-// piloto. El cálculo vive en src/lib/bqto-completo.ts.
+// Harina PAN de 3 meses de toda la ciudad — Barquisimeto, Guanare, Maracay,
+// Barcelona, Acarigua y Cumaná — y la combinación Cumaná + una zona variable
+// (25-09-2026). No sale en el Dashboard principal ni se mezcla con los datos
+// del piloto. El cálculo vive en src/lib/bqto-completo.ts.
 
 type Vista = CiudadCompleta | "ambas";
 
@@ -306,58 +310,104 @@ function VistaResumen({
 export default async function CiudadesCompletasPage({
   searchParams,
 }: {
-  searchParams: Promise<{ ciudad?: string }>;
+  searchParams: Promise<{ ciudad?: string; con?: string }>;
 }) {
   const session = await requireDashboard();
   if (session.role !== "DIENN") redirect("/dashboard");
 
-  const { ciudad: param } = await searchParams;
+  const { ciudad: param, con: paramCon } = await searchParams;
   const vista: Vista = param === "ambas" ? "ambas" : esCiudadCompleta(param) ? param : "barquisimeto";
+  // Zona que acompaña a Cumaná en la combinación.
+  const con: CiudadCompleta =
+    esCiudadCompleta(paramCon) && ZONAS_VARIABLES.includes(paramCon) ? paramCon : "barquisimeto";
 
   const [{ filas, error }, refs] = await Promise.all([getBqto3MFilas(), getReferenciasPiloto()]);
-  const filasPorCiudad: Record<CiudadCompleta, typeof filas> = {
-    barquisimeto: filas.filter((f) => f.ciudad === "barquisimeto"),
-    cumana: filas.filter((f) => f.ciudad === "cumana"),
-  };
-  const resumenes: Record<CiudadCompleta, BqtoResumen | null> = {
-    barquisimeto: resumenBqto(filasPorCiudad.barquisimeto),
-    cumana: resumenBqto(filasPorCiudad.cumana),
-  };
-  const cargadas = CIUDADES.filter((c) => resumenes[c] !== null);
+  const filasPorCiudad = Object.fromEntries(
+    CIUDADES.map((c) => [c, filas.filter((f) => f.ciudad === c)])
+  ) as Record<CiudadCompleta, BqtoFila[]>;
+  const resumenes = Object.fromEntries(
+    CIUDADES.map((c) => [c, resumenBqto(filasPorCiudad[c])])
+  ) as Record<CiudadCompleta, BqtoResumen | null>;
 
-  const pestanas: { vista: Vista; label: string }[] = [
-    ...CIUDADES.map((c) => ({ vista: c as Vista, label: CIUDADES_COMPLETAS[c].nombre })),
-    { vista: "ambas", label: "Barquisimeto + Cumaná" },
+  // La activación "propia" de una ciudad: la de su sector piloto si lo tiene;
+  // si no, la del piloto total (DIENN, 25-09-2026).
+  const refPropia = (c: CiudadCompleta): ReferenciaActivacion => {
+    const sector = CIUDADES_COMPLETAS[c].sector;
+    return sector ? refs[sector] : refs.total;
+  };
+
+  const nombreFija = CIUDADES_COMPLETAS[CIUDAD_FIJA].nombre;
+  const nombreCombo = `${nombreFija} + ${CIUDADES_COMPLETAS[con].nombre}`;
+  const pestanas: { vista: Vista; label: string; href: string }[] = [
+    ...CIUDADES.map((c) => ({
+      vista: c as Vista,
+      label: CIUDADES_COMPLETAS[c].nombre,
+      href: `/bqto-completo?ciudad=${c}`,
+    })),
+    { vista: "ambas", label: `${nombreFija} + zona`, href: `/bqto-completo?ciudad=ambas&con=${con}` },
   ];
 
   let contenido: React.ReactNode;
   if (vista === "ambas") {
-    const r = resumenCombinado(CIUDADES.map((c) => filasPorCiudad[c]));
+    const combo: CiudadCompleta[] = [CIUDAD_FIJA, con];
+    const cargadas = combo.filter((c) => resumenes[c] !== null);
+    const faltan = combo.filter((c) => resumenes[c] === null);
+    const r = resumenCombinado(combo.map((c) => filasPorCiudad[c]));
+
+    // Cumaná queda fija; la otra zona se elige aquí.
+    const selectorZona = (
+      <div className="flex flex-wrap items-center gap-2 text-sm">
+        <span className="text-slate-500">{nombreFija} +</span>
+        {ZONAS_VARIABLES.map((z) => (
+          <Link
+            key={z}
+            href={`/bqto-completo?ciudad=ambas&con=${z}`}
+            className={`px-2.5 py-1 rounded-md border text-sm transition-colors ${
+              z === con
+                ? "bg-slate-900 text-white border-slate-900"
+                : "border-slate-200 text-slate-600 hover:bg-slate-50"
+            }`}
+          >
+            {CIUDADES_COMPLETAS[z].nombre}
+            {resumenes[z] === null && <span className="ml-1 text-xs opacity-70">(sin cargar)</span>}
+          </Link>
+        ))}
+      </div>
+    );
+
     if (!r) {
       contenido = (
-        <Alert>
-          <AlertDescription>Todavía no hay ninguna ciudad cargada.</AlertDescription>
-        </Alert>
+        <>
+          {selectorZona}
+          <Alert>
+            <AlertDescription>Todavía no está cargada ninguna de las dos: {nombreCombo}.</AlertDescription>
+          </Alert>
+        </>
       );
     } else {
-      // Cada ciudad con la activación de SU sector piloto, y el resultado sumado.
-      const porCiudad = cargadas.map((c) => escenariosCon(resumenes[c]!, refs[CIUDADES_COMPLETAS[c].sector]));
+      // Cada ciudad con SU activación (sector piloto o, si no tiene, piloto total), y el resultado sumado.
+      const porCiudad = cargadas.map((c) => escenariosCon(resumenes[c]!, refPropia(c)));
       const [totalTodos, totalFoco] = escenariosCon(r, refs.total);
       const cadaUna = `Cada ciudad la suya (${cargadas
-        .map((c) => `${CIUDADES_COMPLETAS[c].nombre} con ${refs[CIUDADES_COMPLETAS[c].sector].etiqueta}`)
+        .map((c) => `${CIUDADES_COMPLETAS[c].nombre} con ${refPropia(c).etiqueta}`)
         .join(", ")})`;
+      // Cajas de referencia sin repetir: el piloto total más las propias que existan.
+      const referencias = [refs.total, ...cargadas.map(refPropia)].filter(
+        (ref, i, arr) => arr.findIndex((x) => x.etiqueta === ref.etiqueta) === i
+      );
       contenido = (
         <>
-          {cargadas.length < CIUDADES.length && (
+          {selectorZona}
+          {faltan.length > 0 && (
             <Alert>
               <AlertDescription>
-                Falta cargar {CIUDADES.filter((c) => !cargadas.includes(c)).map((c) => CIUDADES_COMPLETAS[c].nombre).join(", ")}:
-                la suma solo incluye {cargadas.map((c) => CIUDADES_COMPLETAS[c].nombre).join(", ")}.
+                Falta cargar {faltan.map((c) => CIUDADES_COMPLETAS[c].nombre).join(", ")}: la suma solo incluye{" "}
+                {cargadas.map((c) => CIUDADES_COMPLETAS[c].nombre).join(", ")}.
               </AlertDescription>
             </Alert>
           )}
           <VistaResumen
-            nombre="Barquisimeto + Cumaná"
+            nombre={nombreCombo}
             r={r}
             filasMeta={[
               ...cargadas.flatMap((c) => {
@@ -371,7 +421,7 @@ export default async function CiudadesCompletasPage({
               { label: "Total · todos los clientes", clientes: r.clientes, panMes: r.promedioMesKg, destacada: true },
               { label: "Total · segmentos foco", clientes: r.clientesFoco, panMes: r.promedioMesFocoKg, destacada: true },
             ]}
-            referencias={[refs.total, refs.barquisimeto_este, refs.cumana]}
+            referencias={referencias}
             escenarios={[
               { referencia: refs.total.etiqueta, poblacion: "Todos los clientes", e: totalTodos },
               { referencia: refs.total.etiqueta, poblacion: "Segmentos foco", e: totalFoco },
@@ -382,7 +432,7 @@ export default async function CiudadesCompletasPage({
               mes: "Suma de los promedios mensuales de cada ciudad",
               dia: "Suma de los promedios diarios de cada ciudad (venta ÷ días con venta de su archivo)",
             }}
-            notaProyeccion={`Clientes de las dos ciudades × activación de hoy = clientes activados; × kg de Panquecitas por cliente activo al mes = volumen mensual, y × ${MESES_PROYECCION} para el período. "Cada ciudad la suya" proyecta cada ciudad con la activación de su sector piloto y suma el resultado; la activación que muestra es la efectiva (activados ÷ clientes).`}
+            notaProyeccion={`Clientes de las dos ciudades × activación de hoy = clientes activados; × kg de Panquecitas por cliente activo al mes = volumen mensual, y × ${MESES_PROYECCION} para el período. "Cada ciudad la suya" proyecta cada ciudad con la activación de su sector piloto (la del piloto total si no tiene) y suma el resultado; la activación que muestra es la efectiva (activados ÷ clientes).`}
           />
         </>
       );
@@ -390,7 +440,7 @@ export default async function CiudadesCompletasPage({
   } else {
     const r = resumenes[vista];
     const { nombre, sector } = CIUDADES_COMPLETAS[vista];
-    const referencias = [refs.total, refs[sector]];
+    const referencias = sector ? [refs.total, refs[sector]] : [refs.total];
     contenido = !r ? (
       <Card>
         <CardHeader>
@@ -453,7 +503,7 @@ export default async function CiudadesCompletasPage({
           return (
             <Link
               key={p.vista}
-              href={`/bqto-completo?ciudad=${p.vista}`}
+              href={p.href}
               className={`px-3 py-1.5 rounded-md text-sm font-medium border transition-colors ${
                 activa
                   ? "bg-primary text-primary-foreground border-primary"

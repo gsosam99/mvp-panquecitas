@@ -18,20 +18,34 @@ import type { Sector } from "@/lib/sectors";
 
 /**
  * Ciudades con reporte "completo" (toda la ciudad, no solo la cartera). Cada
- * una se proyecta con la activación del piloto total y con la de su propio
- * sector piloto (Barquisimeto con Cabudare, Cumaná con Cumaná).
+ * una se proyecta con la activación del piloto total y, si tiene un sector
+ * piloto propio, también con la de ese sector (Barquisimeto con Cabudare,
+ * Cumaná con Cumaná). Guanare, Maracay, Barcelona y Acarigua no tienen sector
+ * piloto: solo el piloto total (DIENN, 25-09-2026).
  */
-export const CIUDADES_COMPLETAS = {
+export const CIUDADES_COMPLETAS: Record<CiudadCompleta, { nombre: string; sector: Sector | null }> = {
   barquisimeto: { nombre: "Barquisimeto", sector: "barquisimeto_este" },
+  guanare: { nombre: "Guanare", sector: null },
+  maracay: { nombre: "Maracay", sector: null },
+  barcelona: { nombre: "Barcelona", sector: null },
+  acarigua: { nombre: "Acarigua", sector: null },
   cumana: { nombre: "Cumaná", sector: "cumana" },
-} as const satisfies Record<string, { nombre: string; sector: Sector }>;
+};
 
-export type CiudadCompleta = keyof typeof CIUDADES_COMPLETAS;
+export type CiudadCompleta = "barquisimeto" | "guanare" | "maracay" | "barcelona" | "acarigua" | "cumana";
 
-export const CIUDADES: CiudadCompleta[] = ["barquisimeto", "cumana"];
+/** Todas, en el orden de las pestañas. */
+export const CIUDADES: CiudadCompleta[] = ["barquisimeto", "guanare", "maracay", "barcelona", "acarigua", "cumana"];
+
+/**
+ * La combinación siempre es Cumaná + una zona variable (DIENN, 25-09-2026):
+ * Cumaná queda fija y la otra se elige entre estas.
+ */
+export const CIUDAD_FIJA: CiudadCompleta = "cumana";
+export const ZONAS_VARIABLES: CiudadCompleta[] = CIUDADES.filter((c) => c !== CIUDAD_FIJA);
 
 export function esCiudadCompleta(valor: unknown): valor is CiudadCompleta {
-  return valor === "barquisimeto" || valor === "cumana";
+  return typeof valor === "string" && (CIUDADES as string[]).includes(valor);
 }
 
 /** Meta de Panquecitas: 4% del volumen de Harina PAN (la misma del dashboard). */
