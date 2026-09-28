@@ -408,12 +408,37 @@ function findRadarRatioColumns(grid: string[][], headerRowIdx: number): number[]
  * a un mes y solo la columna de ese mes trae cifra, así que se toma la primera
  * distinta de cero. Con una sola columna se comporta igual que antes.
  */
-function valorVentaAcumulada(row: string[], ratioCols: number[]): number {
+function valorVentaAcumulada(row: string[], ratioCols: number[], formato: FormatoNumero): number {
   for (const col of ratioCols) {
-    const valor = parseLatinNumber(row[col]);
+    const valor = parseSapNumber(row[col], formato);
     if (valor !== 0) return valor;
   }
   return 0;
+}
+
+/**
+ * Formato de los números de las columnas de venta, por mayoría de celdas.
+ *
+ * El export de SAP viene en formato latino ("28.800,00"). Pero si alguien abre
+ * el .xls en Excel y lo vuelve a guardar como página web, Excel reescribe las
+ * cifras en el formato de la PC, que puede ser inglés ("28,800.00"). Leído
+ * como latino, "12.00" daba 1.200 kg y "28,800.00" daba 28,8 kg: el Maracay
+ * completo salió en 42,8 millones de kg en vez de 2,27 (DIENN, 27-09-2026).
+ *
+ * SAP escribe siempre dos decimales, así que el separador que va antes de los
+ * dos últimos dígitos es el decimal.
+ */
+function detectarFormatoNumero(grid: string[][], desdeFila: number, cols: number[]): FormatoNumero {
+  let latino = 0;
+  let ingles = 0;
+  for (let r = desdeFila; r < grid.length; r++) {
+    for (const col of cols) {
+      const texto = (grid[r][col] ?? "").trim();
+      if (/,\d{1,2}$/.test(texto)) latino++;
+      else if (/\.\d{1,2}$/.test(texto)) ingles++;
+    }
+  }
+  return ingles > latino ? "ingles" : "latino";
 }
 
 export async function parseSapRadarMhtml(buffer: ArrayBuffer): Promise<SapRadarParseResult> {
@@ -466,6 +491,9 @@ export async function parseSapRadarMhtml(buffer: ArrayBuffer): Promise<SapRadarP
     };
   }
 
+  // Latino en el export de SAP; inglés si el archivo se reguardó desde Excel.
+  const formatoNumeros = detectarFormatoNumero(grid, headerRowIdx + 1, ratioCols);
+
   // Última fila por cliente+material (mayor "Día") — descarta snapshots intermedios del mismo archivo.
   const latestByKey = new Map<string, ParsedSapRadarRow>();
   // TODAS las fechas distintas por cliente+material (para la recompra): a
@@ -475,6 +503,11 @@ export async function parseSapRadarMhtml(buffer: ArrayBuffer): Promise<SapRadarP
   // para reportes de varios meses, donde el "Venta Acumulada" se reinicia cada
   // mes y quedarse solo con el último corte perdería los meses anteriores.
   const todasLasFilas = new Map<string, ParsedSapRadarRow>();
+  // Cada fila del archivo, SIN colapsar ni siquiera por cliente+material+día. Un
+  // cliente Mixto puede traer dos filas el mismo día (una por grupo de vendedores)
+  // y son dos ventas distintas: `todasLasFilas` se queda con la última. Solo la
+  // usa Ciudades completas, que las suma; el resto sigue igual.
+  const filasCrudas: ParsedSapRadarRow[] = [];
   for (let r = headerRowIdx + 1; r < grid.length; r++) {
     const row = grid[r];
     const sapCode = (row[cols.clienteCodigo] ?? "").trim();
@@ -509,10 +542,11 @@ export async function parseSapRadarMhtml(buffer: ArrayBuffer): Promise<SapRadarP
       material_code: materialCode,
       material_name: (row[cols.materialNombre] ?? "").trim(),
       fecha,
-      quantity_kg: valorVentaAcumulada(row, ratioCols),
+      quantity_kg: valorVentaAcumulada(row, ratioCols, formatoNumeros),
     };
     // Sin colapsar: una entrada por cliente+material+fecha.
     todasLasFilas.set(`${sapCode}|${materialCode}|${fecha}`, parsed);
+    filasCrudas.push(parsed);
 
     const key = `${sapCode}|${materialCode}`;
     const existing = latestByKey.get(key);
@@ -527,7 +561,15 @@ export async function parseSapRadarMhtml(buffer: ArrayBuffer): Promise<SapRadarP
     errors.push({ row: 0, field: "datos", message: "No se encontraron filas de datos en el reporte." });
   }
 
-  return { valid, errors, fechas: Array.from(fechasSet.values()), filas, columnasVenta: ratioCols.length };
+  return {
+    valid,
+    errors,
+    fechas: Array.from(fechasSet.values()),
+    filas,
+    filasCrudas,
+    columnasVenta: ratioCols.length,
+    formatoNumeros,
+  };
 }
 
 // ════════════════════════════════════════════════════════════════
@@ -1047,5 +1089,16 @@ function parseLatinNumber(value: string | undefined): number {
   if (!trimmed) return 0;
   const normalized = trimmed.replace(/\./g, "").replace(",", ".");
   const n = Number(normalized);
+  return Number.isFinite(n) ? n : 0;
+}
+
+type FormatoNumero = "latino" | "ingles";
+
+/** Latino ("2.054,40") o inglés ("2,054.40"), según lo detectado en el archivo. */
+function parseSapNumber(value: string | undefined, formato: FormatoNumero): number {
+  if (formato === "latino") return parseLatinNumber(value);
+  const trimmed = (value ?? "").trim();
+  if (!trimmed) return 0;
+  const n = Number(trimmed.replace(/,/g, ""));
   return Number.isFinite(n) ? n : 0;
 }

@@ -42,6 +42,7 @@ export function Bqto3MDropzone({ ciudad }: { ciudad: CiudadCompleta }) {
   const [dragOver, setDragOver] = useState(false);
   const [rows, setRows] = useState<FilaCarga[]>([]);
   const [errors, setErrors] = useState<ParseError[]>([]);
+  const [formatoIngles, setFormatoIngles] = useState(false);
   const [fileName, setFileName] = useState("");
   const [doneSummary, setDoneSummary] = useState("");
 
@@ -61,10 +62,19 @@ export function Bqto3MDropzone({ ciudad }: { ciudad: CiudadCompleta }) {
         return;
       }
       const result = await parseSapRadarMhtml(buffer);
-      // `filas` (todas, una por cliente + material + día) y no `valid`, que se
-      // queda solo con el último corte de cada cliente.
-      setRows(
-        (result.filas ?? result.valid).map((r) => ({
+      // `filasCrudas` (TODAS las filas del archivo) y no `valid`, que se queda
+      // solo con el último corte de cada cliente. Si el mismo cliente + material
+      // + día viene dos veces (clientes Mixtos, una fila por grupo de
+      // vendedores), son dos ventas: se SUMAN para que el total sea el del Excel.
+      const porLlave = new Map<string, FilaCarga>();
+      for (const r of result.filasCrudas ?? result.filas ?? result.valid) {
+        const llave = `${r.sap_code}|${r.material_code}|${r.fecha}`;
+        const previa = porLlave.get(llave);
+        if (previa) {
+          previa.quantity_kg += r.quantity_kg;
+          continue;
+        }
+        porLlave.set(llave, {
           sap_code: r.sap_code,
           client_name: r.client_name,
           tipo_cliente: r.tipo_cliente,
@@ -73,9 +83,11 @@ export function Bqto3MDropzone({ ciudad }: { ciudad: CiudadCompleta }) {
           material_code: r.material_code,
           fecha: r.fecha,
           quantity_kg: r.quantity_kg,
-        }))
-      );
+        });
+      }
+      setRows([...porLlave.values()]);
       setErrors(result.errors);
+      setFormatoIngles(result.formatoNumeros === "ingles");
       setState("previewing");
     } catch {
       toast.error("Error al leer el archivo.");
@@ -142,6 +154,7 @@ export function Bqto3MDropzone({ ciudad }: { ciudad: CiudadCompleta }) {
     setState("idle");
     setRows([]);
     setErrors([]);
+    setFormatoIngles(false);
     setFileName("");
     setDoneSummary("");
   }
@@ -181,6 +194,14 @@ export function Bqto3MDropzone({ ciudad }: { ciudad: CiudadCompleta }) {
           <Badge variant="outline">Oficinas: {oficinas.join(", ") || "—"}</Badge>
           {errors.length > 0 && <Badge variant="destructive">{errors.length} errores</Badge>}
         </div>
+        {formatoIngles && (
+          <Alert>
+            <AlertDescription>
+              Este archivo se volvió a guardar desde Excel y trae los números en formato inglés (&quot;28,800.00&quot;).
+              Se convirtieron bien, pero revisa que el total en kg de arriba coincida con el reporte.
+            </AlertDescription>
+          </Alert>
+        )}
         <Alert>
           <AlertDescription>
             Esta carga <span className="font-medium">reemplaza por completo</span> la de {nombreCiudad} completo

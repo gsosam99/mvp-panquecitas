@@ -70,6 +70,10 @@ export const DIAS_HABILES_MES = DIAS_HABILES_3M / 3;
  * (decisión con DIENN, 24-09-2026): licorerías, farmacias y perfumerías,
  * mascotas y agropecuarias. Los "CS" del segmento no tienen un giro propio y
  * no se pueden separar desde este archivo.
+ *
+ * Revisado el 27-09-2026 contra el Radar de Panquecitas del piloto: las
+ * licorerías sí compran (5.º tipo en kg), pero DIENN decidió dejarlas fuera
+ * de foco igual.
  */
 export const TIPOS_NO_FOCO = [
   "LICOR/FRIAXCAJA/DEPO",

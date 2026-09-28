@@ -213,9 +213,16 @@ export interface SapRadarParseResult {
   // poder sumar el acumulado de cada mes. Opcional: los returns de error
   // temprano no lo traen.
   filas?: ParsedSapRadarRow[];
+  // Cada fila del archivo tal cual, sin colapsar: un cliente Mixto puede traer
+  // dos filas el mismo día (una por grupo de vendedores) y `filas` se queda con
+  // la última. Solo la usa Ciudades completas, que las suma.
+  filasCrudas?: ParsedSapRadarRow[];
   /** Cuántas columnas "Venta Acumulada" trae el archivo (una por mes en el
    *  reporte de 3 meses). Diagnóstico: con 1 sola, los meses extra vendrían en 0. */
   columnasVenta?: number;
+  /** Formato de las cifras de venta: "latino" en el export de SAP; "ingles" si
+   *  el archivo se volvió a guardar desde Excel. Se convierte igual; es diagnóstico. */
+  formatoNumeros?: "latino" | "ingles";
 }
 
 // ════════════════════════════════════════════════════════════════
