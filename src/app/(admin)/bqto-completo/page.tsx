@@ -6,7 +6,7 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Alert, AlertDescription } from "@/components/ui/alert";
 import { KpiCard } from "@/components/dashboard/KpiCard";
 import { Bqto3MDropzone } from "@/components/admin/Bqto3MDropzone";
-import { getBqto3MFilas, getReferenciasPiloto } from "@/lib/bqto-queries";
+import { getBqto3MFilas, getPerfilPiloto } from "@/lib/bqto-queries";
 import {
   CIUDAD_FIJA,
   CIUDADES,
@@ -15,7 +15,8 @@ import {
   MESES_PROYECCION,
   META_PCT,
   esCiudadCompleta,
-  proyectar,
+  esGigante,
+  proyeccionPorTipo,
   resumenBqto,
   resumenCombinado,
   sumarEscenarios,
@@ -24,7 +25,9 @@ import {
   type BqtoFila,
   type BqtoResumen,
   type CiudadCompleta,
+  type ClienteZona,
   type EscenarioProyeccion,
+  type FilaTipoProyeccion,
   type ReferenciaActivacion,
 } from "@/lib/bqto-completo";
 
@@ -35,6 +38,10 @@ export const metadata: Metadata = { title: "Ciudades completas — Panquecitas" 
 // Barcelona, Acarigua y Cumaná — y la combinación Cumaná + una zona variable
 // (25-09-2026). No sale en el Dashboard principal ni se mezcla con los datos
 // del piloto. El cálculo vive en src/lib/bqto-completo.ts.
+//
+// La proyección usa el perfil del piloto POR TIPO DE CLIENTE (27-09-2026) y
+// muestra aparte a los clientes "gigantes", que no tienen equivalente en el
+// piloto.
 
 type Vista = CiudadCompleta | "ambas";
 
@@ -61,6 +68,11 @@ interface FilaMeta {
   destacada?: boolean;
 }
 
+interface Detalle {
+  titulo: string;
+  filas: FilaTipoProyeccion[];
+}
+
 /** Barra horizontal rotulada con su kg; el ancho es relativo a `max`. */
 function Barra({ valor, max, color, texto }: { valor: number; max: number; color: string; texto: string }) {
   // Se escala al 75% del ancho para que el rótulo quepa a la derecha de la barra más larga.
@@ -73,11 +85,18 @@ function Barra({ valor, max, color, texto }: { valor: number; max: number; color
   );
 }
 
-/** Los dos escenarios (todos / foco) de una población con una activación de referencia. */
-function escenariosCon(r: BqtoResumen, ref: ReferenciaActivacion): [EscenarioProyeccion, EscenarioProyeccion] {
+/**
+ * Las poblaciones que se proyectan: todos y foco, y cada una sin gigantes si
+ * la zona los tiene (si no, serían filas repetidas).
+ */
+function poblaciones(clientes: ClienteZona[], umbral: number): { poblacion: string; clientes: ClienteZona[] }[] {
+  const sinGigantes = clientes.filter((c) => !esGigante(c, umbral));
+  const hayGigantes = sinGigantes.length < clientes.length;
   return [
-    proyectar(r.clientes, ref.activacionPct, ref.kgPorActivoMes, r.promedioMesKg),
-    proyectar(r.clientesFoco, ref.activacionFocoPct, ref.kgPorActivoMes, r.promedioMesFocoKg),
+    { poblacion: "Todos los clientes", clientes },
+    ...(hayGigantes ? [{ poblacion: "Todos, sin gigantes", clientes: sinGigantes }] : []),
+    { poblacion: "Segmentos foco", clientes: clientes.filter((c) => c.foco) },
+    ...(hayGigantes ? [{ poblacion: "Foco, sin gigantes", clientes: sinGigantes.filter((c) => c.foco) }] : []),
   ];
 }
 
@@ -96,25 +115,83 @@ function CajaReferencia({ referencia: ref }: { referencia: ReferenciaActivacion 
           </span>
         </div>
         <div className="flex justify-between gap-2">
-          <span className="text-slate-500">Activación segmentos foco</span>
-          <span className="font-bold text-slate-900">
-            {pct(ref.activacionFocoPct)}%{" "}
-            <span className="text-xs font-normal text-slate-400">
-              ({ref.activos.toLocaleString("es-VE")} de {ref.carteraFoco.toLocaleString("es-VE")})
-            </span>
-          </span>
+          <span className="text-slate-500">Panquecitas por cliente activo (promedio)</span>
+          <span className="font-bold text-slate-900">{pct(ref.kgPorActivoMes)} kg/mes</span>
         </div>
-        <div className="flex justify-between gap-2">
-          <span className="text-slate-500">Panquecitas por cliente activo</span>
-          <span className="font-bold text-slate-900">
-            {pct(ref.kgPorActivoMes)} kg/mes{" "}
-            <span className="text-xs font-normal text-slate-400">
-              ({kg(ref.kgActivos)} kg ÷ {pct(ref.mesesCliente)} meses-cliente)
-            </span>
-          </span>
-        </div>
+        <p className="text-xs text-slate-400">
+          La proyección no usa estos promedios: usa los de cada tipo de cliente (ver el detalle por tipo).
+        </p>
       </div>
     </div>
+  );
+}
+
+function TablaDetalle({ detalle }: { detalle: Detalle }) {
+  const sinPerfil = detalle.filas.filter((f) => !f.conPerfil);
+  return (
+    <details className="rounded-lg border border-slate-200">
+      <summary className="cursor-pointer select-none px-3 py-2 text-sm font-medium text-slate-900">
+        {detalle.titulo}
+      </summary>
+      <div className="overflow-x-auto px-3 pb-3">
+        <table className="w-full text-xs">
+          <thead>
+            <tr className="border-b text-left uppercase tracking-wide text-slate-500">
+              <th className="py-2 pr-3 font-semibold">Tipo de cliente</th>
+              <th className="py-2 pr-3 font-semibold text-right">Clientes</th>
+              <th className="py-2 pr-3 font-semibold text-right">Harina PAN / mes</th>
+              <th className="py-2 pr-3 font-semibold text-right">Meta 4% / mes</th>
+              <th className="py-2 pr-3 font-semibold text-right">% a activar (el del piloto)</th>
+              <th className="py-2 pr-3 font-semibold text-right">kg / activo / mes</th>
+              <th className="py-2 pr-3 font-semibold text-right">Clientes activados</th>
+              <th className="py-2 pr-3 font-semibold text-right">Volumen / mes</th>
+              <th className="py-2 font-semibold text-right">% de la meta</th>
+            </tr>
+          </thead>
+          <tbody>
+            {detalle.filas.map((f) => (
+              <tr key={f.tipo} className={`border-b last:border-0 ${f.conPerfil ? "" : "text-slate-400"}`}>
+                <td className="py-1.5 pr-3">
+                  {f.tipo}
+                  {!f.conPerfil && <span className="ml-1">(sin perfil en el piloto)</span>}
+                </td>
+                <td className="py-1.5 pr-3 text-right">{f.clientes.toLocaleString("es-VE")}</td>
+                <td className="py-1.5 pr-3 text-right">{kg(f.panMes)} kg</td>
+                <td className="py-1.5 pr-3 text-right" style={{ color: COLOR_META }}>
+                  {kg(f.metaMes)} kg
+                </td>
+                <td className="py-1.5 pr-3 text-right">
+                  {f.conPerfil ? (
+                    <>
+                      {pct(f.activacionPct)}%
+                      {f.carteraPiloto > 0 && (
+                        <span className="text-slate-400">
+                          {" "}
+                          ({f.activosPiloto} de {f.carteraPiloto})
+                        </span>
+                      )}
+                    </>
+                  ) : (
+                    "—"
+                  )}
+                </td>
+                <td className="py-1.5 pr-3 text-right">{f.conPerfil ? pct(f.kgPorActivoMes) : "—"}</td>
+                <td className="py-1.5 pr-3 text-right">{kg(f.activados)}</td>
+                <td className="py-1.5 pr-3 text-right font-semibold" style={{ color: COLOR_PROYECCION }}>
+                  {kg(f.kgMes)} kg
+                </td>
+                <td className="py-1.5 text-right">{f.metaMes > 0 ? `${pct((f.kgMes / f.metaMes) * 100)}%` : "—"}</td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+        {sinPerfil.length > 0 && (
+          <p className="text-xs text-slate-400 mt-2">
+            Sin perfil = el tipo no está en la cartera del piloto, así que no hay con qué proyectarlo y queda en 0.
+          </p>
+        )}
+      </div>
+    </details>
   );
 }
 
@@ -124,6 +201,9 @@ function VistaResumen({
   filasMeta,
   referencias,
   escenarios,
+  detalles,
+  gigantes,
+  umbralGiganteMes,
   notaPromedios,
   notaProyeccion,
 }: {
@@ -132,12 +212,17 @@ function VistaResumen({
   filasMeta: FilaMeta[];
   referencias: ReferenciaActivacion[];
   escenarios: Escenario[];
+  detalles: Detalle[];
+  gigantes: ClienteZona[];
+  umbralGiganteMes: number;
   /** Cómo se calcularon los promedios, bajo las tarjetas mensual y diaria. */
   notaPromedios: { mes: string; dia: string };
   notaProyeccion: string;
 }) {
   const maxBarra = Math.max(0, ...escenarios.flatMap(({ e }) => [e.metaMes, e.kgMes]));
   const tiposNoFoco = r.porTipo.filter((t) => !t.foco);
+  const metaGigantesMes = gigantes.reduce((s, c) => s + c.panMes, 0) * META_PCT;
+  const metaTotalMes = r.promedioMesKg * META_PCT;
 
   return (
     <>
@@ -212,10 +297,57 @@ function VistaResumen({
         </CardContent>
       </Card>
 
-      {/* ── 3. Proyección con la activación del piloto ───────────── */}
+      {/* ── 2b. Clientes gigantes ────────────────────────────────── */}
+      {gigantes.length > 0 && (
+        <Card>
+          <CardHeader>
+            <CardTitle>
+              Clientes gigantes — {gigantes.length} {gigantes.length === 1 ? "cliente" : "clientes"},{" "}
+              {pct(metaTotalMes > 0 ? (metaGigantesMes / metaTotalMes) * 100 : 0)}% de la meta
+            </CardTitle>
+          </CardHeader>
+          <CardContent className="space-y-3">
+            <div className="overflow-x-auto">
+              <table className="w-full text-sm">
+                <thead>
+                  <tr className="border-b text-left text-xs uppercase tracking-wide text-slate-500">
+                    <th className="py-2 pr-4 font-semibold">Cliente</th>
+                    <th className="py-2 pr-4 font-semibold">Tipo</th>
+                    <th className="py-2 pr-4 font-semibold text-right">Harina PAN / mes</th>
+                    <th className="py-2 font-semibold text-right">Meta 4% / mes</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {[...gigantes]
+                    .sort((a, b) => b.panMes - a.panMes)
+                    .map((c) => (
+                      <tr key={`${c.ciudad}|${c.sap_code}`} className="border-b last:border-0">
+                        <td className="py-2 pr-4 font-medium text-slate-900">
+                          {c.nombre} <span className="text-xs text-slate-400">({c.sap_code})</span>
+                        </td>
+                        <td className="py-2 pr-4 text-slate-500">{c.tipo}</td>
+                        <td className="py-2 pr-4 text-right">{kg(c.panMes)} kg</td>
+                        <td className="py-2 text-right font-semibold" style={{ color: COLOR_META }}>
+                          {kg(c.panMes * META_PCT)} kg
+                        </td>
+                      </tr>
+                    ))}
+                </tbody>
+              </table>
+            </div>
+            <p className="text-xs text-slate-400">
+              Gigante = compra más Harina PAN al mes que el mayor cliente de la cartera del piloto en un mes (
+              {kg(umbralGiganteMes)} kg). No hay nadie en el piloto con quien compararlos, así que la proyección se
+              muestra con y sin ellos.
+            </p>
+          </CardContent>
+        </Card>
+      )}
+
+      {/* ── 3. Proyección con el perfil del piloto ───────────────── */}
       <Card>
         <CardHeader>
-          <CardTitle>Proyección: {nombre} completo con la activación de hoy</CardTitle>
+          <CardTitle>Proyección: si se activa {nombre} como el piloto, ¿cuánto daría?</CardTitle>
         </CardHeader>
         <CardContent className="space-y-5">
           <div className={`grid gap-4 ${referencias.length > 2 ? "md:grid-cols-3" : "md:grid-cols-2"}`}>
@@ -228,11 +360,11 @@ function VistaResumen({
             <table className="w-full text-sm">
               <thead>
                 <tr className="border-b text-left text-xs uppercase tracking-wide text-slate-500">
-                  <th className="py-2 pr-3 font-semibold">Activación de</th>
+                  <th className="py-2 pr-3 font-semibold">Perfil de</th>
                   <th className="py-2 pr-3 font-semibold">Población</th>
                   <th className="py-2 pr-3 font-semibold text-right">Clientes</th>
                   <th className="py-2 pr-3 font-semibold text-right">Activación</th>
-                  <th className="py-2 pr-3 font-semibold text-right">Activados</th>
+                  <th className="py-2 pr-3 font-semibold text-right">Clientes activados</th>
                   <th className="py-2 pr-3 font-semibold text-right">Volumen / mes</th>
                   <th className="py-2 pr-3 font-semibold text-right">Meta 4% / mes</th>
                   <th className="py-2 pr-3 font-semibold text-right">% de la meta</th>
@@ -281,7 +413,7 @@ function VistaResumen({
             {escenarios.map(({ referencia, poblacion, e }) => (
               <div key={`barra|${referencia}|${poblacion}`} className="space-y-1">
                 <p className="text-sm font-medium text-slate-900">
-                  {poblacion} <span className="font-normal text-slate-500">· activación de {referencia}</span>
+                  {poblacion} <span className="font-normal text-slate-500">· perfil de {referencia}</span>
                 </p>
                 <Barra valor={e.metaMes} max={maxBarra} color={COLOR_META} texto={`${kg(e.metaMes)} kg`} />
                 <Barra
@@ -294,10 +426,17 @@ function VistaResumen({
             ))}
           </div>
 
+          <div className="space-y-2">
+            {detalles.map((d) => (
+              <TablaDetalle key={d.titulo} detalle={d} />
+            ))}
+          </div>
+
           <p className="text-xs text-slate-400">
-            {notaProyeccion} Todos los clientes usan la activación total (activos ÷ cartera) y los segmentos foco la
-            activación a escala (activos ÷ cartera sin los inactivos de segmentos no vendibles), las mismas del
-            Dashboard. Los kg por cliente activo cuentan a cada cliente desde su primera compra hasta el último Radar (
+            Escenario: cada tipo de cliente de la zona se activa en el MISMO % en que está activado hoy ese tipo en el
+            piloto, y cada cliente activado compra lo que compra hoy un cliente activo de ese tipo. Por tipo: clientes
+            del tipo × su % de activación en el piloto (activos ÷ cartera del tipo) × kg de Panquecitas al mes por
+            cliente activo del tipo. {notaProyeccion} Los kg por cliente activo cuentan a cada cliente desde su primera compra hasta el último Radar (
             {fecha(referencias[0]?.corte ?? null)}), en meses de {DIAS_HABILES_MES} días hábiles. La meta es el 4% de
             la Harina PAN mensual de esa misma población.
           </p>
@@ -321,7 +460,10 @@ export default async function CiudadesCompletasPage({
   const con: CiudadCompleta =
     esCiudadCompleta(paramCon) && ZONAS_VARIABLES.includes(paramCon) ? paramCon : "barquisimeto";
 
-  const [{ filas, error }, refs] = await Promise.all([getBqto3MFilas(), getReferenciasPiloto()]);
+  const [{ filas, error }, { referencias: refs, umbralGiganteMes }] = await Promise.all([
+    getBqto3MFilas(),
+    getPerfilPiloto(),
+  ]);
   const filasPorCiudad = Object.fromEntries(
     CIUDADES.map((c) => [c, filas.filter((f) => f.ciudad === c)])
   ) as Record<CiudadCompleta, BqtoFila[]>;
@@ -329,8 +471,8 @@ export default async function CiudadesCompletasPage({
     CIUDADES.map((c) => [c, resumenBqto(filasPorCiudad[c])])
   ) as Record<CiudadCompleta, BqtoResumen | null>;
 
-  // La activación "propia" de una ciudad: la de su sector piloto si lo tiene;
-  // si no, la del piloto total (DIENN, 25-09-2026).
+  // El perfil "propio" de una ciudad: el de su sector piloto si lo tiene; si
+  // no, el del piloto total (DIENN, 25-09-2026).
   const refPropia = (c: CiudadCompleta): ReferenciaActivacion => {
     const sector = CIUDADES_COMPLETAS[c].sector;
     return sector ? refs[sector] : refs.total;
@@ -385,13 +527,30 @@ export default async function CiudadesCompletasPage({
         </>
       );
     } else {
-      // Cada ciudad con SU activación (sector piloto o, si no tiene, piloto total), y el resultado sumado.
-      const porCiudad = cargadas.map((c) => escenariosCon(resumenes[c]!, refPropia(c)));
-      const [totalTodos, totalFoco] = escenariosCon(r, refs.total);
-      const cadaUna = `Cada ciudad la suya (${cargadas
+      const cadaUna = `cada ciudad la suya (${cargadas
         .map((c) => `${CIUDADES_COMPLETAS[c].nombre} con ${refPropia(c).etiqueta}`)
         .join(", ")})`;
-      // Cajas de referencia sin repetir: el piloto total más las propias que existan.
+      // Las poblaciones se arman con los clientes de las dos ciudades; "cada
+      // ciudad la suya" proyecta cada ciudad con su perfil y suma el resultado.
+      const escenarios: Escenario[] = [
+        ...poblaciones(r.porCliente, umbralGiganteMes).map((p) => ({
+          referencia: refs.total.etiqueta,
+          poblacion: p.poblacion,
+          e: proyeccionPorTipo(p.clientes, refs.total).e,
+        })),
+        ...poblaciones(r.porCliente, umbralGiganteMes).map((p) => ({
+          referencia: cadaUna,
+          poblacion: p.poblacion,
+          e: sumarEscenarios(
+            cargadas.map((c) =>
+              proyeccionPorTipo(
+                p.clientes.filter((x) => x.ciudad === c),
+                refPropia(c)
+              ).e
+            )
+          ),
+        })),
+      ];
       const referencias = [refs.total, ...cargadas.map(refPropia)].filter(
         (ref, i, arr) => arr.findIndex((x) => x.etiqueta === ref.etiqueta) === i
       );
@@ -422,17 +581,24 @@ export default async function CiudadesCompletasPage({
               { label: "Total · segmentos foco", clientes: r.clientesFoco, panMes: r.promedioMesFocoKg, destacada: true },
             ]}
             referencias={referencias}
-            escenarios={[
-              { referencia: refs.total.etiqueta, poblacion: "Todos los clientes", e: totalTodos },
-              { referencia: refs.total.etiqueta, poblacion: "Segmentos foco", e: totalFoco },
-              { referencia: cadaUna, poblacion: "Todos los clientes", e: sumarEscenarios(porCiudad.map(([t]) => t)) },
-              { referencia: cadaUna, poblacion: "Segmentos foco", e: sumarEscenarios(porCiudad.map(([, f]) => f)) },
+            escenarios={escenarios}
+            detalles={[
+              {
+                titulo: `Detalle por tipo — ${nombreCombo} con el perfil de ${refs.total.etiqueta}`,
+                filas: proyeccionPorTipo(r.porCliente, refs.total).filas,
+              },
+              ...cargadas.map((c) => ({
+                titulo: `Detalle por tipo — ${CIUDADES_COMPLETAS[c].nombre} con el perfil de ${refPropia(c).etiqueta}`,
+                filas: proyeccionPorTipo(resumenes[c]!.porCliente, refPropia(c)).filas,
+              })),
             ]}
+            gigantes={r.porCliente.filter((c) => esGigante(c, umbralGiganteMes))}
+            umbralGiganteMes={umbralGiganteMes}
             notaPromedios={{
               mes: "Suma de los promedios mensuales de cada ciudad",
               dia: "Suma de los promedios diarios de cada ciudad (venta ÷ días con venta de su archivo)",
             }}
-            notaProyeccion={`Clientes de las dos ciudades × activación de hoy = clientes activados; × kg de Panquecitas por cliente activo al mes = volumen mensual, y × ${MESES_PROYECCION} para el período. "Cada ciudad la suya" proyecta cada ciudad con la activación de su sector piloto (la del piloto total si no tiene) y suma el resultado; la activación que muestra es la efectiva (activados ÷ clientes).`}
+            notaProyeccion={`"Cada ciudad la suya" proyecta cada ciudad con el perfil de su sector piloto (el del piloto total si no tiene) y suma el resultado; la activación que muestra es la efectiva (activados ÷ clientes).`}
           />
         </>
       );
@@ -460,18 +626,24 @@ export default async function CiudadesCompletasPage({
             { label: "Segmentos foco", clientes: r.clientesFoco, panMes: r.promedioMesFocoKg },
           ]}
           referencias={referencias}
-          escenarios={referencias.flatMap((ref) => {
-            const [todos, foco] = escenariosCon(r, ref);
-            return [
-              { referencia: ref.etiqueta, poblacion: "Todos los clientes", e: todos },
-              { referencia: ref.etiqueta, poblacion: "Segmentos foco", e: foco },
-            ];
-          })}
+          escenarios={referencias.flatMap((ref) =>
+            poblaciones(r.porCliente, umbralGiganteMes).map((p) => ({
+              referencia: ref.etiqueta,
+              poblacion: p.poblacion,
+              e: proyeccionPorTipo(p.clientes, ref).e,
+            }))
+          )}
+          detalles={referencias.map((ref) => ({
+            titulo: `Detalle por tipo — ${nombre} con el perfil de ${ref.etiqueta}`,
+            filas: proyeccionPorTipo(r.porCliente, ref).filas,
+          }))}
+          gigantes={r.porCliente.filter((c) => esGigante(c, umbralGiganteMes))}
+          umbralGiganteMes={umbralGiganteMes}
           notaPromedios={{
             mes: `Venta de los ${r.meses} meses ÷ ${r.meses}`,
             dia: `Venta de los ${r.meses} meses ÷ ${r.dias} días con venta`,
           }}
-          notaProyeccion={`Clientes de ${nombre} × activación de hoy = clientes activados; × kg de Panquecitas por cliente activo al mes = volumen mensual, y × ${MESES_PROYECCION} para el período.`}
+          notaProyeccion={`Volumen de ${nombre} = la suma de sus tipos de cliente, y × ${MESES_PROYECCION} para el período.`}
         />
         <Card>
           <CardHeader>
@@ -491,8 +663,8 @@ export default async function CiudadesCompletasPage({
         <h1 className="text-2xl font-bold text-slate-900">Ciudades completas</h1>
         <p className="text-slate-500 mt-1">
           Ratios de Harina PAN de toda la ciudad, aparte del piloto: venta de 3 meses, la meta del 4% para todos los
-          clientes y para los segmentos foco, y el volumen que daría activar la ciudad completa al % de activación que
-          el piloto tiene hoy. No afecta el Dashboard.
+          clientes y para los segmentos foco, y el volumen que daría activar la ciudad completa con el perfil de hoy
+          del piloto por tipo de cliente. No afecta el Dashboard.
         </p>
       </div>
 
