@@ -2703,23 +2703,31 @@ export async function getCarteraPorSegmento(): Promise<CarteraSegmentoResult> {
       (c) => [...c.plan].some((w) => covered.has(w)) && estabaIncorporado(c.fecha_incorporacion, cierre)
     );
 
+  // En la vista por día, lo de sábado o domingo (Radar, facturas y pedidos) se
+  // suma al lunes siguiente, igual que las series de rendimiento (ver
+  // siguienteDiaHabil). Antes un pedido de fin de semana sin Radar creaba un
+  // día propio con la barra en 0: un hueco en el gráfico (26-27 sep).
+  // Semana y mes agrupan por la fecha real.
+  const bucketDe = (fecha: string, granularity: TimeGranularity) =>
+    bucketKeyFor(granularity === "day" ? siguienteDiaHabil(fecha) : fecha.slice(0, 10), granularity);
+
   // ── Gráficos por segmento (barras Radar del bucket; efectividad acumulada) ──
   function buildSegmentos(granularity: TimeGranularity): CarteraSegmentoBucket[] {
     const radarByBucket = new Map<string, { locId: string; kg: number }[]>();
     for (const r of radar) {
-      const b = bucketKeyFor(r.date_of_sale.slice(0, 10), granularity);
+      const b = bucketDe(r.date_of_sale, granularity);
       if (!radarByBucket.has(b)) radarByBucket.set(b, []);
       radarByBucket.get(b)!.push({ locId: r.location_id, kg: Math.max(0, r.quantity_kg) });
     }
     const factByBucket = new Map<string, string[]>();
     for (const r of fact) {
-      const b = bucketKeyFor(r.fecha.slice(0, 10), granularity);
+      const b = bucketDe(r.fecha, granularity);
       if (!factByBucket.has(b)) factByBucket.set(b, []);
       factByBucket.get(b)!.push(r.location_id);
     }
     const pedidoByBucket = new Map<string, string[]>();
     for (const r of pedido) {
-      const b = bucketKeyFor(r.fecha.slice(0, 10), granularity);
+      const b = bucketDe(r.fecha, granularity);
       if (!pedidoByBucket.has(b)) pedidoByBucket.set(b, []);
       pedidoByBucket.get(b)!.push(r.location_id);
     }
@@ -2796,19 +2804,19 @@ export async function getCarteraPorSegmento(): Promise<CarteraSegmentoResult> {
     // volumen del período (DIENN, 18-09-2026 — Cabudare salía en negativo).
     const radarByBucket = new Map<string, { locId: string; kg: number }[]>();
     for (const r of radarScope) {
-      const b = bucketKeyFor(r.date_of_sale.slice(0, 10), granularity);
+      const b = bucketDe(r.date_of_sale, granularity);
       if (!radarByBucket.has(b)) radarByBucket.set(b, []);
       radarByBucket.get(b)!.push({ locId: r.location_id, kg: Math.max(0, r.quantity_kg) });
     }
     const factByBucket = new Map<string, string[]>();
     for (const r of factScope) {
-      const b = bucketKeyFor(r.fecha.slice(0, 10), granularity);
+      const b = bucketDe(r.fecha, granularity);
       if (!factByBucket.has(b)) factByBucket.set(b, []);
       factByBucket.get(b)!.push(r.location_id);
     }
     const pedidoByBucket = new Map<string, string[]>();
     for (const r of pedidoScope) {
-      const b = bucketKeyFor(r.fecha.slice(0, 10), granularity);
+      const b = bucketDe(r.fecha, granularity);
       if (!pedidoByBucket.has(b)) pedidoByBucket.set(b, []);
       pedidoByBucket.get(b)!.push(r.location_id);
     }
@@ -2819,7 +2827,7 @@ export async function getCarteraPorSegmento(): Promise<CarteraSegmentoResult> {
       : radarFuera;
     const fueraByBucket = new Map<string, number>();
     for (const r of radarFueraScope) {
-      const b = bucketKeyFor(r.date_of_sale.slice(0, 10), granularity);
+      const b = bucketDe(r.date_of_sale, granularity);
       fueraByBucket.set(b, (fueraByBucket.get(b) ?? 0) + Math.max(0, r.quantity_kg));
     }
 
