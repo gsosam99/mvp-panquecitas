@@ -12,13 +12,19 @@ import { isExcludedDistribuidor } from "@/lib/sectors";
 import type { ParsedSapRadarRow, ParsedSapFacturacionRow } from "@/types";
 
 type RadarFecha = { sap_code: string; material_code: string; fecha: string };
+// Fila liviana del Radar: los datos del cliente viajan aparte, una vez por
+// código (`clientes`), para no pasar el límite de 4,5 MB de Vercel.
+type RadarFila = Pick<ParsedSapRadarRow, "sap_code" | "material_code" | "material_name" | "fecha" | "quantity_kg">;
+type RadarCliente = Omit<ParsedSapRadarRow, "material_code" | "material_name" | "fecha" | "quantity_kg">;
 
 type SapUploadBody =
   // Reporte "Radar" (Harina PAN + Panquecitas) — acumulado del mes, un
   // archivo MHTML por producto ("Radar HPM.xls" / "Radar panquecitas.xls").
-  // `fechas` = todas las fechas distintas con venta (para la recompra), aparte
-  // del acumulado que va en `rows`.
-  | { format: "radar"; rows: ParsedSapRadarRow[]; batchId: string; fechas?: RadarFecha[] }
+  // `fechas` = todas las fechas distintas con venta (para la recompra). Si no
+  // viene se sacan de `rows`, que tienen las mismas llaves cliente+material+día.
+  // `clientes` = datos de cada cliente; si no viene se toman de `rows` (formato
+  // viejo, filas completas).
+  | { format: "radar"; rows: RadarFila[]; clientes?: RadarCliente[]; batchId: string; fechas?: RadarFecha[] }
   // Reporte "Pedidos y Facturado" (Panquecitas, Cantidad Pedido/Facturada por día).
   | { format: "facturacion"; rows: ParsedSapFacturacionRow[]; batchId: string };
 
@@ -89,7 +95,11 @@ export async function POST(req: Request) {
       return await handleFacturacionUpload(supabase, body.rows, body.batchId);
     }
     if (body.format === "radar") {
-      return await handleRadarUpload(supabase, body.rows, body.batchId, body.fechas ?? []);
+      const clientes = body.clientes ?? (body.rows as unknown as RadarCliente[]);
+      const fechas =
+        body.fechas ??
+        body.rows.map((r) => ({ sap_code: r.sap_code, material_code: r.material_code, fecha: r.fecha }));
+      return await handleRadarUpload(supabase, body.rows, clientes, body.batchId, fechas);
     }
     return Response.json({ error: "Formato de reporte desconocido" }, { status: 400 });
   } catch (error) {
@@ -111,11 +121,16 @@ export async function POST(req: Request) {
 // actualizar fila por fila: se borra y se reinserta. Volver a subir el mismo
 // archivo es idempotente, y una corrección queda reflejada en vez de convivir
 // con el dato viejo.
-// eslint-disable-next-line @typescript-eslint/no-explicit-any
-async function handleRadarUpload(supabase: any, rows: ParsedSapRadarRow[], batchId: string, fechas: RadarFecha[]) {
+async function handleRadarUpload(
+  supabase: any, // eslint-disable-line @typescript-eslint/no-explicit-any
+  rows: RadarFila[],
+  clientes: RadarCliente[],
+  batchId: string,
+  fechas: RadarFecha[]
+) {
   // ── 1. Resolver clientes contra la cartera ya cargada (no se crean nuevos) ──
-  const uniqueByCode = new Map<string, ParsedSapRadarRow>();
-  for (const row of rows) uniqueByCode.set(row.sap_code, row);
+  const uniqueByCode = new Map<string, RadarCliente>();
+  for (const c of clientes) uniqueByCode.set(c.sap_code, c);
 
   const knownLocationIds = await resolveKnownLocationIds(supabase, [...uniqueByCode.keys()]);
   const clientesFueraCartera = [...uniqueByCode.keys()].filter((c) => !knownLocationIds.has(c)).length;

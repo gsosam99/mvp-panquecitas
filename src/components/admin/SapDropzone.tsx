@@ -113,21 +113,56 @@ export function SapDropzone({ mode, onCommitSuccess }: SapDropzoneProps) {
     setState("uploading");
     const batchId = crypto.randomUUID();
     try {
+      // Radar: se manda TODA fila cliente+material+día y la ruta suma el
+      // mes. Antes se mandaba `valid`, que el parser deja con un solo día
+      // por cliente+material — en el export del 21-08-2026 eso descartaba
+      // 1,21 de 5,42 toneladas antes de llegar al servidor.
+      //
+      // Las filas van LIVIANAS (cliente, material, día y kg) y los datos del
+      // cliente una sola vez por código en `clientes`. Repetirlos en cada fila,
+      // más la lista de `fechas` (que son las mismas llaves de las filas),
+      // pasaba el límite de 4,5 MB de Vercel a fin de mes: el Radar HPM del
+      // 29-09-2026 trae ~11.300 filas y la carga fallaba con "Error de
+      // conexión". Las fechas ahora las saca la ruta de las filas.
+      let payload: Record<string, unknown>;
+      if (parsed.format === "radar") {
+        const clientes = new Map<string, ParsedSapRadarRow>();
+        for (const f of parsed.filas) clientes.set(f.sap_code, f);
+        payload = {
+          format: "radar",
+          rows: parsed.filas.map((f) => ({
+            sap_code: f.sap_code,
+            material_code: f.material_code,
+            material_name: f.material_name,
+            fecha: f.fecha,
+            quantity_kg: f.quantity_kg,
+          })),
+          clientes: [...clientes.values()].map((c) => ({
+            sap_code: c.sap_code,
+            client_name: c.client_name,
+            tipo_cliente: c.tipo_cliente,
+            esquema_atencion: c.esquema_atencion,
+            grupo_vendedor: c.grupo_vendedor,
+            region: c.region,
+            oficina_venta: c.oficina_venta,
+            zona_venta: c.zona_venta,
+          })),
+          batchId,
+        };
+      } else {
+        payload = { format: parsed.format, rows: parsed.valid, batchId };
+      }
       const res = await fetch("/api/sap-upload", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          format: parsed.format,
-          // Radar: se manda TODA fila cliente+material+día y la ruta suma el
-          // mes. Antes se mandaba `valid`, que el parser deja con un solo día
-          // por cliente+material — en el export del 21-08-2026 eso descartaba
-          // 1,21 de 5,42 toneladas antes de llegar al servidor.
-          rows: parsed.format === "radar" ? parsed.filas : parsed.valid,
-          batchId,
-          ...(parsed.format === "radar" ? { fechas: parsed.fechas } : {}),
-        }),
+        body: JSON.stringify(payload),
       });
-      const data = (await res.json()) as {
+      // Si Vercel corta la petición (cuerpo muy grande, tiempo agotado) la
+      // respuesta no es JSON: se muestra el código HTTP en vez de un "Error
+      // de conexión" que no dice nada.
+      const data = (await res.json().catch(() => ({
+        error: `Respuesta inesperada del servidor (HTTP ${res.status})`,
+      }))) as {
         inserted?: number;
         /** Filas sustituidas: las dos cargas reemplazan el período que trae el archivo. */
         deleted?: number;
