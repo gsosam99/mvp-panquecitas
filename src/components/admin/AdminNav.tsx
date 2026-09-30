@@ -38,6 +38,8 @@ const NAV_ITEMS: Record<DashboardRole, NavItem[]> = {
     { href: '/resumen-piloto', label: 'Resumen del Piloto' },
     // Módulo aparte: ratios de ciudades completas (Barquisimeto, Cumaná y las dos), fuera del Dashboard.
     { href: '/bqto-completo', label: 'Ciudades completas' },
+    // Proyección simple de Barquisimeto y Cumaná con el perfil de su sector piloto.
+    { href: '/old-school', label: 'Old School' },
     { href: '/modelo-atencion', label: 'Plan de Visita' },
     { href: '/products', label: 'Productos' },
     { href: '/personal', label: 'Personal de Campo' },
