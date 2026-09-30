@@ -21,7 +21,15 @@
 // Puro, sin dependencias de servidor, igual que bqto-completo.ts.
 
 import { DIAS_HABILES_3M } from "@/lib/business-days";
-import { DIAS_HABILES_MES, MESES_PROYECCION, META_PCT, type BqtoResumen } from "@/lib/bqto-completo";
+import {
+  DIAS_HABILES_MES,
+  MESES_PROYECCION,
+  META_PCT,
+  SIN_TIPO,
+  type BqtoResumen,
+  type ClienteZona,
+} from "@/lib/bqto-completo";
+import { foldSegmento } from "@/lib/segmentos";
 
 // ── Proyección por participación en la demanda (DIENN, 30-09-2026) ──
 // La principal: cuánto representa la venta diaria de Panquecitas del sector
@@ -152,6 +160,139 @@ export interface ReferenciaOldSchool {
   kgDia: number;
   /** kgDia ÷ activos totales. */
   kgDiaPorActivo: number;
+  /** El mismo perfil por segmento (tipo de cliente), ordenado por cartera. */
+  porSegmento: SegmentoPiloto[];
+}
+
+// ── Proyección por segmento (DIENN, 30-09-2026) ─────────────────────
+// La principal. "Segmento" = Tipo de Cliente: es lo único que trae el archivo
+// de la ciudad completa (no trae el Segmento de Clientes 2 de la cartera), así
+// que es el único corte que se puede aplicar igual en el piloto y en la ciudad.
+//
+//   por segmento: clientes de la ciudad del segmento
+//                 × activación del segmento en el piloto (activos ÷ cartera)
+//                 × venta diaria por cliente activo del segmento en el piloto
+//                   (Radar de Panquecitas desde el arranque ÷ días hábiles ÷ activos)
+//   ciudad = suma de sus segmentos; mensual = diario × DIAS_HABILES_MES.
+//
+// Barquisimeto con el perfil de Cabudare, Cumaná con el de Cumaná piloto. Un
+// segmento que no existe en la cartera de ese sector usa el del piloto total;
+// si tampoco está ahí, no hay perfil y proyecta 0.
+
+/** Un segmento de la cartera del piloto. */
+export interface SegmentoPiloto {
+  /** foldSegmento del tipo: la llave para cruzar con la ciudad. */
+  clave: string;
+  tipo: string;
+  cartera: number;
+  activos: number;
+  activacionPct: number;
+  /** Radar de Panquecitas del segmento desde el arranque del piloto. */
+  kg: number;
+  /** kg ÷ días hábiles ÷ activos. */
+  kgDiaPorActivo: number;
+}
+
+export interface FilaSegmento {
+  clave: string;
+  tipo: string;
+  /** Clientes de la ciudad completa de este segmento. */
+  clientes: number;
+  /** De dónde salió el perfil: su sector, el piloto total o ninguno. */
+  perfil: "sector" | "total" | null;
+  activacionPct: number;
+  activados: number;
+  kgDiaPorActivo: number;
+  kgDia: number;
+  kgMes: number;
+}
+
+export interface ProyeccionSegmentos {
+  filas: FilaSegmento[];
+  clientes: number;
+  activados: number;
+  /** Efectiva: activados ÷ clientes × 100. */
+  activacionPct: number;
+  kgDia: number;
+  kgMes: number;
+  kgPeriodo: number;
+}
+
+function totalizar(filas: FilaSegmento[]): ProyeccionSegmentos {
+  const suma = (f: (x: FilaSegmento) => number) => filas.reduce((s, x) => s + f(x), 0);
+  const clientes = suma((x) => x.clientes);
+  const activados = suma((x) => x.activados);
+  const kgMes = suma((x) => x.kgMes);
+  return {
+    filas: [...filas].sort((a, b) => b.kgDia - a.kgDia || b.clientes - a.clientes),
+    clientes,
+    activados,
+    activacionPct: clientes > 0 ? (activados / clientes) * 100 : 0,
+    kgDia: suma((x) => x.kgDia),
+    kgMes,
+    kgPeriodo: kgMes * MESES_PROYECCION,
+  };
+}
+
+export function proyeccionPorSegmento(
+  clientes: ClienteZona[],
+  ref: ReferenciaOldSchool,
+  refTotal: ReferenciaOldSchool
+): ProyeccionSegmentos {
+  const delSector = new Map(ref.porSegmento.map((s) => [s.clave, s]));
+  const delTotal = new Map(refTotal.porSegmento.map((s) => [s.clave, s]));
+  const grupos = new Map<string, { tipo: string; clientes: number }>();
+  for (const c of clientes) {
+    const clave = foldSegmento(c.tipo) || foldSegmento(SIN_TIPO);
+    const g = grupos.get(clave) ?? { tipo: c.tipo, clientes: 0 };
+    g.clientes += 1;
+    grupos.set(clave, g);
+  }
+  const filas: FilaSegmento[] = [...grupos.entries()].map(([clave, g]) => {
+    const propio = delSector.get(clave);
+    const general = delTotal.get(clave);
+    const perfil = propio && propio.cartera > 0 ? "sector" : general && general.cartera > 0 ? "total" : null;
+    const s = perfil === "sector" ? propio : perfil === "total" ? general : undefined;
+    const activacionPct = s?.activacionPct ?? 0;
+    const kgDiaPorActivo = s?.kgDiaPorActivo ?? 0;
+    const activados = g.clientes * (activacionPct / 100);
+    const kgDia = activados * kgDiaPorActivo;
+    return {
+      clave,
+      tipo: g.tipo,
+      clientes: g.clientes,
+      perfil,
+      activacionPct,
+      activados,
+      kgDiaPorActivo,
+      kgDia,
+      kgMes: kgDia * DIAS_HABILES_MES,
+    };
+  });
+  return totalizar(filas);
+}
+
+/** Suma de ciudades, segmento por segmento. */
+export function sumarSegmentos(partes: ProyeccionSegmentos[]): ProyeccionSegmentos {
+  const porClave = new Map<string, FilaSegmento>();
+  for (const f of partes.flatMap((p) => p.filas)) {
+    const acc = porClave.get(f.clave);
+    if (!acc) {
+      porClave.set(f.clave, { ...f });
+      continue;
+    }
+    acc.clientes += f.clientes;
+    acc.activados += f.activados;
+    acc.kgDia += f.kgDia;
+    acc.kgMes += f.kgMes;
+    acc.perfil = acc.perfil ?? f.perfil;
+  }
+  const filas = [...porClave.values()].map((f) => ({
+    ...f,
+    activacionPct: f.clientes > 0 ? (f.activados / f.clientes) * 100 : 0,
+    kgDiaPorActivo: f.activados > 0 ? f.kgDia / f.activados : 0,
+  }));
+  return totalizar(filas);
 }
 
 export interface EscenarioOldSchool {

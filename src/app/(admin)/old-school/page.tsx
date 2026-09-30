@@ -1,3 +1,4 @@
+import { Fragment } from "react";
 import type { Metadata } from "next";
 import Link from "next/link";
 import { redirect } from "next/navigation";
@@ -18,12 +19,15 @@ import {
   CRITERIOS_FOCO,
   escenariosOldSchool,
   proyeccionDemanda,
+  proyeccionPorSegmento,
   sumarDemanda,
   sumarOldSchool,
+  sumarSegmentos,
   type BaseRatio,
   type EscenarioOldSchool,
   type GrupoPiloto,
   type ProyeccionDemanda,
+  type ProyeccionSegmentos,
   type RatioDemanda,
   type ReferenciaOldSchool,
 } from "@/lib/old-school";
@@ -133,6 +137,162 @@ function TablaDemanda({
         </tbody>
       </table>
     </div>
+  );
+}
+
+/** Una fila por segmento; por cada referencia, activación y venta diaria por activo. */
+function TablaActivacionSegmentos({ referencias }: { referencias: ReferenciaOldSchool[] }) {
+  const mapas = referencias.map((ref) => new Map(ref.porSegmento.map((s) => [s.clave, s])));
+  const total = referencias[referencias.length - 1];
+  return (
+    <div className="overflow-x-auto max-h-[32rem] overflow-y-auto">
+      <table className="w-full text-xs">
+        <thead className="sticky top-0 bg-white">
+          <tr className="border-b text-left uppercase tracking-wide text-slate-500">
+            <th className="py-2 pr-3 font-semibold" rowSpan={2}>
+              Segmento
+            </th>
+            {referencias.map((ref) => (
+              <th key={ref.etiqueta} className="py-2 pr-3 font-semibold text-center border-l" colSpan={2}>
+                {ref.etiqueta}
+              </th>
+            ))}
+          </tr>
+          <tr className="border-b text-left uppercase tracking-wide text-slate-500">
+            {referencias.map((ref) => (
+              <Fragment key={ref.etiqueta}>
+                <th className="py-1 px-3 font-semibold text-right border-l">Activación</th>
+                <th className="py-1 pr-3 font-semibold text-right">kg/día por activo</th>
+              </Fragment>
+            ))}
+          </tr>
+        </thead>
+        <tbody>
+          <tr className="border-b bg-slate-50 font-bold">
+            <td className="py-1.5 pr-3 text-slate-900">Todos los segmentos</td>
+            {referencias.map((ref) => (
+              <Fragment key={ref.etiqueta}>
+                <td className="py-1.5 px-3 text-right border-l">
+                  <Activacion g={ref.total} />
+                </td>
+                <td className="py-1.5 pr-3 text-right">{kg2(ref.kgDiaPorActivo)}</td>
+              </Fragment>
+            ))}
+          </tr>
+          {total.porSegmento.map((seg) => (
+            <tr key={seg.clave} className="border-b last:border-0">
+              <td className="py-1.5 pr-3 text-slate-900">{seg.tipo}</td>
+              {mapas.map((m, i) => {
+                const s = m.get(seg.clave);
+                return (
+                  <Fragment key={referencias[i].etiqueta}>
+                    <td className="py-1.5 px-3 text-right border-l">{s ? <Activacion g={s} /> : "—"}</td>
+                    <td className="py-1.5 pr-3 text-right">{s && s.activos > 0 ? kg2(s.kgDiaPorActivo) : "—"}</td>
+                  </Fragment>
+                );
+              })}
+            </tr>
+          ))}
+        </tbody>
+      </table>
+    </div>
+  );
+}
+
+function TablaResumenSegmentos({
+  filas,
+}: {
+  filas: { ciudad: string; perfil: string; p: ProyeccionSegmentos; destacada?: boolean }[];
+}) {
+  return (
+    <div className="overflow-x-auto">
+      <table className="w-full text-sm">
+        <thead>
+          <tr className="border-b text-left text-xs uppercase tracking-wide text-slate-500">
+            <th className="py-2 pr-3 font-semibold">Ciudad</th>
+            <th className="py-2 pr-3 font-semibold text-right">Clientes</th>
+            <th className="py-2 pr-3 font-semibold text-right">Clientes activados</th>
+            <th className="py-2 pr-3 font-semibold text-right">Activación</th>
+            <th className="py-2 pr-3 font-semibold text-right">Venta / día</th>
+            <th className="py-2 pr-3 font-semibold text-right">Venta / mes</th>
+            <th className="py-2 font-semibold text-right">Venta {MESES_PROYECCION} meses</th>
+          </tr>
+        </thead>
+        <tbody>
+          {filas.map(({ ciudad, perfil, p, destacada }) => (
+            <tr key={ciudad} className={`border-b last:border-0 ${destacada ? "bg-slate-50" : ""}`}>
+              <td className={`py-2 pr-3 text-slate-900 ${destacada ? "font-bold" : "font-medium"}`}>
+                {ciudad}
+                <span className="block text-xs font-normal text-slate-400">segmentos de {perfil}</span>
+              </td>
+              <td className="py-2 pr-3 text-right">{p.clientes.toLocaleString("es-VE")}</td>
+              <td className="py-2 pr-3 text-right">{kg(p.activados)}</td>
+              <td className="py-2 pr-3 text-right">{dec(p.activacionPct)}%</td>
+              <td className="py-2 pr-3 text-right font-bold" style={{ color: COLOR_PROYECCION }}>
+                {kg(p.kgDia)} kg
+              </td>
+              <td className="py-2 pr-3 text-right font-bold" style={{ color: COLOR_PROYECCION }}>
+                {kg(p.kgMes)} kg <span className="text-xs font-normal text-slate-400">({dec(p.kgMes / 1000)} t)</span>
+              </td>
+              <td className="py-2 text-right">{dec(p.kgPeriodo / 1000)} t</td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
+    </div>
+  );
+}
+
+function TablaDetalleSegmentos({ titulo, p }: { titulo: string; p: ProyeccionSegmentos }) {
+  return (
+    <details className="rounded-lg border border-slate-200">
+      <summary className="cursor-pointer select-none px-3 py-2 text-sm font-medium text-slate-900">{titulo}</summary>
+      <div className="overflow-x-auto px-3 pb-3">
+        <table className="w-full text-xs">
+          <thead>
+            <tr className="border-b text-left uppercase tracking-wide text-slate-500">
+              <th className="py-2 pr-3 font-semibold">Segmento</th>
+              <th className="py-2 pr-3 font-semibold text-right">Clientes</th>
+              <th className="py-2 pr-3 font-semibold text-right">Activación</th>
+              <th className="py-2 pr-3 font-semibold text-right">Clientes activados</th>
+              <th className="py-2 pr-3 font-semibold text-right">kg/día por activo</th>
+              <th className="py-2 pr-3 font-semibold text-right">Venta / día</th>
+              <th className="py-2 font-semibold text-right">Venta / mes</th>
+            </tr>
+          </thead>
+          <tbody>
+            {p.filas.map((f) => (
+              <tr key={f.clave} className={`border-b last:border-0 ${f.perfil ? "" : "text-slate-400"}`}>
+                <td className="py-1.5 pr-3">
+                  {f.tipo}
+                  {f.perfil === "total" && <span className="ml-1 text-slate-400">(perfil del piloto total)</span>}
+                  {!f.perfil && <span className="ml-1">(sin perfil en el piloto)</span>}
+                </td>
+                <td className="py-1.5 pr-3 text-right">{f.clientes.toLocaleString("es-VE")}</td>
+                <td className="py-1.5 pr-3 text-right">{f.perfil ? `${dec(f.activacionPct)}%` : "—"}</td>
+                <td className="py-1.5 pr-3 text-right">{dec(f.activados)}</td>
+                <td className="py-1.5 pr-3 text-right">{f.perfil ? kg2(f.kgDiaPorActivo) : "—"}</td>
+                <td className="py-1.5 pr-3 text-right font-semibold" style={{ color: COLOR_PROYECCION }}>
+                  {dec(f.kgDia)} kg
+                </td>
+                <td className="py-1.5 text-right">{kg(f.kgMes)} kg</td>
+              </tr>
+            ))}
+            <tr className="bg-slate-50 font-bold">
+              <td className="py-1.5 pr-3">Total</td>
+              <td className="py-1.5 pr-3 text-right">{p.clientes.toLocaleString("es-VE")}</td>
+              <td className="py-1.5 pr-3 text-right">{dec(p.activacionPct)}%</td>
+              <td className="py-1.5 pr-3 text-right">{kg(p.activados)}</td>
+              <td className="py-1.5 pr-3 text-right">{p.activados > 0 ? kg2(p.kgDia / p.activados) : "—"}</td>
+              <td className="py-1.5 pr-3 text-right" style={{ color: COLOR_PROYECCION }}>
+                {kg(p.kgDia)} kg
+              </td>
+              <td className="py-1.5 text-right">{kg(p.kgMes)} kg</td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+    </details>
   );
 }
 
@@ -273,6 +433,38 @@ export default async function OldSchoolPage() {
     return { base, titulo, nota, filas: [...porCiudad, ...total] };
   });
 
+  const porSegmentoCiudad = cargadas.map((x) => ({
+    x,
+    p: proyeccionPorSegmento(x.r!.porCliente, x.ref, refs.total),
+  }));
+  const totalSegmentos = porSegmentoCiudad.length > 1 ? sumarSegmentos(porSegmentoCiudad.map((c) => c.p)) : null;
+  const nombreTotal = cargadas.map((x) => x.nombre).join(" + ");
+  const segmentos =
+    porSegmentoCiudad.length === 0
+      ? null
+      : {
+          resumen: [
+            ...porSegmentoCiudad.map(({ x, p }) => ({ ciudad: x.nombre, perfil: x.ref.etiqueta, p })),
+            ...(totalSegmentos
+              ? [
+                  {
+                    ciudad: nombreTotal,
+                    perfil: cargadas.map((x) => x.ref.etiqueta).join(" y "),
+                    p: totalSegmentos,
+                    destacada: true,
+                  },
+                ]
+              : []),
+          ],
+          detalles: [
+            ...porSegmentoCiudad.map(({ x, p }) => ({
+              titulo: `Detalle por segmento — ${x.nombre} con los segmentos de ${x.ref.etiqueta}`,
+              p,
+            })),
+            ...(totalSegmentos ? [{ titulo: `Detalle por segmento — ${nombreTotal}`, p: totalSegmentos }] : []),
+          ],
+        };
+
   const tablas = cargadas.length === 0 ? [] : CRITERIOS_FOCO.map(({ criterio, titulo, nota }) => {
     const porCiudad = cargadas.map((x) => ({ x, escenarios: escenariosOldSchool(x.r!, x.ref, criterio) }));
     const total = porCiudad.length > 1 ? sumarOldSchool(porCiudad.map((p) => p.escenarios), activosPiloto) : [];
@@ -298,9 +490,9 @@ export default async function OldSchoolPage() {
       <div>
         <h1 className="text-2xl font-bold text-slate-900">Old School</h1>
         <p className="text-slate-500 mt-1">
-          Proyección de Barquisimeto y Cumaná completas por participación en la demanda: cuánto representa hoy la venta
-          diaria de Panquecitas de cada sector piloto sobre la Harina PAN de su cartera, y ese mismo % aplicado a la
-          Harina PAN de la ciudad completa (Barquisimeto con Cabudare, Cumaná con Cumaná). No afecta el Dashboard.
+          Proyección de Barquisimeto y Cumaná completas por segmento: los clientes de cada segmento de la ciudad se
+          activan en el mismo % que ese segmento en su piloto (Barquisimeto con Cabudare, Cumaná con Cumaná) y cada
+          cliente activado vende lo que vende hoy al día un cliente activo de ese segmento. No afecta el Dashboard.
         </p>
       </div>
 
@@ -326,39 +518,71 @@ export default async function OldSchoolPage() {
 
       <Card>
         <CardHeader>
-          <CardTitle>1. % de la demanda que vende hoy cada piloto</CardTitle>
+          <CardTitle>1. Activación por segmento en el piloto</CardTitle>
         </CardHeader>
-        <CardContent>
-          <div className="grid gap-4 md:grid-cols-2">
-            {ciudades.map((x) => (
-              <CajaRatio key={x.c} ciudad={x.nombre} ratio={x.ratio} />
-            ))}
-          </div>
+        <CardContent className="space-y-3">
+          <TablaActivacionSegmentos
+            referencias={[refs.barquisimeto_este, refs.cumana, refs.total]}
+          />
+          <p className="text-xs text-slate-400">
+            Segmento = Tipo de Cliente: es el único corte que trae también el archivo de la ciudad completa. Activación
+            = clientes con Radar de Panquecitas &gt; 0 ÷ cartera vigente del segmento. Venta diaria por activo = Radar
+            de Panquecitas del segmento desde el {fecha(refs.total.desde)} ÷ {refs.total.diasHabiles} días hábiles ÷
+            activos.
+          </p>
         </CardContent>
       </Card>
 
-      {tablasDemanda.map((t, i) => (
-        <Card key={t.base}>
+      {segmentos && (
+        <Card>
           <CardHeader>
-            <CardTitle>
-              {i + 2}. {t.titulo}
-            </CardTitle>
+            <CardTitle>2. Proyección por segmento</CardTitle>
           </CardHeader>
-          <CardContent className="space-y-3">
-            <p className="text-sm text-slate-500">{t.nota}</p>
-            <TablaDemanda filas={t.filas} />
+          <CardContent className="space-y-4">
+            <TablaResumenSegmentos filas={segmentos.resumen} />
+            <div className="space-y-2">
+              {segmentos.detalles.map((d) => (
+                <TablaDetalleSegmentos key={d.titulo} titulo={d.titulo} p={d.p} />
+              ))}
+            </div>
+            <p className="text-xs text-slate-400">
+              Por segmento: clientes de la ciudad completa (con Harina PAN en su Radar de 3 meses) × activación del
+              segmento en el piloto × venta diaria por cliente activo del segmento en el piloto. La ciudad es la suma
+              de sus segmentos y el total, la suma de las dos ciudades. Mensual = diario × {DIAS_HABILES_MES} días
+              hábiles. Barquisimeto usa los segmentos de Cabudare y Cumaná los de Cumaná piloto; un segmento que no
+              está en la cartera de ese sector usa el del piloto total, y uno que no está en ninguna proyecta 0.
+            </p>
           </CardContent>
         </Card>
-      ))}
+      )}
 
       {tablasDemanda.length > 0 && (
-        <p className="text-xs text-slate-400">
-          % de la demanda = Panquecitas por día hábil del sector piloto desde el{" "}
-          {fecha(ciudades[0]?.ratio.desde ?? null)} ÷ Harina PAN por día de su cartera (3 meses ÷ {DIAS_HABILES_3M}).
-          Venta / día = Harina PAN por día de la ciudad completa × ese %. Venta / mes = venta / día × {DIAS_HABILES_MES}{" "}
-          días hábiles. La meta es el 4% de la Harina PAN mensual de la ciudad, así que % de la meta = % de la demanda ÷
-          4%.
-        </p>
+        <details className="rounded-lg border border-slate-200 bg-white">
+          <summary className="cursor-pointer select-none px-4 py-3 text-sm font-medium text-slate-900">
+            Proyección por participación en la demanda (% de la Harina PAN del piloto aplicado a la ciudad)
+          </summary>
+          <div className="space-y-6 px-4 pb-4">
+            <div className="grid gap-4 md:grid-cols-2">
+              {ciudades.map((x) => (
+                <CajaRatio key={x.c} ciudad={x.nombre} ratio={x.ratio} />
+              ))}
+            </div>
+            {tablasDemanda.map((t) => (
+              <div key={t.base} className="space-y-2">
+                <p className="text-sm font-semibold text-slate-900">{t.titulo}</p>
+                <p className="text-sm text-slate-500">{t.nota}</p>
+                <TablaDemanda filas={t.filas} />
+              </div>
+            ))}
+            <p className="text-xs text-slate-400">
+              % de la demanda = Panquecitas por día hábil del sector piloto desde el{" "}
+              {fecha(ciudades[0]?.ratio.desde ?? null)} ÷ Harina PAN por día de su cartera (3 meses ÷ {DIAS_HABILES_3M}
+              ). Venta / día = Harina PAN por día de la ciudad completa × ese %. Venta / mes = venta / día ×{" "}
+              {DIAS_HABILES_MES} días hábiles. La meta es el 4% de la Harina PAN mensual de la ciudad, así que % de la
+              meta = % de la demanda ÷ 4%.
+            </p>
+          </div>
+        </details>
       )}
 
       {tablas.length > 0 && (

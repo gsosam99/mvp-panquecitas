@@ -5,10 +5,16 @@ import { contarDiasHabiles, siguienteDiaHabil } from "@/lib/business-days";
 import { todayISO } from "@/lib/date-buckets";
 import { DIAS_HABILES_3M } from "@/lib/business-days";
 import { getRendimiento3M } from "@/lib/dienn-queries";
-import { esTipoFoco, type BqtoFila } from "@/lib/bqto-completo";
-import { esSegmentoSinAlimentos } from "@/lib/segmentos";
+import { esTipoFoco, SIN_TIPO, type BqtoFila } from "@/lib/bqto-completo";
+import { esSegmentoSinAlimentos, foldSegmento } from "@/lib/segmentos";
 import { getUniverseLocations, sectorGroup, vigentesAl, type Sector } from "@/lib/universe";
-import type { CriterioFoco, GrupoPiloto, RatioDemanda, ReferenciaOldSchool } from "@/lib/old-school";
+import type {
+  CriterioFoco,
+  GrupoPiloto,
+  RatioDemanda,
+  ReferenciaOldSchool,
+  SegmentoPiloto,
+} from "@/lib/old-school";
 
 // Lecturas del módulo "Old School" (ver src/lib/old-school.ts).
 
@@ -76,7 +82,7 @@ export async function getRatiosDemanda(
  * venta de fin de semana se imputa al lunes siguiente, igual que en las
  * series diarias del piloto.
  */
-export async function getReferenciasOldSchool(): Promise<Record<Sector, ReferenciaOldSchool>> {
+export async function getReferenciasOldSchool(): Promise<Record<"total" | Sector, ReferenciaOldSchool>> {
   const supabase = createSupabaseServiceClient();
   const [universo, radar] = await Promise.all([
     getUniverseLocations(),
@@ -108,15 +114,25 @@ export async function getReferenciasOldSchool(): Promise<Record<Sector, Referenc
     activacionPct: cartera > 0 ? (activos / cartera) * 100 : 0,
   });
 
-  function armar(etiqueta: string, sector: Sector): ReferenciaOldSchool {
+  /** sector null = el piloto total (Cabudare + Cumaná). */
+  function armar(etiqueta: string, sector: Sector | null): ReferenciaOldSchool {
     const conteo = () => ({ foco: { c: 0, a: 0 }, noFoco: { c: 0, a: 0 } });
     const porCriterio: Record<CriterioFoco, ReturnType<typeof conteo>> = { tipo: conteo(), segmento: conteo() };
+    const segmentos = new Map<string, { tipo: string; cartera: number; activos: number; kg: number }>();
     let cartera = 0;
     let activos = 0;
     let kgPanquecitas = 0;
     for (const l of vigentes) {
-      if (sectorGroup(l.oficina_venta) !== sector) continue;
+      const s = sectorGroup(l.oficina_venta);
+      if (sector ? s !== sector : s === null) continue;
       const activo = (acumulado.get(l.id) ?? 0) > 0;
+      const kg = desdeArranque.get(l.id) ?? 0;
+      const clave = foldSegmento(l.tipo_cliente) || foldSegmento(SIN_TIPO);
+      const seg = segmentos.get(clave) ?? { tipo: l.tipo_cliente?.trim() || SIN_TIPO, cartera: 0, activos: 0, kg: 0 };
+      seg.cartera += 1;
+      if (activo) seg.activos += 1;
+      seg.kg += kg;
+      segmentos.set(clave, seg);
       const esFoco: Record<CriterioFoco, boolean> = {
         tipo: esTipoFoco(l.tipo_cliente),
         segmento: !esSegmentoSinAlimentos(l.segmento_cliente),
@@ -128,8 +144,19 @@ export async function getReferenciasOldSchool(): Promise<Record<Sector, Referenc
       }
       cartera += 1;
       if (activo) activos += 1;
-      kgPanquecitas += desdeArranque.get(l.id) ?? 0;
+      kgPanquecitas += kg;
     }
+    const porSegmento: SegmentoPiloto[] = [...segmentos.entries()]
+      .map(([clave, s]) => ({
+        clave,
+        tipo: s.tipo,
+        cartera: s.cartera,
+        activos: s.activos,
+        activacionPct: s.cartera > 0 ? (s.activos / s.cartera) * 100 : 0,
+        kg: s.kg,
+        kgDiaPorActivo: s.activos > 0 && diasHabiles > 0 ? s.kg / diasHabiles / s.activos : 0,
+      }))
+      .sort((a, b) => b.cartera - a.cartera);
     const grupos = (criterio: CriterioFoco) => ({
       foco: grupo(porCriterio[criterio].foco.c, porCriterio[criterio].foco.a),
       noFoco: grupo(porCriterio[criterio].noFoco.c, porCriterio[criterio].noFoco.a),
@@ -145,10 +172,12 @@ export async function getReferenciasOldSchool(): Promise<Record<Sector, Referenc
       diasHabiles,
       kgDia,
       kgDiaPorActivo: activos > 0 ? kgDia / activos : 0,
+      porSegmento,
     };
   }
 
   return {
+    total: armar("Piloto total", null),
     barquisimeto_este: armar("Cabudare", "barquisimeto_este"),
     cumana: armar("Cumaná (piloto)", "cumana"),
   };
