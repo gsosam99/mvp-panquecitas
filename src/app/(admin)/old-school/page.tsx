@@ -17,6 +17,7 @@ import {
   escenariosOldSchool,
   sumarOldSchool,
   type EscenarioOldSchool,
+  type GrupoPiloto,
   type ReferenciaOldSchool,
 } from "@/lib/old-school";
 
@@ -39,26 +40,22 @@ const dec = (n: number) => n.toLocaleString("es-VE", { maximumFractionDigits: 1 
 const kg2 = (n: number) => n.toLocaleString("es-VE", { maximumFractionDigits: 2 });
 const fecha = (iso: string | null) => (iso ? `${iso.slice(8, 10)}-${iso.slice(5, 7)}-${iso.slice(0, 4)}` : "—");
 
+function Activacion({ g }: { g: GrupoPiloto }) {
+  return (
+    <>
+      {dec(g.activacionPct)}%{" "}
+      <span className="text-xs font-normal text-slate-400">
+        ({g.activos.toLocaleString("es-VE")} de {g.cartera.toLocaleString("es-VE")})
+      </span>
+    </>
+  );
+}
+
 function CajaReferencia({ ciudad, referencia: ref }: { ciudad: string; referencia: ReferenciaOldSchool }) {
   const filas: [string, React.ReactNode][] = [
-    [
-      "Activación total",
-      <>
-        {dec(ref.activacionPct)}%{" "}
-        <span className="text-xs font-normal text-slate-400">
-          ({ref.activos.toLocaleString("es-VE")} de {ref.cartera.toLocaleString("es-VE")})
-        </span>
-      </>,
-    ],
-    [
-      "Activación foco",
-      <>
-        {dec(ref.activacionFocoPct)}%{" "}
-        <span className="text-xs font-normal text-slate-400">
-          ({ref.activos.toLocaleString("es-VE")} de {ref.carteraFoco.toLocaleString("es-VE")})
-        </span>
-      </>,
-    ],
+    ["Activación total", <Activacion key="t" g={ref.total} />],
+    ["Activación segmentos foco", <Activacion key="f" g={ref.foco} />],
+    ["Activación fuera de foco", <Activacion key="n" g={ref.noFoco} />],
     [
       "Panquecitas vendidas",
       <>
@@ -89,7 +86,7 @@ function CajaReferencia({ ciudad, referencia: ref }: { ciudad: string; referenci
   );
 }
 
-function TablaEscenarios({ filas }: { filas: { ciudad: string; perfil: string; e: EscenarioOldSchool; destacada?: boolean }[] }) {
+function TablaEscenarios({ filas }: { filas: { ciudad: string; perfil: string; e: EscenarioOldSchool }[] }) {
   return (
     <div className="overflow-x-auto">
       <table className="w-full text-sm">
@@ -109,9 +106,9 @@ function TablaEscenarios({ filas }: { filas: { ciudad: string; perfil: string; e
           </tr>
         </thead>
         <tbody>
-          {filas.map(({ ciudad, perfil, e, destacada }) => (
-            <tr key={`${ciudad}|${e.poblacion}`} className={`border-b last:border-0 ${destacada ? "bg-slate-50" : ""}`}>
-              <td className={`py-2 pr-3 text-slate-900 ${destacada ? "font-bold" : "font-medium"}`}>
+          {filas.map(({ ciudad, perfil, e }) => (
+            <tr key={`${ciudad}|${e.poblacion}`} className={`border-b last:border-0 ${e.destacada ? "bg-slate-50" : ""}`}>
+              <td className={`py-2 pr-3 text-slate-900 ${e.destacada ? "font-bold" : "font-medium"}`}>
                 {ciudad}
                 <span className="block text-xs font-normal text-slate-400">perfil de {perfil}</span>
               </td>
@@ -153,7 +150,7 @@ export default async function OldSchoolPage() {
   });
   const cargadas = ciudades.filter((x) => x.escenarios !== null);
   const faltan = ciudades.filter((x) => x.escenarios === null);
-  const activosPiloto = cargadas.reduce((s, x) => s + x.ref.activos, 0);
+  const activosPiloto = cargadas.reduce((s, x) => s + x.ref.total.activos, 0);
   const total = cargadas.length > 1 ? sumarOldSchool(cargadas.map((x) => x.escenarios!), activosPiloto) : [];
 
   const filasTabla = [
@@ -162,7 +159,6 @@ export default async function OldSchoolPage() {
       ciudad: cargadas.map((x) => x.nombre).join(" + "),
       perfil: cargadas.map((x) => x.ref.etiqueta).join(" y "),
       e,
-      destacada: true,
     })),
   ];
 
@@ -172,7 +168,8 @@ export default async function OldSchoolPage() {
         <h1 className="text-2xl font-bold text-slate-900">Old School</h1>
         <p className="text-slate-500 mt-1">
           Proyección de Barquisimeto y Cumaná completas por equivalencia de activación: la cartera completa de cada
-          ciudad se activa en el mismo % que su sector piloto (Barquisimeto con Cabudare, Cumaná con Cumaná) y cada
+          ciudad se activa en el mismo % que su sector piloto (Barquisimeto con Cabudare, Cumaná con Cumaná), foco y
+          fuera de foco cada uno con el suyo, y cada
           cliente activado vende lo que vende hoy al día un cliente activo de ese sector. No afecta el Dashboard.
         </p>
       </div>
@@ -219,9 +216,10 @@ export default async function OldSchoolPage() {
             <TablaEscenarios filas={filasTabla} />
             <p className="text-xs text-slate-400">
               Clientes = clientes de la ciudad completa con Harina PAN en su Radar de 3 meses. Clientes activados =
-              clientes × activación del sector piloto (todos los clientes con la activación total; segmentos foco con la
-              activación foco, sin los inactivos de segmentos no vendibles). Veces el piloto = clientes activados ÷
-              activos del sector piloto. Venta / día = clientes activados × venta diaria por cliente activo del sector
+              clientes × activación del sector piloto, por separado para segmentos foco y fuera de foco (el mismo corte
+              por tipo de cliente en el piloto y en la ciudad); todos los clientes = la suma de los dos, y su
+              activación es la efectiva (activados ÷ clientes). Veces el piloto = clientes activados ÷ activos del
+              sector piloto. Venta / día = clientes activados × venta diaria por cliente activo del sector
               (Radar de Panquecitas desde el {fecha(ciudades[0]?.ref.desde ?? null)} ÷ días hábiles ÷ activos). Venta /
               mes = venta / día × {DIAS_HABILES_MES} días hábiles. La meta es el 4% de la Harina PAN mensual de esa
               misma población. La suma de las dos ciudades suma cada una con su propio perfil.
