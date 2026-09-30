@@ -5,7 +5,8 @@ import { requireDashboard } from "@/lib/session";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Alert, AlertDescription } from "@/components/ui/alert";
 import { getBqto3MFilas } from "@/lib/bqto-queries";
-import { getReferenciasOldSchool } from "@/lib/old-school-queries";
+import { getRatiosDemanda, getReferenciasOldSchool } from "@/lib/old-school-queries";
+import { DIAS_HABILES_3M } from "@/lib/business-days";
 import {
   CIUDADES_COMPLETAS,
   DIAS_HABILES_MES,
@@ -16,9 +17,14 @@ import {
 import {
   CRITERIOS_FOCO,
   escenariosOldSchool,
+  proyeccionDemanda,
+  sumarDemanda,
   sumarOldSchool,
+  type BaseRatio,
   type EscenarioOldSchool,
   type GrupoPiloto,
+  type ProyeccionDemanda,
+  type RatioDemanda,
   type ReferenciaOldSchool,
 } from "@/lib/old-school";
 
@@ -40,6 +46,95 @@ const kg = (n: number) => n.toLocaleString("es-VE", { maximumFractionDigits: 0 }
 const dec = (n: number) => n.toLocaleString("es-VE", { maximumFractionDigits: 1 });
 const kg2 = (n: number) => n.toLocaleString("es-VE", { maximumFractionDigits: 2 });
 const fecha = (iso: string | null) => (iso ? `${iso.slice(8, 10)}-${iso.slice(5, 7)}-${iso.slice(0, 4)}` : "—");
+
+const BASES_RATIO: { base: BaseRatio; titulo: string; nota: string }[] = [
+  {
+    base: "dashboard",
+    titulo: "Proyección con el % del dashboard",
+    nota: "El % de cada piloto es el del gráfico de ratios del dashboard: su Harina PAN sale del Radar de 3 meses del piloto (radar_3m_records).",
+  },
+  {
+    base: "mismaFuente",
+    titulo: "Proyección con el % de la misma fuente",
+    nota: "El % de cada piloto se calcula con la Harina PAN de sus clientes dentro del mismo archivo de la ciudad completa: el % y la demanda de la ciudad salen del mismo reporte.",
+  },
+];
+
+function CajaRatio({ ciudad, ratio: r }: { ciudad: string; ratio: RatioDemanda }) {
+  const filas: [string, string][] = [
+    ["Panquecitas por día", `${dec(r.panqKgDia)} kg/día (${r.dias} días hábiles, ${fecha(r.desde)} a ${fecha(r.hasta)})`],
+    ["Harina PAN por día · dashboard", `${kg(r.panKgDia.dashboard)} kg/día`],
+    ["% de la demanda · dashboard", `${kg2(r.ratioPct.dashboard)}%`],
+    [
+      "Harina PAN por día · misma fuente",
+      `${kg(r.panKgDia.mismaFuente)} kg/día (${r.clientesEnArchivo.toLocaleString("es-VE")} clientes en el archivo)`,
+    ],
+    ["% de la demanda · misma fuente", `${kg2(r.ratioPct.mismaFuente)}%`],
+  ];
+  return (
+    <div className="rounded-lg border border-slate-200 p-3">
+      <p className="text-xs font-semibold uppercase tracking-widest text-muted-foreground mb-2">
+        {r.etiqueta} <span className="normal-case tracking-normal font-normal">· % para {ciudad}</span>
+      </p>
+      <div className="space-y-1 text-sm">
+        {filas.map(([label, valor]) => (
+          <div key={label} className="flex justify-between gap-2">
+            <span className="text-slate-500">{label}</span>
+            <span className="font-bold text-slate-900 text-right">{valor}</span>
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+}
+
+function TablaDemanda({
+  filas,
+}: {
+  filas: { ciudad: string; perfil: string; p: ProyeccionDemanda; destacada?: boolean }[];
+}) {
+  return (
+    <div className="overflow-x-auto">
+      <table className="w-full text-sm">
+        <thead>
+          <tr className="border-b text-left text-xs uppercase tracking-wide text-slate-500">
+            <th className="py-2 pr-3 font-semibold">Ciudad</th>
+            <th className="py-2 pr-3 font-semibold text-right">Harina PAN / día</th>
+            <th className="py-2 pr-3 font-semibold text-right">% de la demanda</th>
+            <th className="py-2 pr-3 font-semibold text-right">Venta / día</th>
+            <th className="py-2 pr-3 font-semibold text-right">Venta / mes</th>
+            <th className="py-2 pr-3 font-semibold text-right">Venta {MESES_PROYECCION} meses</th>
+            <th className="py-2 pr-3 font-semibold text-right">Meta 4% / mes</th>
+            <th className="py-2 font-semibold text-right">% de la meta</th>
+          </tr>
+        </thead>
+        <tbody>
+          {filas.map(({ ciudad, perfil, p, destacada }) => (
+            <tr key={ciudad} className={`border-b last:border-0 ${destacada ? "bg-slate-50" : ""}`}>
+              <td className={`py-2 pr-3 text-slate-900 ${destacada ? "font-bold" : "font-medium"}`}>
+                {ciudad}
+                <span className="block text-xs font-normal text-slate-400">% de {perfil}</span>
+              </td>
+              <td className="py-2 pr-3 text-right">{kg(p.panKgDia)} kg</td>
+              <td className="py-2 pr-3 text-right">{kg2(p.ratioPct)}%</td>
+              <td className="py-2 pr-3 text-right font-bold" style={{ color: COLOR_PROYECCION }}>
+                {kg(p.kgDia)} kg
+              </td>
+              <td className="py-2 pr-3 text-right font-bold" style={{ color: COLOR_PROYECCION }}>
+                {dec(p.kgMes / 1000)} t
+              </td>
+              <td className="py-2 pr-3 text-right">{dec(p.kgPeriodo / 1000)} t</td>
+              <td className="py-2 pr-3 text-right" style={{ color: COLOR_META }}>
+                {dec(p.metaMes / 1000)} t
+              </td>
+              <td className="py-2 text-right font-bold">{dec(p.pctMeta)}%</td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
+    </div>
+  );
+}
 
 function Activacion({ g }: { g: GrupoPiloto }) {
   return (
@@ -143,16 +238,40 @@ export default async function OldSchoolPage() {
   const session = await requireDashboard();
   if (session.role !== "DIENN") redirect("/dashboard");
 
-  const [{ filas, error }, refs] = await Promise.all([getBqto3MFilas(), getReferenciasOldSchool()]);
+  const { filas, error } = await getBqto3MFilas();
+  const filasDe = (c: CiudadCompleta) => filas.filter((f) => f.ciudad === c);
+  const [refs, ratios] = await Promise.all([
+    getReferenciasOldSchool(),
+    getRatiosDemanda({ barquisimeto_este: filasDe("barquisimeto"), cumana: filasDe("cumana") }),
+  ]);
 
   const ciudades = CIUDADES_OLD_SCHOOL.map((c) => {
     const { nombre, sector } = CIUDADES_COMPLETAS[c];
-    const ref = refs[sector!];
-    return { c, nombre, ref, r: resumenBqto(filas.filter((f) => f.ciudad === c)) };
+    return { c, nombre, ref: refs[sector!], ratio: ratios[sector!], r: resumenBqto(filasDe(c)) };
   });
   const cargadas = ciudades.filter((x) => x.r !== null);
   const faltan = ciudades.filter((x) => x.r === null);
   const activosPiloto = cargadas.reduce((s, x) => s + x.ref.total.activos, 0);
+
+  const tablasDemanda = cargadas.length === 0 ? [] : BASES_RATIO.map(({ base, titulo, nota }) => {
+    const porCiudad = cargadas.map((x) => ({
+      ciudad: x.nombre,
+      perfil: x.ratio.etiqueta,
+      p: proyeccionDemanda(x.r!, x.ratio.ratioPct[base]),
+    }));
+    const total =
+      porCiudad.length > 1
+        ? [
+            {
+              ciudad: porCiudad.map((x) => x.ciudad).join(" + "),
+              perfil: porCiudad.map((x) => x.perfil).join(" y "),
+              p: sumarDemanda(porCiudad.map((x) => x.p)),
+              destacada: true,
+            },
+          ]
+        : [];
+    return { base, titulo, nota, filas: [...porCiudad, ...total] };
+  });
 
   const tablas = cargadas.length === 0 ? [] : CRITERIOS_FOCO.map(({ criterio, titulo, nota }) => {
     const porCiudad = cargadas.map((x) => ({ x, escenarios: escenariosOldSchool(x.r!, x.ref, criterio) }));
@@ -179,10 +298,9 @@ export default async function OldSchoolPage() {
       <div>
         <h1 className="text-2xl font-bold text-slate-900">Old School</h1>
         <p className="text-slate-500 mt-1">
-          Proyección de Barquisimeto y Cumaná completas por equivalencia de activación: la cartera completa de cada
-          ciudad se activa en el mismo % que su sector piloto (Barquisimeto con Cabudare, Cumaná con Cumaná), foco y
-          fuera de foco cada uno con el suyo, y cada cliente activado vende lo que vende hoy al día un cliente activo de
-          ese sector. Se muestran dos escenarios según cómo se corta el foco del piloto. No afecta el Dashboard.
+          Proyección de Barquisimeto y Cumaná completas por participación en la demanda: cuánto representa hoy la venta
+          diaria de Panquecitas de cada sector piloto sobre la Harina PAN de su cartera, y ese mismo % aplicado a la
+          Harina PAN de la ciudad completa (Barquisimeto con Cabudare, Cumaná con Cumaná). No afecta el Dashboard.
         </p>
       </div>
 
@@ -208,19 +326,19 @@ export default async function OldSchoolPage() {
 
       <Card>
         <CardHeader>
-          <CardTitle>1. Perfil de hoy del piloto</CardTitle>
+          <CardTitle>1. % de la demanda que vende hoy cada piloto</CardTitle>
         </CardHeader>
         <CardContent>
           <div className="grid gap-4 md:grid-cols-2">
             {ciudades.map((x) => (
-              <CajaReferencia key={x.c} ciudad={x.nombre} referencia={x.ref} />
+              <CajaRatio key={x.c} ciudad={x.nombre} ratio={x.ratio} />
             ))}
           </div>
         </CardContent>
       </Card>
 
-      {tablas.map((t, i) => (
-        <Card key={t.criterio}>
+      {tablasDemanda.map((t, i) => (
+        <Card key={t.base}>
           <CardHeader>
             <CardTitle>
               {i + 2}. {t.titulo}
@@ -228,23 +346,52 @@ export default async function OldSchoolPage() {
           </CardHeader>
           <CardContent className="space-y-3">
             <p className="text-sm text-slate-500">{t.nota}</p>
-            <TablaEscenarios filas={t.filas} />
+            <TablaDemanda filas={t.filas} />
           </CardContent>
         </Card>
       ))}
 
-      {tablas.length > 0 && (
+      {tablasDemanda.length > 0 && (
         <p className="text-xs text-slate-400">
-          Clientes = clientes de la ciudad completa con Harina PAN en su Radar de 3 meses; en la ciudad el foco siempre
-          se corta por tipo de cliente, porque su archivo no trae el segmento. Clientes activados = clientes × activación
-          del sector piloto, por separado para foco y fuera de foco; todos los clientes = la suma de los dos, y su
-          activación es la efectiva (activados ÷ clientes). Veces el piloto = clientes activados ÷ activos del sector
-          piloto. Venta / día = clientes activados × venta diaria por cliente activo del sector (Radar de Panquecitas
-          desde el {fecha(ciudades[0]?.ref.desde ?? null)} ÷ días hábiles ÷ activos). Venta / mes = venta / día ×{" "}
-          {DIAS_HABILES_MES} días hábiles. La meta es el 4% de la Harina PAN mensual de esa misma población. La suma de
-          las dos ciudades suma cada una con su propio perfil. El valor real debería quedar entre los dos escenarios: no
-          se sabe cuántos clientes CS tiene la ciudad completa.
+          % de la demanda = Panquecitas por día hábil del sector piloto desde el{" "}
+          {fecha(ciudades[0]?.ratio.desde ?? null)} ÷ Harina PAN por día de su cartera (3 meses ÷ {DIAS_HABILES_3M}).
+          Venta / día = Harina PAN por día de la ciudad completa × ese %. Venta / mes = venta / día × {DIAS_HABILES_MES}{" "}
+          días hábiles. La meta es el 4% de la Harina PAN mensual de la ciudad, así que % de la meta = % de la demanda ÷
+          4%.
         </p>
+      )}
+
+      {tablas.length > 0 && (
+        <details className="rounded-lg border border-slate-200 bg-white">
+          <summary className="cursor-pointer select-none px-4 py-3 text-sm font-medium text-slate-900">
+            Método por cliente activo (equivalencia de activación × venta diaria por cliente activo)
+          </summary>
+          <div className="space-y-6 px-4 pb-4">
+            <div className="grid gap-4 md:grid-cols-2">
+              {ciudades.map((x) => (
+                <CajaReferencia key={x.c} ciudad={x.nombre} referencia={x.ref} />
+              ))}
+            </div>
+            {tablas.map((t) => (
+              <div key={t.criterio} className="space-y-2">
+                <p className="text-sm font-semibold text-slate-900">{t.titulo}</p>
+                <p className="text-sm text-slate-500">{t.nota}</p>
+                <TablaEscenarios filas={t.filas} />
+              </div>
+            ))}
+            <p className="text-xs text-slate-400">
+              Clientes = clientes de la ciudad completa con Harina PAN en su Radar de 3 meses; en la ciudad el foco
+              siempre se corta por tipo de cliente, porque su archivo no trae el segmento. Clientes activados = clientes
+              × activación del sector piloto, por separado para foco y fuera de foco; todos los clientes = la suma de
+              los dos, y su activación es la efectiva (activados ÷ clientes). Veces el piloto = clientes activados ÷
+              activos del sector piloto. Venta / día = clientes activados × venta diaria por cliente activo del sector
+              (Radar de Panquecitas desde el {fecha(ciudades[0]?.ref.desde ?? null)} ÷ días hábiles ÷ activos). Venta /
+              mes = venta / día × {DIAS_HABILES_MES} días hábiles. La meta es el 4% de la Harina PAN mensual de esa
+              misma población. La suma de las dos ciudades suma cada una con su propio perfil. El valor real debería
+              quedar entre los dos escenarios: no se sabe cuántos clientes CS tiene la ciudad completa.
+            </p>
+          </div>
+        </details>
       )}
     </div>
   );

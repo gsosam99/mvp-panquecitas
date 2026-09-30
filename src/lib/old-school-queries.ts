@@ -3,15 +3,64 @@ import { fetchAllRows } from "@/lib/supabase/fetch-all";
 import { PRODUCT_IDS } from "@/data/catalog";
 import { contarDiasHabiles, siguienteDiaHabil } from "@/lib/business-days";
 import { todayISO } from "@/lib/date-buckets";
-import { esTipoFoco } from "@/lib/bqto-completo";
+import { DIAS_HABILES_3M } from "@/lib/business-days";
+import { getRendimiento3M } from "@/lib/dienn-queries";
+import { esTipoFoco, type BqtoFila } from "@/lib/bqto-completo";
 import { esSegmentoSinAlimentos } from "@/lib/segmentos";
 import { getUniverseLocations, sectorGroup, vigentesAl, type Sector } from "@/lib/universe";
-import type { CriterioFoco, GrupoPiloto, ReferenciaOldSchool } from "@/lib/old-school";
+import type { CriterioFoco, GrupoPiloto, RatioDemanda, ReferenciaOldSchool } from "@/lib/old-school";
 
 // Lecturas del módulo "Old School" (ver src/lib/old-school.ts).
 
 /** Arranque del piloto: el mismo RENDIMIENTO_DIARIO_DESDE de dienn-queries.ts. */
 export const OLD_SCHOOL_DESDE = "2026-08-03";
+
+/**
+ * El % de la demanda de Harina PAN que hoy vende en Panquecitas cada sector
+ * piloto, con las dos bases de BaseRatio.
+ *
+ * Panquecitas por día y PAN "dashboard" salen de getRendimiento3M("universo"),
+ * la misma función del gráfico de ratios. PAN "misma fuente" = el PAN de los
+ * clientes de la cartera del sector dentro del archivo de la ciudad completa
+ * que le toca (Cabudare en Barquisimeto, Cumaná piloto en Cumaná), ÷ 63.
+ */
+export async function getRatiosDemanda(
+  filasCiudad: Record<Sector, BqtoFila[]>
+): Promise<Record<Sector, RatioDemanda>> {
+  const [universo, rendCabudare, rendCumana] = await Promise.all([
+    getUniverseLocations(),
+    getRendimiento3M("universo", "barquisimeto_este"),
+    getRendimiento3M("universo", "cumana"),
+  ]);
+  const vigentes = vigentesAl(universo, todayISO());
+
+  function armar(etiqueta: string, sector: Sector, rend: Awaited<ReturnType<typeof getRendimiento3M>>): RatioDemanda {
+    const codigos = new Set(
+      vigentes.filter((l) => sectorGroup(l.oficina_venta) === sector).map((l) => l.sap_code.trim())
+    );
+    const delPiloto = filasCiudad[sector].filter((f) => codigos.has(f.sap_code.trim()));
+    const panMismaFuente = delPiloto.reduce((s, f) => s + (Number(f.quantity_kg) || 0), 0);
+    const dias = rend.puntos.length;
+    const panqKgDia = dias > 0 ? rend.puntos.reduce((s, p) => s + p.panquecitasKg, 0) / dias : 0;
+    const panKgDia = { dashboard: rend.promedio3M, mismaFuente: panMismaFuente / DIAS_HABILES_3M };
+    const ratio = (pan: number) => (pan > 0 ? (panqKgDia / pan) * 100 : 0);
+    return {
+      etiqueta,
+      panqKgDia,
+      dias,
+      desde: rend.puntos[0]?.dia ?? null,
+      hasta: rend.puntos[dias - 1]?.dia ?? null,
+      panKgDia,
+      ratioPct: { dashboard: ratio(panKgDia.dashboard), mismaFuente: ratio(panKgDia.mismaFuente) },
+      clientesEnArchivo: new Set(delPiloto.map((f) => f.sap_code.trim())).size,
+    };
+  }
+
+  return {
+    barquisimeto_este: armar("Cabudare", "barquisimeto_este", rendCabudare),
+    cumana: armar("Cumaná (piloto)", "cumana", rendCumana),
+  };
+}
 
 /**
  * El perfil de hoy de Cabudare y de Cumaná piloto.

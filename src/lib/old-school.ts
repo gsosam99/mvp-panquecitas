@@ -1,10 +1,12 @@
-// Old School — proyección simple por equivalencia de activación (DIENN,
-// 30-09-2026, pedido de Asdrúbal). Módulo aparte de "Ciudades completas":
-// allá la proyección es por tipo de cliente; aquí es un solo promedio de venta
-// por ciudad, con el perfil de SU sector piloto:
+// Old School — proyección simple de ciudades completas (DIENN, 30-09-2026,
+// pedido de Asdrúbal). Módulo aparte de "Ciudades completas": allá la
+// proyección es por tipo de cliente; aquí cada ciudad usa el perfil de SU
+// sector piloto:
 //   · Barquisimeto completo con los valores de Cabudare;
 //   · Cumaná completa con los valores de Cumaná piloto.
 //
+// La proyección principal es por participación en la demanda (ver abajo).
+// El método por cliente activo queda como referencia:
 //   1. Equivalencia de activación, por separado para segmentos foco y fuera
 //      de foco, en dos escenarios según cómo se corta el foco del piloto
 //      (ver CriterioFoco):
@@ -18,7 +20,87 @@
 //
 // Puro, sin dependencias de servidor, igual que bqto-completo.ts.
 
+import { DIAS_HABILES_3M } from "@/lib/business-days";
 import { DIAS_HABILES_MES, MESES_PROYECCION, META_PCT, type BqtoResumen } from "@/lib/bqto-completo";
+
+// ── Proyección por participación en la demanda (DIENN, 30-09-2026) ──
+// La principal: cuánto representa la venta diaria de Panquecitas del sector
+// piloto sobre la demanda de Harina PAN de su zona (su cartera), y ese mismo %
+// aplicado a la Harina PAN de la ciudad completa. Barquisimeto con el % de
+// Cabudare, Cumaná con el de Cumaná piloto.
+//
+// Dos bases para la Harina PAN del piloto, porque las dos fuentes no miden lo
+// mismo:
+//   · "dashboard": el promedio de PAN del gráfico de ratios (radar_3m_records
+//     ÷ 63), el % que se ve en el dashboard.
+//   · "misma fuente": el PAN de los clientes del piloto dentro del mismo
+//     archivo de la ciudad completa (bqto_3m_ventas ÷ 63). Numerador del % y
+//     demanda de la ciudad salen del mismo reporte.
+
+export type BaseRatio = "dashboard" | "mismaFuente";
+
+/** El % de la demanda que hoy vende en Panquecitas un sector piloto. */
+export interface RatioDemanda {
+  etiqueta: string;
+  /** Panquecitas por día hábil desde el arranque (la serie del dashboard). */
+  panqKgDia: number;
+  dias: number;
+  desde: string | null;
+  hasta: string | null;
+  /** Harina PAN por día de la cartera del sector según cada base. */
+  panKgDia: Record<BaseRatio, number>;
+  /** panqKgDia ÷ panKgDia × 100. */
+  ratioPct: Record<BaseRatio, number>;
+  /** Clientes de la cartera del piloto que aparecen en el archivo de la ciudad. */
+  clientesEnArchivo: number;
+}
+
+export interface ProyeccionDemanda {
+  /** Harina PAN por día de la ciudad completa (3 meses ÷ 63). */
+  panKgDia: number;
+  ratioPct: number;
+  kgDia: number;
+  kgMes: number;
+  kgPeriodo: number;
+  metaMes: number;
+  pctMeta: number;
+}
+
+export function proyeccionDemanda(r: BqtoResumen, ratioPct: number): ProyeccionDemanda {
+  const panKgDia = r.totalKg / DIAS_HABILES_3M;
+  const kgDia = panKgDia * (ratioPct / 100);
+  const kgMes = kgDia * DIAS_HABILES_MES;
+  const metaMes = r.promedioMesKg * META_PCT;
+  return {
+    panKgDia,
+    ratioPct,
+    kgDia,
+    kgMes,
+    kgPeriodo: kgMes * MESES_PROYECCION,
+    metaMes,
+    pctMeta: metaMes > 0 ? (kgMes / metaMes) * 100 : 0,
+  };
+}
+
+/** Suma de ciudades; el % que devuelve es el efectivo (kg ÷ PAN). */
+export function sumarDemanda(partes: ProyeccionDemanda[]): ProyeccionDemanda {
+  const suma = (f: (p: ProyeccionDemanda) => number) => partes.reduce((s, p) => s + f(p), 0);
+  const panKgDia = suma((p) => p.panKgDia);
+  const kgDia = suma((p) => p.kgDia);
+  const kgMes = suma((p) => p.kgMes);
+  const metaMes = suma((p) => p.metaMes);
+  return {
+    panKgDia,
+    ratioPct: panKgDia > 0 ? (kgDia / panKgDia) * 100 : 0,
+    kgDia,
+    kgMes,
+    kgPeriodo: suma((p) => p.kgPeriodo),
+    metaMes,
+    pctMeta: metaMes > 0 ? (kgMes / metaMes) * 100 : 0,
+  };
+}
+
+// ── Método por cliente activo (el primero que se armó) ──────────────
 
 /** Cartera y activos de un grupo de clientes del sector piloto. */
 export interface GrupoPiloto {
