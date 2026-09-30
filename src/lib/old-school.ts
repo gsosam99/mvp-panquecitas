@@ -6,7 +6,8 @@
 //   · Cumaná completa con los valores de Cumaná piloto.
 //
 //   1. Equivalencia de activación, por separado para segmentos foco y fuera
-//      de foco (mismo criterio en el piloto y en la ciudad: esTipoFoco):
+//      de foco, en dos escenarios según cómo se corta el foco del piloto
+//      (ver CriterioFoco):
 //        clientes activados = clientes de la ciudad del grupo × activación del grupo en el piloto
 //   2. Venta promedio diaria equivalente:
 //        kg/día por activo = Radar de Panquecitas del sector ÷ días hábiles del piloto ÷ activos
@@ -27,15 +28,38 @@ export interface GrupoPiloto {
   activacionPct: number;
 }
 
+/**
+ * Con qué criterio se corta foco / fuera de foco en el PILOTO. En la ciudad
+ * siempre es por tipo de cliente: su archivo no trae el segmento.
+ *   · "tipo" (conservador): el mismo corte que la ciudad. Los CS (Tradicional,
+ *     Alta y Media Visibilidad) tienen giro de bodega y caen en foco; en
+ *     Cabudare casi no están activos y bajan la activación foco.
+ *   · "segmento" (optimista): el corte del dashboard (SEGMENTOS_SIN_ALIMENTOS),
+ *     sin los CS. Supone que el foco de la ciudad se activa como los segmentos
+ *     de alimentos del piloto.
+ */
+export type CriterioFoco = "tipo" | "segmento";
+
+export const CRITERIOS_FOCO: { criterio: CriterioFoco; titulo: string; nota: string }[] = [
+  {
+    criterio: "tipo",
+    titulo: "Escenario conservador — foco por tipo de cliente",
+    nota: "Foco y fuera de foco del piloto cortados por tipo de cliente, igual que la ciudad: los CS del piloto cuentan como foco con su activación de hoy.",
+  },
+  {
+    criterio: "segmento",
+    titulo: "Escenario optimista — foco por segmento",
+    nota: "Foco y fuera de foco del piloto cortados por segmento, como el dashboard (sin los CS): el foco de la ciudad se activa como los segmentos de alimentos del piloto.",
+  },
+];
+
 /** Cómo está hoy un sector del piloto. */
 export interface ReferenciaOldSchool {
   etiqueta: string;
   /** Cartera vigente hoy completa (la tarjeta de activación del dashboard). */
   total: GrupoPiloto;
-  /** Solo tipos de cliente foco (esTipoFoco). */
-  foco: GrupoPiloto;
-  /** Tipos de cliente fuera de foco. */
-  noFoco: GrupoPiloto;
+  /** Foco / fuera de foco del piloto según cada criterio. */
+  grupos: Record<CriterioFoco, { foco: GrupoPiloto; noFoco: GrupoPiloto }>;
   /** Radar de Panquecitas de la cartera vigente del sector desde el arranque del piloto. */
   kgPanquecitas: number;
   desde: string;
@@ -95,10 +119,15 @@ function armarEscenario(
 }
 
 /** Segmentos foco, fuera de foco y todos (= la suma de los dos), en ese orden. */
-export function escenariosOldSchool(r: BqtoResumen, ref: ReferenciaOldSchool): EscenarioOldSchool[] {
+export function escenariosOldSchool(
+  r: BqtoResumen,
+  ref: ReferenciaOldSchool,
+  criterio: CriterioFoco
+): EscenarioOldSchool[] {
+  const { foco, noFoco } = ref.grupos[criterio];
   const clientesNoFoco = r.clientes - r.clientesFoco;
-  const activadosFoco = r.clientesFoco * (ref.foco.activacionPct / 100);
-  const activadosNoFoco = clientesNoFoco * (ref.noFoco.activacionPct / 100);
+  const activadosFoco = r.clientesFoco * (foco.activacionPct / 100);
+  const activadosNoFoco = clientesNoFoco * (noFoco.activacionPct / 100);
   const a = ref.total.activos;
   return [
     armarEscenario("Segmentos foco", r.clientesFoco, activadosFoco, r.promedioMesFocoKg, ref.kgDiaPorActivo, a),

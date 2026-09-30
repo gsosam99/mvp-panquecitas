@@ -14,6 +14,7 @@ import {
   type CiudadCompleta,
 } from "@/lib/bqto-completo";
 import {
+  CRITERIOS_FOCO,
   escenariosOldSchool,
   sumarOldSchool,
   type EscenarioOldSchool,
@@ -54,8 +55,10 @@ function Activacion({ g }: { g: GrupoPiloto }) {
 function CajaReferencia({ ciudad, referencia: ref }: { ciudad: string; referencia: ReferenciaOldSchool }) {
   const filas: [string, React.ReactNode][] = [
     ["Activación total", <Activacion key="t" g={ref.total} />],
-    ["Activación segmentos foco", <Activacion key="f" g={ref.foco} />],
-    ["Activación fuera de foco", <Activacion key="n" g={ref.noFoco} />],
+    ["Foco por tipo de cliente", <Activacion key="tf" g={ref.grupos.tipo.foco} />],
+    ["Fuera de foco por tipo", <Activacion key="tn" g={ref.grupos.tipo.noFoco} />],
+    ["Foco por segmento", <Activacion key="sf" g={ref.grupos.segmento.foco} />],
+    ["Fuera de foco por segmento", <Activacion key="sn" g={ref.grupos.segmento.noFoco} />],
     [
       "Panquecitas vendidas",
       <>
@@ -145,22 +148,31 @@ export default async function OldSchoolPage() {
   const ciudades = CIUDADES_OLD_SCHOOL.map((c) => {
     const { nombre, sector } = CIUDADES_COMPLETAS[c];
     const ref = refs[sector!];
-    const r = resumenBqto(filas.filter((f) => f.ciudad === c));
-    return { c, nombre, ref, r, escenarios: r ? escenariosOldSchool(r, ref) : null };
+    return { c, nombre, ref, r: resumenBqto(filas.filter((f) => f.ciudad === c)) };
   });
-  const cargadas = ciudades.filter((x) => x.escenarios !== null);
-  const faltan = ciudades.filter((x) => x.escenarios === null);
+  const cargadas = ciudades.filter((x) => x.r !== null);
+  const faltan = ciudades.filter((x) => x.r === null);
   const activosPiloto = cargadas.reduce((s, x) => s + x.ref.total.activos, 0);
-  const total = cargadas.length > 1 ? sumarOldSchool(cargadas.map((x) => x.escenarios!), activosPiloto) : [];
 
-  const filasTabla = [
-    ...cargadas.flatMap((x) => x.escenarios!.map((e) => ({ ciudad: x.nombre, perfil: x.ref.etiqueta, e }))),
-    ...total.map((e) => ({
-      ciudad: cargadas.map((x) => x.nombre).join(" + "),
-      perfil: cargadas.map((x) => x.ref.etiqueta).join(" y "),
-      e,
-    })),
-  ];
+  const tablas = cargadas.length === 0 ? [] : CRITERIOS_FOCO.map(({ criterio, titulo, nota }) => {
+    const porCiudad = cargadas.map((x) => ({ x, escenarios: escenariosOldSchool(x.r!, x.ref, criterio) }));
+    const total = porCiudad.length > 1 ? sumarOldSchool(porCiudad.map((p) => p.escenarios), activosPiloto) : [];
+    return {
+      criterio,
+      titulo,
+      nota,
+      filas: [
+        ...porCiudad.flatMap(({ x, escenarios }) =>
+          escenarios.map((e) => ({ ciudad: x.nombre, perfil: x.ref.etiqueta, e }))
+        ),
+        ...total.map((e) => ({
+          ciudad: cargadas.map((x) => x.nombre).join(" + "),
+          perfil: cargadas.map((x) => x.ref.etiqueta).join(" y "),
+          e,
+        })),
+      ],
+    };
+  });
 
   return (
     <div className="space-y-6">
@@ -169,8 +181,8 @@ export default async function OldSchoolPage() {
         <p className="text-slate-500 mt-1">
           Proyección de Barquisimeto y Cumaná completas por equivalencia de activación: la cartera completa de cada
           ciudad se activa en el mismo % que su sector piloto (Barquisimeto con Cabudare, Cumaná con Cumaná), foco y
-          fuera de foco cada uno con el suyo, y cada
-          cliente activado vende lo que vende hoy al día un cliente activo de ese sector. No afecta el Dashboard.
+          fuera de foco cada uno con el suyo, y cada cliente activado vende lo que vende hoy al día un cliente activo de
+          ese sector. Se muestran dos escenarios según cómo se corta el foco del piloto. No afecta el Dashboard.
         </p>
       </div>
 
@@ -207,25 +219,32 @@ export default async function OldSchoolPage() {
         </CardContent>
       </Card>
 
-      {filasTabla.length > 0 && (
-        <Card>
+      {tablas.map((t, i) => (
+        <Card key={t.criterio}>
           <CardHeader>
-            <CardTitle>2. Equivalencia de activación y venta promedio</CardTitle>
+            <CardTitle>
+              {i + 2}. {t.titulo}
+            </CardTitle>
           </CardHeader>
           <CardContent className="space-y-3">
-            <TablaEscenarios filas={filasTabla} />
-            <p className="text-xs text-slate-400">
-              Clientes = clientes de la ciudad completa con Harina PAN en su Radar de 3 meses. Clientes activados =
-              clientes × activación del sector piloto, por separado para segmentos foco y fuera de foco (el mismo corte
-              por tipo de cliente en el piloto y en la ciudad); todos los clientes = la suma de los dos, y su
-              activación es la efectiva (activados ÷ clientes). Veces el piloto = clientes activados ÷ activos del
-              sector piloto. Venta / día = clientes activados × venta diaria por cliente activo del sector
-              (Radar de Panquecitas desde el {fecha(ciudades[0]?.ref.desde ?? null)} ÷ días hábiles ÷ activos). Venta /
-              mes = venta / día × {DIAS_HABILES_MES} días hábiles. La meta es el 4% de la Harina PAN mensual de esa
-              misma población. La suma de las dos ciudades suma cada una con su propio perfil.
-            </p>
+            <p className="text-sm text-slate-500">{t.nota}</p>
+            <TablaEscenarios filas={t.filas} />
           </CardContent>
         </Card>
+      ))}
+
+      {tablas.length > 0 && (
+        <p className="text-xs text-slate-400">
+          Clientes = clientes de la ciudad completa con Harina PAN en su Radar de 3 meses; en la ciudad el foco siempre
+          se corta por tipo de cliente, porque su archivo no trae el segmento. Clientes activados = clientes × activación
+          del sector piloto, por separado para foco y fuera de foco; todos los clientes = la suma de los dos, y su
+          activación es la efectiva (activados ÷ clientes). Veces el piloto = clientes activados ÷ activos del sector
+          piloto. Venta / día = clientes activados × venta diaria por cliente activo del sector (Radar de Panquecitas
+          desde el {fecha(ciudades[0]?.ref.desde ?? null)} ÷ días hábiles ÷ activos). Venta / mes = venta / día ×{" "}
+          {DIAS_HABILES_MES} días hábiles. La meta es el 4% de la Harina PAN mensual de esa misma población. La suma de
+          las dos ciudades suma cada una con su propio perfil. El valor real debería quedar entre los dos escenarios: no
+          se sabe cuántos clientes CS tiene la ciudad completa.
+        </p>
       )}
     </div>
   );

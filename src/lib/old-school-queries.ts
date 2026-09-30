@@ -4,8 +4,9 @@ import { PRODUCT_IDS } from "@/data/catalog";
 import { contarDiasHabiles, siguienteDiaHabil } from "@/lib/business-days";
 import { todayISO } from "@/lib/date-buckets";
 import { esTipoFoco } from "@/lib/bqto-completo";
+import { esSegmentoSinAlimentos } from "@/lib/segmentos";
 import { getUniverseLocations, sectorGroup, vigentesAl, type Sector } from "@/lib/universe";
-import type { GrupoPiloto, ReferenciaOldSchool } from "@/lib/old-school";
+import type { CriterioFoco, GrupoPiloto, ReferenciaOldSchool } from "@/lib/old-school";
 
 // Lecturas del módulo "Old School" (ver src/lib/old-school.ts).
 
@@ -17,9 +18,9 @@ export const OLD_SCHOOL_DESDE = "2026-08-03";
  *
  * Activo = Radar de Panquecitas acumulado > 0 sobre la cartera vigente hoy,
  * igual que la tarjeta de activación del dashboard. El corte foco / fuera de
- * foco usa el TIPO de cliente (esTipoFoco), el mismo criterio con que se
- * separan los clientes del archivo de la ciudad completa: así la activación
- * de cada grupo se aplica al mismo grupo del otro lado.
+ * foco se arma con los dos criterios de CriterioFoco: por tipo de cliente
+ * (esTipoFoco, el mismo del archivo de la ciudad) y por segmento
+ * (SEGMENTOS_SIN_ALIMENTOS, el del dashboard).
  *
  * Venta diaria = Radar de Panquecitas de la cartera vigente del sector desde
  * el 03-08-2026 ÷ días hábiles desde esa fecha hasta el último Radar. Una
@@ -59,23 +60,36 @@ export async function getReferenciasOldSchool(): Promise<Record<Sector, Referenc
   });
 
   function armar(etiqueta: string, sector: Sector): ReferenciaOldSchool {
-    const c = { foco: 0, noFoco: 0 };
-    const a = { foco: 0, noFoco: 0 };
+    const conteo = () => ({ foco: { c: 0, a: 0 }, noFoco: { c: 0, a: 0 } });
+    const porCriterio: Record<CriterioFoco, ReturnType<typeof conteo>> = { tipo: conteo(), segmento: conteo() };
+    let cartera = 0;
+    let activos = 0;
     let kgPanquecitas = 0;
     for (const l of vigentes) {
       if (sectorGroup(l.oficina_venta) !== sector) continue;
-      const g = esTipoFoco(l.tipo_cliente) ? "foco" : "noFoco";
-      c[g] += 1;
-      if ((acumulado.get(l.id) ?? 0) > 0) a[g] += 1;
+      const activo = (acumulado.get(l.id) ?? 0) > 0;
+      const esFoco: Record<CriterioFoco, boolean> = {
+        tipo: esTipoFoco(l.tipo_cliente),
+        segmento: !esSegmentoSinAlimentos(l.segmento_cliente),
+      };
+      for (const criterio of ["tipo", "segmento"] as const) {
+        const g = porCriterio[criterio][esFoco[criterio] ? "foco" : "noFoco"];
+        g.c += 1;
+        if (activo) g.a += 1;
+      }
+      cartera += 1;
+      if (activo) activos += 1;
       kgPanquecitas += desdeArranque.get(l.id) ?? 0;
     }
-    const activos = a.foco + a.noFoco;
+    const grupos = (criterio: CriterioFoco) => ({
+      foco: grupo(porCriterio[criterio].foco.c, porCriterio[criterio].foco.a),
+      noFoco: grupo(porCriterio[criterio].noFoco.c, porCriterio[criterio].noFoco.a),
+    });
     const kgDia = diasHabiles > 0 ? kgPanquecitas / diasHabiles : 0;
     return {
       etiqueta,
-      total: grupo(c.foco + c.noFoco, activos),
-      foco: grupo(c.foco, a.foco),
-      noFoco: grupo(c.noFoco, a.noFoco),
+      total: grupo(cartera, activos),
+      grupos: { tipo: grupos("tipo"), segmento: grupos("segmento") },
       kgPanquecitas,
       desde: OLD_SCHOOL_DESDE,
       corte,
