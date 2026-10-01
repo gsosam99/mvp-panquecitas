@@ -295,6 +295,77 @@ export function sumarSegmentos(partes: ProyeccionSegmentos[]): ProyeccionSegment
   return totalizar(filas);
 }
 
+// ── Clientes gigantes (DIENN, 30-09-2026) ───────────────────────────
+// Un gigante (esGigante: más Harina PAN al mes que el mayor cliente de la
+// cartera del piloto, p. ej. CECOSESOLA) no tiene equivalente en el piloto:
+// su segmento le daría la venta de un abasto. Sale de la proyección por
+// segmento y se proyecta aparte, activado al 100%:
+//   venta / día = su Harina PAN por día (3 meses ÷ 63) × %
+// con tres % como rango: el de su piloto con la misma fuente, el 4% de la
+// meta y el de su piloto con la base del dashboard.
+
+export type BaseGigante = "mismaFuente" | "meta" | "dashboard";
+
+export const BASES_GIGANTES: { base: BaseGigante; label: string }[] = [
+  { base: "mismaFuente", label: "% del piloto · misma fuente" },
+  { base: "meta", label: "4% (la meta)" },
+  { base: "dashboard", label: "% del piloto · dashboard" },
+];
+
+export interface FilaGigante {
+  ciudad: string;
+  sap_code: string;
+  nombre: string;
+  tipo: string;
+  panMes: number;
+  panDia: number;
+  pct: Record<BaseGigante, number>;
+  kgDia: Record<BaseGigante, number>;
+}
+
+export interface ProyeccionGigantes {
+  filas: FilaGigante[];
+  panDia: number;
+  kgDia: Record<BaseGigante, number>;
+}
+
+const porBase = (f: (b: BaseGigante) => number): Record<BaseGigante, number> => ({
+  mismaFuente: f("mismaFuente"),
+  meta: f("meta"),
+  dashboard: f("dashboard"),
+});
+
+function totalizarGigantes(filas: FilaGigante[]): ProyeccionGigantes {
+  return {
+    filas: [...filas].sort((a, b) => b.panMes - a.panMes),
+    panDia: filas.reduce((s, f) => s + f.panDia, 0),
+    kgDia: porBase((b) => filas.reduce((s, f) => s + f.kgDia[b], 0)),
+  };
+}
+
+export function proyeccionGigantes(gigantes: ClienteZona[], ratio: RatioDemanda): ProyeccionGigantes {
+  const pct = porBase((b) => (b === "meta" ? META_PCT * 100 : ratio.ratioPct[b]));
+  return totalizarGigantes(
+    gigantes.map((c) => {
+      const panDia = c.panMes / DIAS_HABILES_MES;
+      return {
+        ciudad: c.ciudad,
+        sap_code: c.sap_code,
+        nombre: c.nombre,
+        tipo: c.tipo,
+        panMes: c.panMes,
+        panDia,
+        pct,
+        kgDia: porBase((b) => panDia * (pct[b] / 100)),
+      };
+    })
+  );
+}
+
+export function sumarGigantes(partes: ProyeccionGigantes[]): ProyeccionGigantes {
+  return totalizarGigantes(partes.flatMap((p) => p.filas));
+}
+
 export interface EscenarioOldSchool {
   poblacion: string;
   /** Clientes de la ciudad completa (Harina PAN > 0 en su Radar de 3 meses). */

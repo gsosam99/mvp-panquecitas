@@ -5,25 +5,31 @@ import { redirect } from "next/navigation";
 import { requireDashboard } from "@/lib/session";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Alert, AlertDescription } from "@/components/ui/alert";
-import { getBqto3MFilas } from "@/lib/bqto-queries";
+import { getBqto3MFilas, getPerfilPiloto } from "@/lib/bqto-queries";
 import { getRatiosDemanda, getReferenciasOldSchool } from "@/lib/old-school-queries";
 import { DIAS_HABILES_3M } from "@/lib/business-days";
 import {
   CIUDADES_COMPLETAS,
   DIAS_HABILES_MES,
   MESES_PROYECCION,
+  esGigante,
   resumenBqto,
   type CiudadCompleta,
 } from "@/lib/bqto-completo";
 import {
+  BASES_GIGANTES,
   CRITERIOS_FOCO,
   escenariosOldSchool,
   proyeccionDemanda,
+  proyeccionGigantes,
   proyeccionPorSegmento,
   sumarDemanda,
+  sumarGigantes,
   sumarOldSchool,
   sumarSegmentos,
   type BaseRatio,
+  type FilaGigante,
+  type ProyeccionGigantes,
   type EscenarioOldSchool,
   type GrupoPiloto,
   type ProyeccionDemanda,
@@ -296,6 +302,100 @@ function TablaDetalleSegmentos({ titulo, p }: { titulo: string; p: ProyeccionSeg
   );
 }
 
+function TablaGigantes({ filas }: { filas: FilaGigante[] }) {
+  return (
+    <div className="overflow-x-auto">
+      <table className="w-full text-sm">
+        <thead>
+          <tr className="border-b text-left text-xs uppercase tracking-wide text-slate-500">
+            <th className="py-2 pr-3 font-semibold">Cliente</th>
+            <th className="py-2 pr-3 font-semibold">Segmento</th>
+            <th className="py-2 pr-3 font-semibold text-right">Harina PAN / mes</th>
+            <th className="py-2 pr-3 font-semibold text-right">Harina PAN / día</th>
+            {BASES_GIGANTES.map(({ base, label }) => (
+              <th key={base} className="py-2 pr-3 font-semibold text-right last:pr-0">
+                Venta / día · {label}
+              </th>
+            ))}
+          </tr>
+        </thead>
+        <tbody>
+          {filas.map((f) => (
+            <tr key={`${f.ciudad}|${f.sap_code}`} className="border-b last:border-0">
+              <td className="py-2 pr-3 font-medium text-slate-900">
+                {f.nombre} <span className="text-xs text-slate-400">({f.sap_code})</span>
+              </td>
+              <td className="py-2 pr-3 text-slate-500">{f.tipo}</td>
+              <td className="py-2 pr-3 text-right">{kg(f.panMes)} kg</td>
+              <td className="py-2 pr-3 text-right">{kg(f.panDia)} kg</td>
+              {BASES_GIGANTES.map(({ base }) => (
+                <td key={base} className="py-2 pr-3 text-right last:pr-0" style={{ color: COLOR_PROYECCION }}>
+                  {kg(f.kgDia[base])} kg <span className="text-xs text-slate-400">({kg2(f.pct[base])}%)</span>
+                </td>
+              ))}
+            </tr>
+          ))}
+        </tbody>
+      </table>
+    </div>
+  );
+}
+
+function TablaConGigantes({
+  filas,
+}: {
+  filas: { ciudad: string; segmentosKgDia: number; g: ProyeccionGigantes; destacada?: boolean }[];
+}) {
+  return (
+    <div className="overflow-x-auto">
+      <table className="w-full text-sm">
+        <thead>
+          <tr className="border-b text-left text-xs uppercase tracking-wide text-slate-500">
+            <th className="py-2 pr-3 font-semibold" rowSpan={2}>
+              Ciudad
+            </th>
+            <th className="py-2 pr-3 font-semibold text-right" rowSpan={2}>
+              Segmentos / día
+            </th>
+            {BASES_GIGANTES.map(({ base, label }) => (
+              <th key={base} className="py-2 px-3 font-semibold text-center border-l" colSpan={2}>
+                Gigantes al {label}
+              </th>
+            ))}
+          </tr>
+          <tr className="border-b text-left text-xs uppercase tracking-wide text-slate-500">
+            {BASES_GIGANTES.map(({ base }) => (
+              <Fragment key={base}>
+                <th className="py-1 px-3 font-semibold text-right border-l">Total / día</th>
+                <th className="py-1 pr-3 font-semibold text-right">Total / mes</th>
+              </Fragment>
+            ))}
+          </tr>
+        </thead>
+        <tbody>
+          {filas.map(({ ciudad, segmentosKgDia, g, destacada }) => (
+            <tr key={ciudad} className={`border-b last:border-0 ${destacada ? "bg-slate-50 font-bold" : ""}`}>
+              <td className="py-2 pr-3 text-slate-900">{ciudad}</td>
+              <td className="py-2 pr-3 text-right">{kg(segmentosKgDia)} kg</td>
+              {BASES_GIGANTES.map(({ base }) => {
+                const dia = segmentosKgDia + g.kgDia[base];
+                return (
+                  <Fragment key={base}>
+                    <td className="py-2 px-3 text-right border-l font-bold" style={{ color: COLOR_PROYECCION }}>
+                      {kg(dia)} kg
+                    </td>
+                    <td className="py-2 pr-3 text-right">{dec((dia * DIAS_HABILES_MES) / 1000)} t</td>
+                  </Fragment>
+                );
+              })}
+            </tr>
+          ))}
+        </tbody>
+      </table>
+    </div>
+  );
+}
+
 function Activacion({ g }: { g: GrupoPiloto }) {
   return (
     <>
@@ -400,9 +500,10 @@ export default async function OldSchoolPage() {
 
   const { filas, error } = await getBqto3MFilas();
   const filasDe = (c: CiudadCompleta) => filas.filter((f) => f.ciudad === c);
-  const [refs, ratios] = await Promise.all([
+  const [refs, ratios, { umbralGiganteMes }] = await Promise.all([
     getReferenciasOldSchool(),
     getRatiosDemanda({ barquisimeto_este: filasDe("barquisimeto"), cumana: filasDe("cumana") }),
+    getPerfilPiloto(),
   ]);
 
   const ciudades = CIUDADES_OLD_SCHOOL.map((c) => {
@@ -435,10 +536,26 @@ export default async function OldSchoolPage() {
 
   const porSegmentoCiudad = cargadas.map((x) => ({
     x,
-    p: proyeccionPorSegmento(x.r!.porCliente, x.ref, refs.total),
+    p: proyeccionPorSegmento(
+      x.r!.porCliente.filter((c) => !esGigante(c, umbralGiganteMes)),
+      x.ref,
+      refs.total
+    ),
+    g: proyeccionGigantes(
+      x.r!.porCliente.filter((c) => esGigante(c, umbralGiganteMes)),
+      x.ratio
+    ),
   }));
   const totalSegmentos = porSegmentoCiudad.length > 1 ? sumarSegmentos(porSegmentoCiudad.map((c) => c.p)) : null;
+  const totalGigantes = porSegmentoCiudad.length > 1 ? sumarGigantes(porSegmentoCiudad.map((c) => c.g)) : null;
   const nombreTotal = cargadas.map((x) => x.nombre).join(" + ");
+  const filasConGigantes = [
+    ...porSegmentoCiudad.map(({ x, p, g }) => ({ ciudad: x.nombre, segmentosKgDia: p.kgDia, g })),
+    ...(totalSegmentos && totalGigantes
+      ? [{ ciudad: nombreTotal, segmentosKgDia: totalSegmentos.kgDia, g: totalGigantes, destacada: true }]
+      : []),
+  ];
+  const listaGigantes = porSegmentoCiudad.flatMap(({ g }) => g.filas);
   const segmentos =
     porSegmentoCiudad.length === 0
       ? null
@@ -536,7 +653,7 @@ export default async function OldSchoolPage() {
       {segmentos && (
         <Card>
           <CardHeader>
-            <CardTitle>2. Proyección por segmento</CardTitle>
+            <CardTitle>2. Proyección por segmento{listaGigantes.length > 0 ? " (sin los clientes gigantes)" : ""}</CardTitle>
           </CardHeader>
           <CardContent className="space-y-4">
             <TablaResumenSegmentos filas={segmentos.resumen} />
@@ -551,6 +668,38 @@ export default async function OldSchoolPage() {
               de sus segmentos y el total, la suma de las dos ciudades. Mensual = diario × {DIAS_HABILES_MES} días
               hábiles. Barquisimeto usa los segmentos de Cabudare y Cumaná los de Cumaná piloto; un segmento que no
               está en la cartera de ese sector usa el del piloto total, y uno que no está en ninguna proyecta 0.
+            </p>
+          </CardContent>
+        </Card>
+      )}
+
+      {segmentos && listaGigantes.length > 0 && (
+        <Card>
+          <CardHeader>
+            <CardTitle>3. Clientes gigantes, proyectados aparte</CardTitle>
+          </CardHeader>
+          <CardContent className="space-y-3">
+            <TablaGigantes filas={listaGigantes} />
+            <p className="text-xs text-slate-400">
+              Gigante = compra más Harina PAN al mes que el mayor cliente de la cartera del piloto en un mes (
+              {kg(umbralGiganteMes)} kg): no hay un perfil en el piloto con quien compararlo, y por su segmento
+              proyectaría lo de un abasto. Se proyecta activado al 100%: su Harina PAN por día (3 meses ÷{" "}
+              {DIAS_HABILES_3M}) × el %, con tres % como rango.
+            </p>
+          </CardContent>
+        </Card>
+      )}
+
+      {segmentos && listaGigantes.length > 0 && (
+        <Card>
+          <CardHeader>
+            <CardTitle>4. Total: segmentos + clientes gigantes</CardTitle>
+          </CardHeader>
+          <CardContent className="space-y-3">
+            <TablaConGigantes filas={filasConGigantes} />
+            <p className="text-xs text-slate-400">
+              Venta / día = la de los segmentos (sección 2) + la de los gigantes con cada %. Mensual = diario ×{" "}
+              {DIAS_HABILES_MES} días hábiles.
             </p>
           </CardContent>
         </Card>
