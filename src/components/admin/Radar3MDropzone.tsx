@@ -15,6 +15,11 @@ import type { ParsedSapRadarRow, ParseError } from "@/types";
 
 type UploadState = "idle" | "parsing" | "previewing" | "uploading" | "done";
 
+/** Meses ("YYYY-MM") con algún volumen en el archivo: los únicos que la carga reemplaza. */
+function mesesConVolumen(rows: ParsedSapRadarRow[]): string[] {
+  return [...new Set(rows.filter((r) => Number(r.quantity_kg) !== 0).map((r) => r.fecha.slice(0, 7)))].sort();
+}
+
 export function Radar3MDropzone() {
   const [state, setState] = useState<UploadState>("idle");
   const [dragOver, setDragOver] = useState(false);
@@ -92,7 +97,7 @@ export function Radar3MDropzone() {
     const batchId = crypto.randomUUID();
     const tandas = partirPorCliente(rows);
     // Los meses de TODO el archivo: el servidor reemplaza solo esos.
-    const mesesArchivo = [...new Set(rows.map((r) => r.fecha.slice(0, 7)))].sort();
+    const mesesArchivo = mesesConVolumen(rows);
 
     type Resultado = {
       inserted?: number;
@@ -270,7 +275,10 @@ export function Radar3MDropzone() {
     // Lo que importa revisar antes de confirmar no es el número de filas (hay
     // una por corte diario) sino cuántos clientes y qué meses trae el archivo.
     const clientes = new Set(rows.map((r) => r.sap_code)).size;
-    const meses = [...new Set(rows.map((r) => r.fecha.slice(0, 7)))].sort();
+    // Solo cuentan los meses con volumen: un mes que viene sin su columna de
+    // "Venta Acumulada" se lee en 0 y no se toca.
+    const meses = mesesConVolumen(rows);
+    const mesesSinVolumen = [...new Set(rows.map((r) => r.fecha.slice(0, 7)))].filter((m) => !meses.includes(m)).sort();
     return (
       <div className="space-y-4">
         <div className="flex flex-wrap items-center gap-3">
@@ -290,6 +298,15 @@ export function Radar3MDropzone() {
             Esta carga <span className="font-medium">reemplaza solo los meses que trae el archivo</span> (
             {meses.join(", ")}); los otros meses ya cargados se quedan, así que puedes subir el período en varios
             archivos. Los promedios usan solo mayo–julio. No toca la Carga Radar del piloto.
+            {mesesSinVolumen.length > 0 && (
+              <>
+                {" "}
+                <span className="font-medium">
+                  {mesesSinVolumen.join(", ")} viene{mesesSinVolumen.length > 1 ? "n" : ""} en el archivo sin volumen
+                </span>{" "}
+                (sin su columna de Venta Acumulada): esas filas se ignoran y lo ya cargado de ese mes se queda igual.
+              </>
+            )}
           </AlertDescription>
         </Alert>
         {errors.length > 0 && (

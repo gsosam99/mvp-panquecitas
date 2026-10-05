@@ -70,15 +70,36 @@ export async function POST(req: Request) {
       /** Todos los meses ("YYYY-MM") del ARCHIVO, no solo los de esta tanda: lo que se reemplaza. */
       meses?: string[];
     };
-    const { rows, batchId, finalizar = true } = body;
-    if (!rows?.length || !batchId) {
+    const { batchId, finalizar = true } = body;
+    if (!body.rows?.length || !batchId) {
       return Response.json({ error: "Datos inválidos" }, { status: 400 });
     }
-    // Sin `meses` (un navegador con la versión anterior en caché, una sola
-    // tanda) se toman los de las filas recibidas.
-    const mesesArchivo = [...new Set(body.meses?.length ? body.meses : rows.map((r) => monthKey(r.fecha)))].filter(
-      (m) => /^\d{4}-\d{2}$/.test(m)
-    );
+    // Los meses que trae el archivo son los que tienen VOLUMEN, no los de
+    // cualquier fila: el export "jul–sep" (05-10-2026) trae las filas de julio
+    // pero sin su columna de "Venta Acumulada", así que se leen en 0. Contarlo
+    // como mes del archivo borraría el julio bueno de la carga de mayo–julio.
+    // Sin `meses` (un navegador con la versión anterior en caché) se toman los
+    // de las filas con volumen de esta tanda.
+    const mesesArchivo = [
+      ...new Set(
+        body.meses?.length
+          ? body.meses
+          : body.rows.filter((r) => Number(r.quantity_kg) !== 0).map((r) => monthKey(r.fecha))
+      ),
+    ].filter((m) => /^\d{4}-\d{2}$/.test(m));
+    // Las filas de un mes sin volumen se descartan enteras: si no, las ventas
+    // por día de ese mes se pisarían con ceros.
+    const rows = body.rows.filter((r) => mesesArchivo.includes(monthKey(r.fecha)));
+    if (rows.length === 0) {
+      // Tanda sin nada de los meses del archivo. Si es la última, igual le toca
+      // el borrado de lo viejo.
+      let reemplazadas = 0;
+      if (finalizar) {
+        reemplazadas = await borrarMesesDeCargasAnteriores(supabase, "radar_3m_records", mesesArchivo, batchId);
+        await borrarMesesDeCargasAnteriores(supabase, "radar_3m_ventas_dia", mesesArchivo, batchId);
+      }
+      return Response.json({ inserted: 0, reemplazadas, meses: [], ventas_dia_guardadas: 0 });
+    }
 
     // Se resuelve el cliente contra la cartera solo para poder marcar
     // location_id (lo usa el filtro "PAN Cliente"). Los que no calzan igual se
