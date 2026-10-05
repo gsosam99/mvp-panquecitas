@@ -1897,10 +1897,13 @@ export async function getRendimientoBaselinePan(sector?: Sector): Promise<Rendim
   }
   const radarMayJul = radarPan.filter((r) => enRango(r.fecha, BASELINE_MAYJUL_DESDE, BASELINE_MAYJUL_HASTA));
   const radarAgoSep = radarPan.filter((r) => enRango(r.fecha, BASELINE_AGOSEP_DESDE, BASELINE_AGOSEP_HASTA));
+  // En VALOR ABSOLUTO, como la columna "KG corregido" (=ABS) del Excel de
+  // validación de DIENN (05-10-2026): una devolución suma como venta. Solo en
+  // este gráfico y sus tarjetas; el resto del dashboard resta las devoluciones.
   const radarPanq: FilaKg[] = radarData.map((r) => ({
     locId: r.location_id,
     fecha: r.date_of_sale.slice(0, 10),
-    kg: Number(r.quantity_kg),
+    kg: Math.abs(Number(r.quantity_kg)),
   }));
   const radar: DatosFuente = {
     panq: radarPanq,
