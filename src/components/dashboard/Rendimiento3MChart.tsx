@@ -64,11 +64,13 @@ const Inner = dynamic(
       showPanDiario,
       ratiosCiudad,
       showRatioCiudades,
+      etiquetaPromedio,
     }: {
       data: Rendimiento3MResult;
       showPanDiario: boolean;
       ratiosCiudad: Rendimiento3MRatioCiudad[];
       showRatioCiudades: boolean;
+      etiquetaPromedio: string;
     }) {
       // Escala del eje de kg.
       //
@@ -185,7 +187,7 @@ const Inner = dynamic(
                 stroke="#64748b"
                 strokeWidth={2}
                 label={{
-                  value: `Promedio PAN 3M: ${data.promedio3M.toLocaleString("es-VE", { maximumFractionDigits: 0 })} kg/día`,
+                  value: `${etiquetaPromedio}: ${data.promedio3M.toLocaleString("es-VE", { maximumFractionDigits: 0 })} kg/día`,
                   position: "insideTopLeft",
                   fill: "#334155",
                   fontSize: 15,
@@ -283,11 +285,14 @@ export function Rendimiento3MChart({
   showPanDiario = true,
   ratiosCiudad = [],
   showRatioCiudades = false,
+  etiquetaPromedio = "Promedio PAN 3M",
 }: {
   data: Rendimiento3MResult;
   showPanDiario?: boolean;
   ratiosCiudad?: Rendimiento3MRatioCiudad[];
   showRatioCiudades?: boolean;
+  /** Texto de la línea del promedio de PAN (el gráfico de baseline a elegir lo cambia). */
+  etiquetaPromedio?: string;
 }) {
   return (
     <Inner
@@ -295,6 +300,7 @@ export function Rendimiento3MChart({
       showPanDiario={showPanDiario}
       ratiosCiudad={ratiosCiudad}
       showRatioCiudades={showRatioCiudades}
+      etiquetaPromedio={etiquetaPromedio}
     />
   );
 }

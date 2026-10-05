@@ -1591,6 +1591,184 @@ export async function getRendimiento3MFocoRecompra(
     piloto: porSegmento(vigentes.filter(esPiloto), []),
   };
 }
+
+// ── 4f. Rendimiento diario vs. baseline de Harina PAN a elegir ─────
+// Mismo gráfico que 4d/4e —venta diaria de Panquecitas (Carga Radar) contra
+// un promedio diario de Harina PAN y su 4%—, pero con el período de
+// referencia de PAN a elegir (DIENN, 05-10-2026). Botones independientes:
+//   - Baseline (BaselinePan):
+//       · "mayJul": el reporte "Radar últimos 3 Meses" completo (todas sus
+//         filas) ÷ DIAS_HABILES_3M — el mismo promedio que 4d y 4e.
+//       · "agoSep": Harina PAN de la Carga Radar del piloto, del 03-08 (arranque,
+//         HPM_RADAR_DESDE) al 30-09, ÷ sus días hábiles.
+//       · "julSep": julio del reporte de 3 meses + agosto–septiembre de la
+//         Carga Radar, ÷ los días hábiles de julio más los de ago–sep.
+//   - Cartera (CarteraBaseline): "completa", o "ajustada" sin la tanda
+//     "Indirecto Cumaná 2" (los ~975 PDV de los 7 franquiciados de Cumaná).
+//   - Segmento: "foco" recorta a los segmentos foco TANTO la serie de
+//     Panquecitas como el promedio de PAN; "todos", cualquier segmento.
+// El promedio de PAN es la suma de la cartera vigente hoy en el rango ÷ los
+// días hábiles del rango, sin prorratear a los clientes que entraron a mitad
+// del rango (decisión del usuario, 05-10-2026). Panquecitas son siempre las
+// totales, desde RENDIMIENTO_DIARIO_DESDE y con el fin de semana sumado al
+// lunes; los PDV fuera de cartera suman su volumen, igual que en 4e.
+
+export type BaselinePan = "mayJul" | "agoSep" | "julSep";
+
+export type CarteraBaseline = "completa" | "ajustada";
+
+/** Tramo de la Carga Radar que entra en los baselines de ago–sep. */
+const BASELINE_RADAR_DESDE = HPM_RADAR_DESDE;
+const BASELINE_RADAR_HASTA = "2026-09-30";
+/** Julio, el mes del reporte de 3 meses que se suma en "julSep". */
+const BASELINE_JULIO = "2026-07";
+
+export async function getRendimientoBaselinePan(
+  sector?: Sector
+): Promise<Record<CarteraBaseline, Record<BaselinePan, Record<SegmentoRecompra, Rendimiento3MResult>>>> {
+  const vacioSegmento = { foco: RENDIMIENTO_3M_VACIO, todos: RENDIMIENTO_3M_VACIO };
+  const vacioBaseline = { mayJul: vacioSegmento, agoSep: vacioSegmento, julSep: vacioSegmento };
+  const vacio = { completa: vacioBaseline, ajustada: vacioBaseline };
+
+  const delSector = (ls: Location[]) => (sector ? ls.filter((l) => sectorGroup(l.oficina_venta) === sector) : ls);
+  const universoTotal = await getUniverseLocations();
+  const vigentes = vigentesAl(delSector(universoTotal), todayISO());
+  if (vigentes.length === 0) return vacio;
+  const fueraDeCartera = vigentesAl(delSector(await getVolumenLocations()), todayISO()).filter((l) =>
+    esFueraDeCartera(l.cohorte)
+  );
+
+  const supabase = createSupabaseServiceClient();
+  const [pan3MData, panRadarData, panqData] = await Promise.all([
+    // Todas las filas del reporte de 3 meses, como en 4d.
+    fetchAllRows<{ sap_code: string; quantity_kg: number; date_of_sale: string }>(() =>
+      supabase
+        .from("radar_3m_ventas_dia")
+        .select("sap_code, quantity_kg, date_of_sale")
+        .eq("product_id", PRODUCT_IDS.HARINA_PAN)
+    ),
+    // Harina PAN de la Carga Radar desde el arranque; el tope del 30-09 se
+    // aplica abajo sobre la fecha pura (date_of_sale puede traer hora).
+    fetchAllRows<{ location_id: string; quantity_kg: number; date_of_sale: string }>(() =>
+      supabase
+        .from("sap_sell_in_records")
+        .select("location_id, quantity_kg, date_of_sale")
+        .eq("product_id", PRODUCT_IDS.HARINA_PAN)
+        .gte("date_of_sale", BASELINE_RADAR_DESDE)
+    ),
+    fetchAllRows<{ location_id: string; quantity_kg: number; date_of_sale: string }>(() =>
+      supabase
+        .from("sap_sell_in_records")
+        .select("location_id, quantity_kg, date_of_sale")
+        .eq("product_id", PRODUCT_IDS.PANQUECITAS)
+    ),
+  ]);
+
+  // Filas de PAN por cliente, con el cliente ya resuelto. El reporte de 3
+  // meses se resuelve por SAP_CODE contra la cartera de hoy, igual que en 4d.
+  type FilaPan = { locId: string; fecha: string; kg: number };
+  const locIdBySapCode = new Map(universoTotal.map((l) => [l.sap_code.trim(), l.id]));
+  const filas3M: FilaPan[] = [];
+  for (const r of pan3MData) {
+    const locId = locIdBySapCode.get(r.sap_code.trim());
+    if (locId) filas3M.push({ locId, fecha: r.date_of_sale.slice(0, 10), kg: Number(r.quantity_kg) });
+  }
+  const filasAgoSep: FilaPan[] = [];
+  for (const r of panRadarData) {
+    const fecha = r.date_of_sale.slice(0, 10);
+    if (fecha < BASELINE_RADAR_DESDE || fecha > BASELINE_RADAR_HASTA) continue;
+    filasAgoSep.push({ locId: r.location_id, fecha, kg: Number(r.quantity_kg) });
+  }
+
+  const diasAgoSep = contarDiasHabiles(BASELINE_RADAR_DESDE, BASELINE_RADAR_HASTA);
+  const diasJulio = contarDiasHabiles(`${BASELINE_JULIO}-01`, ultimoDiaDelMes(BASELINE_JULIO));
+  const baselines: Record<BaselinePan, { filas: FilaPan[]; dias: number }> = {
+    mayJul: { filas: filas3M, dias: DIAS_HABILES_3M },
+    agoSep: { filas: filasAgoSep, dias: diasAgoSep },
+    julSep: {
+      filas: [...filas3M.filter((r) => r.fecha.startsWith(BASELINE_JULIO)), ...filasAgoSep],
+      dias: diasJulio + diasAgoSep,
+    },
+  };
+
+  // Mismo cierre de rango que 4d, leído de TODO el piloto.
+  let ultimoDiaReportado = "";
+  for (const r of panqData) {
+    const fecha = r.date_of_sale.slice(0, 10);
+    if (fecha < RENDIMIENTO_DIARIO_DESDE) continue;
+    const dia = siguienteDiaHabil(fecha);
+    if (dia > ultimoDiaReportado) ultimoDiaReportado = dia;
+  }
+
+  type Cliente = (typeof vigentes)[number];
+  const esFoco = (l: Cliente) => !esSegmentoSinAlimentos(l.segmento_cliente);
+
+  const armar = (clientes: Cliente[], fuera: Cliente[], baseline: BaselinePan): Rendimiento3MResult => {
+    if (clientes.length === 0) return RENDIMIENTO_3M_VACIO;
+    const idsPan = new Set(clientes.map((l) => l.id));
+    const idsFuera = new Set(fuera.map((l) => l.id));
+    const { filas, dias } = baselines[baseline];
+
+    const filasPan = filas.filter((r) => idsPan.has(r.locId));
+    if (filasPan.length === 0) return RENDIMIENTO_3M_VACIO;
+    const totalPanKg = filasPan.reduce((s, r) => s + r.kg, 0);
+    const promedio = totalPanKg / dias;
+    if (promedio <= 0) return RENDIMIENTO_3M_VACIO;
+
+    const kgPorDia = new Map<string, number>();
+    let fueraKg = 0;
+    for (const r of panqData) {
+      const deFuera = idsFuera.has(r.location_id);
+      if (!deFuera && !idsPan.has(r.location_id)) continue;
+      const fecha = r.date_of_sale.slice(0, 10);
+      if (fecha < RENDIMIENTO_DIARIO_DESDE) continue;
+      const dia = siguienteDiaHabil(fecha);
+      kgPorDia.set(dia, (kgPorDia.get(dia) ?? 0) + Number(r.quantity_kg));
+      if (deFuera) fueraKg += Number(r.quantity_kg);
+    }
+
+    const fechasPan = filasPan.map((r) => r.fecha).sort();
+    const puntos: Rendimiento3MPunto[] = diasHabilesEntre(RENDIMIENTO_DIARIO_DESDE, ultimoDiaReportado).map((dia) => {
+      const kg = kgPorDia.get(dia) ?? 0;
+      return {
+        dia,
+        label: bucketLabelFor(dia, "day"),
+        panquecitasKg: Math.round(kg * 10) / 10,
+        ratioPct: Math.round((kg / promedio) * 100 * 10) / 10,
+      };
+    });
+
+    return {
+      promedio3M: Math.round(promedio * 10) / 10,
+      meta4Pct: Math.round(promedio * 0.04 * 10) / 10,
+      diasPeriodo: dias,
+      // El rango que de verdad trajeron los datos, para poder auditarlo.
+      desde: fechasPan[0],
+      hasta: fechasPan[fechasPan.length - 1],
+      totalPanKg: Math.round(totalPanKg * 10) / 10,
+      clientesPan: new Set(filasPan.map((r) => r.locId)).size,
+      clientesPoblacion: idsPan.size,
+      panquecitasFueraKg: Math.round(fueraKg * 10) / 10,
+      puntos,
+    };
+  };
+
+  const porBaseline = (
+    clientes: Cliente[],
+    fuera: Cliente[]
+  ): Record<BaselinePan, Record<SegmentoRecompra, Rendimiento3MResult>> => {
+    const porSegmento = (b: BaselinePan) => ({
+      foco: armar(clientes.filter(esFoco), fuera.filter(esFoco), b),
+      todos: armar(clientes, fuera, b),
+    });
+    return { mayJul: porSegmento("mayJul"), agoSep: porSegmento("agoSep"), julSep: porSegmento("julSep") };
+  };
+
+  return {
+    completa: porBaseline(vigentes, fueraDeCartera),
+    ajustada: porBaseline(sinAmpliacionFranquiciados(vigentes, true), fueraDeCartera),
+  };
+}
 // ── 5. Cobertura y Comunicación por sector (semanal) ───────────────
 // Ver decisión #11: no hay datos reales de campañas de comunicación ni
 // metas por ciudad, así que se usa un proxy con datos existentes.
