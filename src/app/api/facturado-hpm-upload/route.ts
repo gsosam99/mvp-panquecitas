@@ -23,9 +23,21 @@ type FilaFacturadoHpm = {
   cantidad_facturada_kg: number;
 };
 
-/** Materiales de Harina PAN: los mismos que cuenta la Carga Radar (H187, H439). */
+/**
+ * Código de material sin el prefijo "CR/": este reporte trae "CR/H187" y el
+ * Radar "H187" (ver SAP_RADAR_MATERIAL_PRODUCT_MAP). Se guarda así, sin prefijo.
+ */
+function materialSinPrefijo(materialCode: string): string {
+  return materialCode.trim().replace(/^CR\//i, "");
+}
+
+/**
+ * Materiales de Harina PAN: los mismos que cuenta la Carga Radar (H187, H439),
+ * para que el ratio facturado sea comparable con el de Radar. El reporte trae
+ * más (H188 amarillo, H173 mezcla con arroz, H098 integral…): se ignoran.
+ */
 function esHarinaPan(materialCode: string): boolean {
-  return SAP_RADAR_MATERIAL_PRODUCT_MAP[materialCode.trim()] === PRODUCT_IDS.HARINA_PAN;
+  return SAP_RADAR_MATERIAL_PRODUCT_MAP[materialSinPrefijo(materialCode)] === PRODUCT_IDS.HARINA_PAN;
 }
 
 function errorDetail(error: unknown): string {
@@ -96,7 +108,7 @@ export async function POST(req: Request) {
     for (const r of filasPan) {
       const sap_code = r.sap_code.trim();
       if (!conocidos.has(sap_code)) continue;
-      const material_code = r.material_code.trim();
+      const material_code = materialSinPrefijo(r.material_code);
       const fecha = r.fecha.slice(0, 10);
       const clave = `${sap_code}|${material_code}|${fecha}`;
       const previa = porDia.get(clave);
