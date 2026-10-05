@@ -7,7 +7,14 @@ import {
   SECTOR_LABELS,
   type Sector,
 } from "@/lib/universe";
-import { DIAS_HABILES_3M, contarDiasHabiles, diasHabilesEntre, siguienteDiaHabil } from "@/lib/business-days";
+import {
+  DIAS_HABILES_3M,
+  PERIODO_3M_DESDE,
+  PERIODO_3M_HASTA,
+  contarDiasHabiles,
+  diasHabilesEntre,
+  siguienteDiaHabil,
+} from "@/lib/business-days";
 import { COMBINACIONES, combinacionDeGrupo, nombreCombinacion } from "@/lib/combinaciones";
 import { COHORTES, cohortePorNombre, sinAmpliacionFranquiciados } from "@/lib/cohortes";
 import { esSegmentoSinAlimentos } from "@/lib/segmentos";
@@ -528,7 +535,12 @@ async function cargarDatosCombinaciones(): Promise<DatosCombinaciones> {
     // de los kilos e inflaba el ratio. Desde el 05-10-2026 los gráficos de
     // ratio 3M (getRendimiento3M) leen igual.
     fetchAllRows<{ sap_code: string; quantity_kg: number }>(() =>
-      supabase.from("radar_3m_ventas_dia").select("sap_code, quantity_kg").eq("product_id", PRODUCT_IDS.HARINA_PAN)
+      supabase
+        .from("radar_3m_ventas_dia")
+        .select("sap_code, quantity_kg")
+        .eq("product_id", PRODUCT_IDS.HARINA_PAN)
+        .gte("date_of_sale", PERIODO_3M_DESDE)
+        .lte("date_of_sale", PERIODO_3M_HASTA)
     ),
     fetchAllRows<{ location_id: string; quantity_kg: number; date_of_sale: string }>(() =>
       supabase
@@ -870,7 +882,12 @@ export async function getVentaDiariaPorSegmento(): Promise<VentaPorSegmentoResul
     // lectura que getRendimiento3M. Guarda por sap_code y no por location_id:
     // se resuelve contra la cartera igual que allá.
     fetchAllRows<{ sap_code: string; quantity_kg: number }>(() =>
-      supabase.from("radar_3m_ventas_dia").select("sap_code, quantity_kg").eq("product_id", PRODUCT_IDS.HARINA_PAN)
+      supabase
+        .from("radar_3m_ventas_dia")
+        .select("sap_code, quantity_kg")
+        .eq("product_id", PRODUCT_IDS.HARINA_PAN)
+        .gte("date_of_sale", PERIODO_3M_DESDE)
+        .lte("date_of_sale", PERIODO_3M_HASTA)
     ),
     fetchAllRows<{ location_id: string; quantity_kg: number; date_of_sale: string }>(() =>
       supabase

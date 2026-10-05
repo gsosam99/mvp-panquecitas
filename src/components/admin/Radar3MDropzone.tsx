@@ -10,7 +10,8 @@ import type { ParsedSapRadarRow, ParseError } from "@/types";
 // Carga del reporte "Radar últimos 3 Meses" (Harina PAN mayo–julio).
 // Mismo formato y mismo parser que la Carga Radar, pero va a su propia tabla
 // (radar_3m_records) y solo alimenta el gráfico de rendimiento diario de DIENN.
-// Cada carga REEMPLAZA la anterior: el reporte se exporta completo.
+// Cada carga reemplaza SOLO los meses que trae el archivo: el período se puede
+// subir en varios archivos.
 
 type UploadState = "idle" | "parsing" | "previewing" | "uploading" | "done";
 
@@ -90,6 +91,8 @@ export function Radar3MDropzone() {
     setState("uploading");
     const batchId = crypto.randomUUID();
     const tandas = partirPorCliente(rows);
+    // Los meses de TODO el archivo: el servidor reemplaza solo esos.
+    const mesesArchivo = [...new Set(rows.map((r) => r.fecha.slice(0, 7)))].sort();
 
     type Resultado = {
       inserted?: number;
@@ -134,7 +137,7 @@ export function Radar3MDropzone() {
         const res = await fetch("/api/radar-3m-upload", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ rows: tandas[i], batchId, finalizar: esUltima }),
+          body: JSON.stringify({ rows: tandas[i], batchId, finalizar: esUltima, meses: mesesArchivo }),
         });
         const parcial = (await res.json()) as Resultado;
         if (!res.ok) {
@@ -284,8 +287,9 @@ export function Radar3MDropzone() {
         </div>
         <Alert>
           <AlertDescription>
-            Esta carga <span className="font-medium">reemplaza por completo</span> el reporte de 3 meses anterior. No
-            toca la Carga Radar del piloto.
+            Esta carga <span className="font-medium">reemplaza solo los meses que trae el archivo</span> (
+            {meses.join(", ")}); los otros meses ya cargados se quedan, así que puedes subir el período en varios
+            archivos. Los promedios usan solo mayo–julio. No toca la Carga Radar del piloto.
           </AlertDescription>
         </Alert>
         {errors.length > 0 && (

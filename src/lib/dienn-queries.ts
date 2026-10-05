@@ -5,6 +5,8 @@ import { PVP_TARGETS, PVP_TOLERANCE } from "@/data/pvp-thresholds";
 import {
   DIAS_HABILES_POR_SEMANA,
   DIAS_HABILES_3M,
+  PERIODO_3M_DESDE,
+  PERIODO_3M_HASTA,
   contarDiasHabiles,
   diasHabilesEntre,
   siguienteDiaHabil,
@@ -1241,6 +1243,8 @@ export async function getRendimiento3M(
       .from("radar_3m_ventas_dia")
       .select("sap_code, quantity_kg, date_of_sale")
       .eq("product_id", PRODUCT_IDS.HARINA_PAN)
+      .gte("date_of_sale", PERIODO_3M_DESDE)
+      .lte("date_of_sale", PERIODO_3M_HASTA)
   );
   if (pan3m.length === 0) return RENDIMIENTO_3M_VACIO;
 
@@ -1451,6 +1455,8 @@ export async function getRendimiento3MFocoRecompra(
       .from("radar_3m_ventas_dia")
       .select("sap_code, quantity_kg, date_of_sale")
       .eq("product_id", PRODUCT_IDS.HARINA_PAN)
+      .gte("date_of_sale", PERIODO_3M_DESDE)
+      .lte("date_of_sale", PERIODO_3M_HASTA)
   );
   if (panDias.length === 0) return vacio;
 
@@ -1837,6 +1843,8 @@ export async function getRendimientoBaselinePan(sector?: Sector): Promise<Rendim
         .from("radar_3m_ventas_dia")
         .select("sap_code, quantity_kg, date_of_sale")
         .eq("product_id", PRODUCT_IDS.HARINA_PAN)
+        .gte("date_of_sale", PERIODO_3M_DESDE)
+        .lte("date_of_sale", PERIODO_3M_HASTA)
     ),
     // Carga Radar de los dos productos. Harina PAN solo cuenta desde el
     // arranque (HPM_RADAR_DESDE): se filtra abajo con esHpmVigente.

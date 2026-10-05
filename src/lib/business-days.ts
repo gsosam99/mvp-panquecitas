@@ -87,3 +87,12 @@ export function siguienteDiaHabil(dia: string): string {
  * promedios no eran comparables entre sí. Un solo divisor para las tres.
  */
 export const DIAS_HABILES_3M = 63;
+
+/**
+ * El período que cubre ese divisor. Los promedios de Harina PAN de 3 meses
+ * leen SOLO estas fechas de radar_3m_ventas_dia: desde el 05-10-2026 la carga
+ * "Radar 3 Meses" reemplaza solo los meses de cada archivo (se puede subir en
+ * varios), así que la tabla ya no garantiza por sí sola cubrir mayo–julio.
+ */
+export const PERIODO_3M_DESDE = "2026-05-01";
+export const PERIODO_3M_HASTA = "2026-07-31";

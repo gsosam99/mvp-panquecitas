@@ -15,10 +15,39 @@ import type { ParsedSapRadarRow } from "@/types";
 // reciente de cada mes — mismo criterio que handleRadarUpload. Sumar los meses
 // da el total del período.
 //
-// Cada carga REEMPLAZA la anterior: el reporte se exporta completo.
+// Cada carga reemplaza SOLO los meses que trae su archivo (05-10-2026): así el
+// período se puede subir en varios archivos sin que el segundo borre al
+// primero. Los promedios leen solo mayo–julio (PERIODO_3M en business-days).
 
 function monthKey(dateStr: string): string {
   return dateStr.slice(0, 7);
+}
+
+/**
+ * Borra de `tabla` lo de cargas anteriores en los meses de este archivo. Lo de
+ * esta carga (batchId) se queda; los otros meses no se tocan.
+ */
+async function borrarMesesDeCargasAnteriores(
+  supabase: ReturnType<typeof createSupabaseServiceClient>,
+  tabla: "radar_3m_records" | "radar_3m_ventas_dia",
+  meses: string[],
+  batchId: string
+): Promise<number> {
+  let borradas = 0;
+  for (const mes of meses) {
+    const [anio, mm] = mes.split("-").map(Number);
+    const hasta = new Date(Date.UTC(anio, mm, 0)).toISOString().slice(0, 10);
+    const { data, error } = await supabase
+      .from(tabla)
+      .delete()
+      .gte("date_of_sale", `${mes}-01`)
+      .lte("date_of_sale", hasta)
+      .or(`upload_batch_id.is.null,upload_batch_id.neq.${batchId}`)
+      .select("id");
+    if (error) throw error;
+    borradas += (data ?? []).length;
+  }
+  return borradas;
 }
 
 function errorDetail(error: unknown): string {
@@ -38,11 +67,18 @@ export async function POST(req: Request) {
       batchId?: string;
       /** `false` mientras queden tandas: el borrado de lo viejo corre una sola vez, en la ultima. */
       finalizar?: boolean;
+      /** Todos los meses ("YYYY-MM") del ARCHIVO, no solo los de esta tanda: lo que se reemplaza. */
+      meses?: string[];
     };
     const { rows, batchId, finalizar = true } = body;
     if (!rows?.length || !batchId) {
       return Response.json({ error: "Datos inválidos" }, { status: 400 });
     }
+    // Sin `meses` (un navegador con la versión anterior en caché, una sola
+    // tanda) se toman los de las filas recibidas.
+    const mesesArchivo = [...new Set(body.meses?.length ? body.meses : rows.map((r) => monthKey(r.fecha)))].filter(
+      (m) => /^\d{4}-\d{2}$/.test(m)
+    );
 
     // Se resuelve el cliente contra la cartera solo para poder marcar
     // location_id (lo usa el filtro "PAN Cliente"). Los que no calzan igual se
@@ -172,13 +208,7 @@ export async function POST(req: Request) {
     // siguiente todavia no reinserto. Mismo criterio que la carga de Mavesa.
     let reemplazadas = 0;
     if (finalizar) {
-      const { data: borradas, error: staleError } = await supabase
-        .from("radar_3m_records")
-        .delete()
-        .or(`upload_batch_id.is.null,upload_batch_id.neq.${batchId}`)
-        .select("id");
-      if (staleError) throw staleError;
-      reemplazadas = (borradas ?? []).length;
+      reemplazadas = await borrarMesesDeCargasAnteriores(supabase, "radar_3m_records", mesesArchivo, batchId);
     }
 
     // ── Ventas por DÍA → radar_3m_ventas_dia (migration 024) ──
@@ -240,11 +270,7 @@ export async function POST(req: Request) {
       }
       // Igual que arriba: el borrado de la carga anterior solo en la última tanda.
       if (finalizar) {
-        const { error: staleDiaError } = await supabase
-          .from("radar_3m_ventas_dia")
-          .delete()
-          .or(`upload_batch_id.is.null,upload_batch_id.neq.${batchId}`);
-        if (staleDiaError) throw staleDiaError;
+        await borrarMesesDeCargasAnteriores(supabase, "radar_3m_ventas_dia", mesesArchivo, batchId);
       }
       ventasDiaGuardadas = filasDia.length;
     } catch (diaErr) {
