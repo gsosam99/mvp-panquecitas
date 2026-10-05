@@ -99,13 +99,39 @@ export const COHORTES_NUEVAS: readonly Cohorte[] = [
  */
 export const COHORTE_AMPLIACION_FRANQUICIADOS_CUMANA = "Indirecto Cumaná 2";
 
-/** Recorta la tanda de la ampliación de franquiciados de Cumaná, si `excluir`. */
-export function sinAmpliacionFranquiciados<T extends { cohorte?: string | null }>(
+/**
+ * 38 clientes que ya eran cartera de Cumaná (U29/U30, modelo Mixto) y que la
+ * ampliación del 08-09-2026 pasó a los 7 franquiciados: están en la lista de
+ * los 975 ("Clientes CUMANA Nuevos", con su franquiciada en FQ_COD/RS_FQ),
+ * pero su cohorte en `locations` es la vieja. Cuentan como parte de la
+ * ampliación al excluirla, igual que en el Excel de validación de DIENN
+ * (decisión del usuario, 05-10-2026).
+ */
+export const CLIENTES_PREVIOS_AMPLIACION_CUMANA: readonly string[] = [
+  "103336", "103537", "103969", "238112", "238981", "239056", "271213", "272763",
+  "272815", "360949", "361347", "402258", "436952", "462585", "474676", "658478",
+  "658568", "686779", "770342", "780278", "795271", "8396898", "8397137", "8416315",
+  "843312", "843444", "885779", "895908", "896765", "903857", "907085", "907088",
+  "915647", "915678", "920281", "920304", "931068", "931072",
+];
+
+const CLIENTES_PREVIOS_AMPLIACION_CUMANA_SET = new Set(CLIENTES_PREVIOS_AMPLIACION_CUMANA);
+
+/** ¿El cliente es parte de la ampliación de franquiciados de Cumaná (tanda o uno de los 38)? */
+export function esAmpliacionFranquiciados(item: { cohorte?: string | null; sap_code?: string | null }): boolean {
+  return (
+    (item.cohorte ?? "").trim() === COHORTE_AMPLIACION_FRANQUICIADOS_CUMANA ||
+    CLIENTES_PREVIOS_AMPLIACION_CUMANA_SET.has((item.sap_code ?? "").trim())
+  );
+}
+
+/** Recorta la ampliación de franquiciados de Cumaná (tanda + los 38), si `excluir`. */
+export function sinAmpliacionFranquiciados<T extends { cohorte?: string | null; sap_code?: string | null }>(
   items: readonly T[],
   excluir: boolean
 ): T[] {
   if (!excluir) return [...items];
-  return items.filter((i) => (i.cohorte ?? "").trim() !== COHORTE_AMPLIACION_FRANQUICIADOS_CUMANA);
+  return items.filter((i) => !esAmpliacionFranquiciados(i));
 }
 
 /** Todas las tandas, en orden — alimenta el filtro de cohorte del dashboard. */

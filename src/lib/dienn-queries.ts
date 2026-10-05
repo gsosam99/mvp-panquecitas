@@ -34,7 +34,7 @@ import {
   type TimeGranularity,
 } from "@/lib/date-buckets";
 import {
-  COHORTE_AMPLIACION_FRANQUICIADOS_CUMANA,
+  esAmpliacionFranquiciados,
   estabaIncorporado,
   sinAmpliacionFranquiciados,
   vigentesAl,
@@ -1995,8 +1995,7 @@ export async function getRendimientoBaselinePan(sector?: Sector): Promise<Rendim
         .filter(
           (l) =>
             c === "completa" ||
-            (!franquiciadasCumana2.has((l.sap_code ?? "").trim()) &&
-              (l.cohorte ?? "").trim() !== COHORTE_AMPLIACION_FRANQUICIADOS_CUMANA)
+            (!franquiciadasCumana2.has((l.sap_code ?? "").trim()) && !esAmpliacionFranquiciados(l))
         )
         .map((l) => l.id)
     );

@@ -513,7 +513,7 @@ export function DiennDashboardClient({
   const botonSinAmpliacion = (
     <button
       onClick={() => setSinAmpliacion((v) => !v)}
-      title="Recalcula los ratios sin los ~975 PDV de los franquiciados de Cumaná incorporados el 08-09 (tanda Indirecto Cumaná 2)"
+      title="Recalcula los ratios sin los ~975 PDV de los franquiciados de Cumaná incorporados el 08-09 (tanda Indirecto Cumaná 2), más 38 clientes previos de Cumaná que pasaron a esos franquiciados"
       className={`px-3 py-1.5 rounded-lg border text-xs font-medium transition-colors ${
         sinAmpliacion
           ? "border-rose-700 bg-rose-700 text-white"
@@ -1502,7 +1502,7 @@ export function DiennDashboardClient({
               hábiles); <span className="font-medium">Ago–Sep</span>, Radar de agosto y septiembre (÷ 42);{" "}
               <span className="font-medium">Jul–Sep</span>, julio más agosto–septiembre (÷ 65). La Harina PAN de Radar sale de los reportes del menú Radar 3 Meses.
               Cada promedio se divide entre los días hábiles de su rango. <span className="font-medium">Ajustada</span>{" "}
-              quita de los dos lados la ampliación de los 7 franquiciados de Cumaná (~975 PDV, 08-09).{" "}
+              quita de los dos lados la ampliación de los 7 franquiciados de Cumaná (~975 PDV, 08-09, incluidos 38 clientes previos que pasaron a ellos).{" "}
               <span className="font-medium">Solo foco</span> deja solo los segmentos foco, tanto en Panquecitas como en
               el promedio de PAN. La línea continua es el promedio y la punteada su 4%; el porcentaje sobre cada punto
               es el ratio del día. <span className="font-medium">Facturado</span> hace lo mismo con el reporte Pedidos y
@@ -1569,7 +1569,7 @@ export function DiennDashboardClient({
                   onClick={() => setCarteraBaseline(key)}
                   title={
                     key === "ajustada"
-                      ? "Sin los ~975 PDV de los 7 franquiciados de Cumaná incorporados el 08-09 (tanda Indirecto Cumaná 2)"
+                      ? "Sin los ~975 PDV de los 7 franquiciados de Cumaná incorporados el 08-09 (tanda Indirecto Cumaná 2), más 38 clientes previos de Cumaná que pasaron a esos franquiciados"
                       : "Toda la cartera vigente"
                   }
                   className={`px-3 py-1.5 transition-colors ${
