@@ -1680,7 +1680,7 @@ export function DiennDashboardClient({
                         ratioAcumuladoBaseline.pct >= 4 ? "text-emerald-700" : "text-slate-900"
                       }`}
                     >
-                      {ratioAcumuladoBaseline.pct.toLocaleString("es-VE", { maximumFractionDigits: 1 })}%
+                      {ratioAcumuladoBaseline.pct.toLocaleString("es-VE", { maximumFractionDigits: 0 })}%
                       <span className="text-sm font-medium text-slate-500"> · meta 4%</span>
                     </p>
                   </div>
@@ -1754,7 +1754,18 @@ export function DiennDashboardClient({
                   </p>
                   <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">
                     {tarjetasBaseline[b].map((t: TarjetaTramo) => (
-                      <div key={t.label} className="rounded-lg border border-slate-200 bg-white px-4 py-3">
+                      <div
+                        key={t.label}
+                        className="rounded-lg border border-slate-200 bg-white px-4 py-3"
+                        // Los ratios se muestran redondeados a entero; el valor exacto, al pasar el mouse.
+                        title={`Ratio del tramo: ${
+                          t.ratioPct != null ? `${t.ratioPct.toLocaleString("es-VE", { maximumFractionDigits: 1 })}%` : "—"
+                        } · Acumulado: ${
+                          t.ratioAcumPct != null
+                            ? `${t.ratioAcumPct.toLocaleString("es-VE", { maximumFractionDigits: 1 })}%`
+                            : "—"
+                        }`}
+                      >
                         <p className="text-xs text-slate-500">
                           {t.label}{" "}
                           <span className="text-slate-400">
@@ -1767,7 +1778,7 @@ export function DiennDashboardClient({
                           }`}
                         >
                           {t.ratioPct != null
-                            ? `${t.ratioPct.toLocaleString("es-VE", { maximumFractionDigits: 1 })}%`
+                            ? `${t.ratioPct.toLocaleString("es-VE", { maximumFractionDigits: 0 })}%`
                             : "Sin PAN"}
                         </p>
                         <p className="text-xs text-slate-500">
@@ -1780,7 +1791,7 @@ export function DiennDashboardClient({
                           Acumulado al {t.hasta.slice(8, 10)}/{t.hasta.slice(5, 7)}:{" "}
                           <span className="font-semibold text-slate-700">
                             {t.ratioAcumPct != null
-                              ? `${t.ratioAcumPct.toLocaleString("es-VE", { maximumFractionDigits: 1 })}%`
+                              ? `${t.ratioAcumPct.toLocaleString("es-VE", { maximumFractionDigits: 0 })}%`
                               : "—"}
                           </span>
                         </p>
