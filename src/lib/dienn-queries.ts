@@ -1123,7 +1123,8 @@ export async function getVentaRecompraActivacion(
 // ── 4d. Rendimiento diario vs. promedio histórico 3 Meses (punto 1) ─
 // Compara la venta diaria de Panquecitas (Carga Radar) contra el promedio de
 // ventas diarias de Harina PAN de los últimos 3 meses, que viene de la carga
-// aparte "Radar últimos 3 Meses" (radar_3m_records, migration 017).
+// aparte "Radar últimos 3 Meses" (todas sus filas, radar_3m_ventas_dia,
+// migration 024).
 //
 // Dos referencias FIJAS (no varían día a día, por eso son líneas rectas):
 //   - promedio3M: total de Harina PAN del reporte ÷ días que cubre el reporte.
@@ -1219,9 +1220,16 @@ export async function getRendimiento3M(
   // src/lib/supabase/fetch-all.ts.
   //
   // Se lee `sap_code` en vez de `location_id`: ver la resolución más abajo.
+  //
+  // De radar_3m_ventas_dia (TODAS las filas del archivo, una por día) y no de
+  // radar_3m_records (último corte de cada mes). En el reporte cada fila es el
+  // despacho de ese día, no un acumulado: quedarse con el último corte del mes
+  // perdía la mayor parte de los kilos e inflaba el ratio (DIENN, 05-10-2026:
+  // "que lea todas las filas"). Misma lectura que la tabla de combinaciones de
+  // mavesa-queries desde el 17-09-2026.
   const pan3m = await fetchAllRows<{ sap_code: string; quantity_kg: number; date_of_sale: string }>(() =>
     supabase
-      .from("radar_3m_records")
+      .from("radar_3m_ventas_dia")
       .select("sap_code, quantity_kg, date_of_sale")
       .eq("product_id", PRODUCT_IDS.HARINA_PAN)
   );
@@ -1374,9 +1382,10 @@ export async function getRendimiento3M(
 //     excluye su PRIMERA compra (su primera fecha con kg > 0 en todo su
 //     histórico) y se cuenta desde la segunda. Desde RENDIMIENTO_DIARIO_DESDE y
 //     con el fin de semana sumado al lunes.
-//   - Promedio de PAN: criterio ORIGINAL de 4d —radar_3m_records, último corte
-//     de cada mes— ÷ DIAS_HABILES_3M (DIENN lo verificó a mano: sumar las filas
-//     diarias daba una magnitud ~1,9x mayor). Tres bases (BasePan):
+//   - Promedio de PAN: mismo criterio que 4d —la suma de TODAS las filas del
+//     reporte de 3 meses (radar_3m_ventas_dia)— ÷ DIAS_HABILES_3M. Hasta el
+//     05-10-2026 se usaba el último corte de cada mes (radar_3m_records), que
+//     se quedaba con una parte de los kilos. Tres bases (BasePan):
 //       · "cartera": el PAN de todos los clientes del corte, como siempre.
 //       · "recompraPan": solo los clientes con Harina PAN en ≥2 fechas
 //         distintas del reporte de 3 meses (fechas de radar_3m_ventas_dia).
@@ -1425,30 +1434,16 @@ export async function getRendimiento3MFocoRecompra(
 
   const supabase = createSupabaseServiceClient();
 
-  // Harina PAN de 3 meses: la MISMA lectura que getRendimiento3M (último corte
-  // de cada mes, que es lo que guarda radar_3m_records).
-  const pan3m = await fetchAllRows<{ sap_code: string; quantity_kg: number; date_of_sale: string }>(() =>
+  // Harina PAN de 3 meses: la MISMA lectura que getRendimiento3M, TODAS las
+  // filas del reporte (radar_3m_ventas_dia). De acá salen los kg del promedio
+  // y también las fechas para saber quién recompró PAN.
+  const panDias = await fetchAllRows<{ sap_code: string; quantity_kg: number; date_of_sale: string }>(() =>
     supabase
-      .from("radar_3m_records")
+      .from("radar_3m_ventas_dia")
       .select("sap_code, quantity_kg, date_of_sale")
       .eq("product_id", PRODUCT_IDS.HARINA_PAN)
   );
-  if (pan3m.length === 0) return vacio;
-
-  // Fechas de compra de Harina PAN por día, SOLO para saber quién recompró PAN
-  // (los kg siguen saliendo de radar_3m_records). Si la tabla no está, la base
-  // "recompraPan" queda vacía en vez de romper la página.
-  let panDias: { sap_code: string; quantity_kg: number; date_of_sale: string }[] = [];
-  try {
-    panDias = await fetchAllRows<{ sap_code: string; quantity_kg: number; date_of_sale: string }>(() =>
-      supabase
-        .from("radar_3m_ventas_dia")
-        .select("sap_code, quantity_kg, date_of_sale")
-        .eq("product_id", PRODUCT_IDS.HARINA_PAN)
-    );
-  } catch (error) {
-    console.error("[getRendimiento3MFocoRecompra] radar_3m_ventas_dia no disponible:", error);
-  }
+  if (panDias.length === 0) return vacio;
 
   const panqData = await fetchAllRows<{ location_id: string; quantity_kg: number; date_of_sale: string }>(() =>
     supabase
@@ -1489,7 +1484,7 @@ export async function getRendimiento3MFocoRecompra(
   const recompraPanquecitas = (l: Cliente) => (fechasCompraPanq.get(l.id)?.size ?? 0) >= 2;
   const recompraPan = (l: Cliente) => (fechasCompraPan.get(l.id)?.size ?? 0) >= 2;
 
-  const panPorCliente = pan3m
+  const panPorCliente = panDias
     .map((r) => ({
       locId: locIdBySapCode.get(r.sap_code.trim()),
       fecha: r.date_of_sale.slice(0, 10),

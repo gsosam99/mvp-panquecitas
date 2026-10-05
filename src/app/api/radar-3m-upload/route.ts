@@ -206,12 +206,20 @@ export async function POST(req: Request) {
       >();
       for (const r of rows) {
         const product_id = SAP_RADAR_MATERIAL_PRODUCT_MAP[r.material_code];
-        // Se guardan TODAS las filas, también las de cero: el gráfico lee el
-        // documento igual que radar_3m_records (último corte del mes) y un corte
-        // en cero cambia cuál es el último.
+        // Se guardan TODAS las filas, también las de cero (sirven para auditar).
+        // Los promedios de PAN 3M suman estas filas (getRendimiento3M), así que
+        // una fila repetida del mismo cliente+material+día se SUMA en vez de
+        // pisar a la anterior. Las tandas parten por cliente, así que todas
+        // sus filas llegan en el mismo POST.
         if (!product_id) continue;
         const sap_code = r.sap_code.trim();
-        porDia.set(`${sap_code}|${r.material_code}|${r.fecha}`, {
+        const clave = `${sap_code}|${r.material_code}|${r.fecha}`;
+        const previa = porDia.get(clave);
+        if (previa) {
+          previa.quantity_kg += r.quantity_kg;
+          continue;
+        }
+        porDia.set(clave, {
           sap_code,
           material_code: r.material_code,
           product_id,

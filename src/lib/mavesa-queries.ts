@@ -311,8 +311,8 @@ export interface Ventas3MesesRow {
  * (quien no compró aporta 0 de todas formas), el total es uno solo por
  * ciudad — no hace falta el toggle Cliente/Universo acá.
  *
- * Harina PAN reusa getRendimiento3M("universo", sector) (misma tabla
- * radar_3m_records) en vez de reimplementar la suma.
+ * Harina PAN reusa getRendimiento3M("universo", sector) (todas las filas de
+ * radar_3m_ventas_dia) en vez de reimplementar la suma.
  *
  * Las barras son el ACUMULADO de los 3 meses en kg, para comparar una
  * categoría contra otra (decisión del usuario, 26-08-2026). NO se divide
@@ -525,8 +525,8 @@ async function cargarDatosCombinaciones(): Promise<DatosCombinaciones> {
     // no el último corte del mes de radar_3m_records (DIENN, 17-09-2026). En el
     // archivo cada fila es el despacho de ese día —el valor baja de una fecha a
     // otra dentro del mismo mes—, así que el último corte se quedaba con ~40%
-    // de los kilos e inflaba el ratio. Solo esta tabla: los gráficos de ratio
-    // 3M siguen con su propia lectura.
+    // de los kilos e inflaba el ratio. Desde el 05-10-2026 los gráficos de
+    // ratio 3M (getRendimiento3M) leen igual.
     fetchAllRows<{ sap_code: string; quantity_kg: number }>(() =>
       supabase.from("radar_3m_ventas_dia").select("sap_code, quantity_kg").eq("product_id", PRODUCT_IDS.HARINA_PAN)
     ),
@@ -866,10 +866,11 @@ export async function getVentaDiariaPorSegmento(): Promise<VentaPorSegmentoResul
         .select("location_id, quantity_kg")
         .eq("product_id", PRODUCT_IDS.MAYONESA)
     ),
-    // Harina PAN sale de radar_3m_records, que guarda por sap_code y no por
-    // location_id: se resuelve contra la cartera igual que en getRendimiento3M.
+    // Harina PAN = todas las filas del Radar 3M (radar_3m_ventas_dia), misma
+    // lectura que getRendimiento3M. Guarda por sap_code y no por location_id:
+    // se resuelve contra la cartera igual que allá.
     fetchAllRows<{ sap_code: string; quantity_kg: number }>(() =>
-      supabase.from("radar_3m_records").select("sap_code, quantity_kg").eq("product_id", PRODUCT_IDS.HARINA_PAN)
+      supabase.from("radar_3m_ventas_dia").select("sap_code, quantity_kg").eq("product_id", PRODUCT_IDS.HARINA_PAN)
     ),
     fetchAllRows<{ location_id: string; quantity_kg: number; date_of_sale: string }>(() =>
       supabase

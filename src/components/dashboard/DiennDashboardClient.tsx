@@ -1010,6 +1010,17 @@ export function DiennDashboardClient({
     return Math.round((suma / puntos.length) * 10) / 10;
   }, [bundle]);
 
+  // El mismo ratio con el cálculo ORIGINAL (el gráfico que se quitó el
+  // 15-09-2026), para compararlo contra el de arriba: toda la venta de
+  // Panquecitas ÷ promedio PAN 3M de toda la cartera, sin filtro de segmento ni
+  // de recompra (getRendimiento3M "universo").
+  const ratioAcum3MOriginalTarjeta = useMemo(() => {
+    const puntos = bundle.rendimiento3M.universo.puntos;
+    if (puntos.length === 0) return null;
+    const suma = puntos.reduce((s, p) => s + p.ratioPct, 0);
+    return Math.round((suma / puntos.length) * 10) / 10;
+  }, [bundle]);
+
   const filtroTexto = filter === "TOTAL" ? "Total sectores piloto" : sectorLabels[filter];
 
   // Activación ajustada: siempre el Total y las dos ciudades, sin depender de
@@ -1082,11 +1093,16 @@ export function DiennDashboardClient({
           value={`${bundle.volumenRadarAcumulado.panquecitasTon.toLocaleString("es-VE", { maximumFractionDigits: 2 })} Ton`}
           annotation={[
             `Activación de cliente ${bundle.penetracionRadarVsHpm.radarPanquecitasPct}%`,
-            `Proporción vs Harina PAN ${proporcionPanqVsHpm}%`,
+            // Harina PAN del Radar del piloto (desde el 03-08: agosto-septiembre).
+            `Proporción vs Harina PAN del piloto (Radar desde 03-08) ${proporcionPanqVsHpm}%`,
             // Segunda referencia: el mismo ratio pero contra el promedio de PAN
             // de los últimos 3 meses (carga "Radar últimos 3 Meses").
             ...(ratioAcum3MTarjeta != null
               ? [`Ratio acum. vs promedio PAN 3M (foco con recompra) ${ratioAcum3MTarjeta.toLocaleString("es-VE", { maximumFractionDigits: 1 })}%`]
+              : []),
+            // Tercera: el ratio 3M con el cálculo original (toda la cartera).
+            ...(ratioAcum3MOriginalTarjeta != null
+              ? [`Ratio acum. vs promedio PAN 3M original (toda la cartera) ${ratioAcum3MOriginalTarjeta.toLocaleString("es-VE", { maximumFractionDigits: 1 })}%`]
               : []),
             `Volumen facturado ${bundle.totalFacturadoToneladas.toLocaleString("es-VE", { maximumFractionDigits: 2 })} Ton`,
             // Este total es el único que suma PDV fuera de la cartera. Se
@@ -1128,8 +1144,8 @@ export function DiennDashboardClient({
               Venta diaria de Panquecitas (<span className="font-medium">Panquecitas totales</span>: toda la venta;{" "}
               <span className="font-medium">Panquecitas recompra</span>: solo clientes que compraron más de una vez, sin
               incluir su primera compra) contra un promedio de ventas diarias de Harina PAN del reporte{" "}
-              <span className="font-medium">Radar últimos 3 Meses</span> (venta acumulada de los 3 meses, último corte de
-              cada mes, ÷ días hábiles). El promedio de PAN se elige con el botón:{" "}
+              <span className="font-medium">Radar últimos 3 Meses</span> (suma de todas las filas de los 3 meses ÷ días
+              hábiles). El promedio de PAN se elige con el botón:{" "}
               <span className="font-medium">PAN toda la cartera</span>, todos los clientes, como siempre;{" "}
               <span className="font-medium">PAN recompra de PAN</span>, solo los clientes con Harina PAN en al menos 2
               fechas del reporte; <span className="font-medium">PAN recompra de Panquecitas</span>, solo los clientes que
