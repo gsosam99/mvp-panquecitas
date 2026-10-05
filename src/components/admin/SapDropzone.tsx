@@ -42,7 +42,7 @@ type ParsedData =
 
 const MODE_LABEL: Record<SapDropzoneMode, string> = {
   radar: "Radar (Harina PAN o Panquecitas)",
-  facturacion: "Pedidos y Facturado (Panquecitas o Harina PAN)",
+  facturacion: "Pedidos y Facturado (Panquecitas)",
 };
 
 const MODE_HINT: Record<SapDropzoneMode, string> = {
@@ -274,7 +274,7 @@ export function SapDropzone({ mode, onCommitSuccess }: SapDropzoneProps) {
               <Badge variant="default">{parsed.valid.length} registros</Badge>
               <Badge variant="secondary">{uniqueClients} localidades</Badge>
               <Badge variant="outline">
-                {parsed.format === "facturacion" ? "Pedido/Facturado (Panquecitas o Harina PAN)" : "Radar (acumulado del mes)"}
+                {parsed.format === "facturacion" ? "Pedido/Facturado (Panquecitas)" : "Radar (acumulado del mes)"}
               </Badge>
               {parsed.errors.length > 0 && (
                 <Badge variant="destructive">{parsed.errors.length} errores</Badge>

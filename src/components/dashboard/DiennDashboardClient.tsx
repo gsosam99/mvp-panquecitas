@@ -1726,7 +1726,7 @@ export function DiennDashboardClient({
                     </p>
                     <p className="text-xs mt-1">
                       {fuenteBaseline === "facturado"
-                        ? "Falta cargar el reporte Pedidos y Facturado de Harina PAN para ese período."
+                        ? "Falta cargar la Harina PAN facturada de ese período (menú \"Facturado Harina PAN\")."
                         : "May–Jul y julio salen del reporte \"Radar últimos 3 Meses\"; ago–sep, de la Carga Radar."}
                     </p>
                   </>

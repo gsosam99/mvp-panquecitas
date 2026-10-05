@@ -1830,7 +1830,7 @@ export async function getRendimientoBaselinePan(sector?: Sector): Promise<Rendim
   );
 
   const supabase = createSupabaseServiceClient();
-  const [pan3MData, radarData, facturadoData, todasLocations] = await Promise.all([
+  const [pan3MData, radarData, facturadoPanqData, facturadoPanData, todasLocations] = await Promise.all([
     // Todas las filas del reporte de 3 meses, como en 4d.
     fetchAllRows<{ sap_code: string; quantity_kg: number; date_of_sale: string }>(() =>
       supabase
@@ -1846,14 +1846,22 @@ export async function getRendimientoBaselinePan(sector?: Sector): Promise<Rendim
         .select("location_id, product_id, quantity_kg, date_of_sale")
         .in("product_id", [PRODUCT_IDS.PANQUECITAS, PRODUCT_IDS.HARINA_PAN])
     ),
-    // Pedidos y Facturado de los dos productos. Si todavía no se cargó la
-    // Harina PAN facturada, la fuente "facturado" queda sin promedio.
-    fetchAllRows<{ location_id: string; product_id: string; cantidad_facturada_kg: number; fecha: string }>(() =>
+    // Panquecitas facturadas (Pedidos y Facturado).
+    fetchAllRows<{ location_id: string; cantidad_facturada_kg: number; fecha: string }>(() =>
       supabase
         .from("sap_pedidos_facturados")
-        .select("location_id, product_id, cantidad_facturada_kg, fecha")
-        .in("product_id", [PRODUCT_IDS.PANQUECITAS, PRODUCT_IDS.HARINA_PAN])
+        .select("location_id, cantidad_facturada_kg, fecha")
+        .eq("product_id", PRODUCT_IDS.PANQUECITAS)
     ),
+    // Harina PAN facturada: su propia carga (/facturado-hpm, migration 027).
+    // Si la tabla todavía no existe o no se ha cargado nada, la fuente
+    // "facturado" queda sin promedio en vez de romper el dashboard.
+    fetchAllRows<{ sap_code: string; cantidad_facturada_kg: number; fecha: string }>(() =>
+      supabase.from("facturado_hpm_dia").select("sap_code, cantidad_facturada_kg, fecha")
+    ).catch((error) => {
+      console.error("[getRendimientoBaselinePan] facturado_hpm_dia no disponible:", error);
+      return [] as { sap_code: string; cantidad_facturada_kg: number; fecha: string }[];
+    }),
     // Lo facturado se acota por TODAS las locations (franquiciadas y
     // distribuidoras incluidas), igual que getTotalFacturadoToneladas.
     fetchAllRows<{ id: string; sap_code: string | null; oficina_venta: string | null; cohorte: string | null }>(() =>
@@ -1892,11 +1900,20 @@ export async function getRendimientoBaselinePan(sector?: Sector): Promise<Rendim
   };
 
   // ── Facturado ──
-  const factPanq: FilaKg[] = [];
+  const factPanq: FilaKg[] = facturadoPanqData.map((r) => ({
+    locId: r.location_id,
+    fecha: r.fecha.slice(0, 10),
+    kg: Number(r.cantidad_facturada_kg),
+  }));
+  // La Harina PAN facturada se guarda por SAP_CODE y se resuelve acá contra
+  // TODAS las locations (franquiciadas y distribuidoras incluidas).
+  const locIdPorSapCodeTodas = new Map(
+    todasLocations.filter((l) => l.sap_code).map((l) => [(l.sap_code ?? "").trim(), l.id])
+  );
   const factPan: FilaKg[] = [];
-  for (const r of facturadoData) {
-    const fila = { locId: r.location_id, fecha: r.fecha.slice(0, 10), kg: Number(r.cantidad_facturada_kg) };
-    (r.product_id === PRODUCT_IDS.PANQUECITAS ? factPanq : factPan).push(fila);
+  for (const r of facturadoPanData) {
+    const locId = locIdPorSapCodeTodas.get(r.sap_code.trim());
+    if (locId) factPan.push({ locId, fecha: r.fecha.slice(0, 10), kg: Number(r.cantidad_facturada_kg) });
   }
   const factMayJul = factPan.filter((r) => enRango(r.fecha, BASELINE_MAYJUL_DESDE, BASELINE_MAYJUL_HASTA));
   const factAgoSep = factPan.filter((r) => enRango(r.fecha, BASELINE_AGOSEP_DESDE, BASELINE_AGOSEP_HASTA));

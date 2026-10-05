@@ -31,6 +31,8 @@ const NAV_ITEMS: Record<DashboardRole, NavItem[]> = {
       ],
     },
     { href: '/pedidos-pendientes', label: 'Pedidos y Facturado' },
+    // Facturado de Harina PAN: solo para el botón "Facturado" del gráfico de baseline de PAN.
+    { href: '/facturado-hpm', label: 'Facturado Harina PAN' },
     { href: '/motivos-no-venta', label: 'Motivos de No Venta' },
     { href: '/despachos', label: 'Despachos SAP' },
     { href: '/sell-out-cadenas', label: 'Sell-Out Cadenas' },
