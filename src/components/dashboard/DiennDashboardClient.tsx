@@ -180,6 +180,18 @@ function baselineDe(
     : b.rendimientoBaselinePan.radar[cartera][baseline][segmento];
 }
 
+/**
+ * Ratio del gráfico de baseline de PAN: redondeado a entero solo si el
+ * redondeo SUBE (2,7 → "3%"); si bajaría (3,4 → 3) se muestra con su decimal
+ * ("3,4%"). Pedido del usuario, 05-10-2026.
+ */
+function formatoRatioBaseline(pct: number): string {
+  const entero = Math.round(pct);
+  return entero >= pct
+    ? `${entero.toLocaleString("es-VE")}%`
+    : `${pct.toLocaleString("es-VE", { maximumFractionDigits: 1 })}%`;
+}
+
 /** Filas de tarjetas debajo del gráfico de baseline: arriba ago–sep, en medio jul–sep, abajo may–jul. */
 const FILAS_TARJETAS_BASELINE: BaselinePan[] = ["agoSep", "julSep", "mayJul"];
 
@@ -1680,7 +1692,7 @@ export function DiennDashboardClient({
                         ratioAcumuladoBaseline.pct >= 4 ? "text-emerald-700" : "text-slate-900"
                       }`}
                     >
-                      {ratioAcumuladoBaseline.pct.toLocaleString("es-VE", { maximumFractionDigits: 0 })}%
+                      {formatoRatioBaseline(ratioAcumuladoBaseline.pct)}
                       <span className="text-sm font-medium text-slate-500"> · meta 4%</span>
                     </p>
                   </div>
@@ -1753,7 +1765,7 @@ export function DiennDashboardClient({
                     Baseline PAN {BASELINE_PAN_LABEL[b]}
                   </p>
                   <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">
-                    {/* Los ratios se muestran redondeados a entero; el valor exacto, al pasar el mouse. */}
+                    {/* Ratios redondeados hacia arriba a entero (ver formatoRatioBaseline); el valor exacto, al pasar el mouse. */}
                     {tarjetasBaseline[b].map((t: TarjetaTramo) => (
                       <div
                         key={t.label}
@@ -1778,7 +1790,7 @@ export function DiennDashboardClient({
                           }`}
                         >
                           {t.ratioPct != null
-                            ? `${t.ratioPct.toLocaleString("es-VE", { maximumFractionDigits: 0 })}%`
+                            ? formatoRatioBaseline(t.ratioPct)
                             : "Sin PAN"}
                         </p>
                         <p className="text-xs text-slate-500">
@@ -1791,7 +1803,7 @@ export function DiennDashboardClient({
                           Acumulado al {t.hasta.slice(8, 10)}/{t.hasta.slice(5, 7)}:{" "}
                           <span className="font-semibold text-slate-700">
                             {t.ratioAcumPct != null
-                              ? `${t.ratioAcumPct.toLocaleString("es-VE", { maximumFractionDigits: 0 })}%`
+                              ? formatoRatioBaseline(t.ratioAcumPct)
                               : "—"}
                           </span>
                         </p>
