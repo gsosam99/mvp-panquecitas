@@ -1498,9 +1498,9 @@ export function DiennDashboardClient({
             <CardTitle>Rendimiento Diario vs. Baseline de Harina PAN</CardTitle>
             <p className="text-xs text-slate-400 mt-1">
               Venta diaria de Panquecitas (Carga Radar) contra el promedio diario de Harina PAN del período que se
-              elija: <span className="font-medium">May–Jul</span>, el reporte Radar últimos 3 Meses (÷ 63 días
-              hábiles); <span className="font-medium">Ago–Sep</span>, la Carga Radar del piloto del 03-08 al 30-09;{" "}
-              <span className="font-medium">Jul–Sep</span>, julio del reporte de 3 meses más ago–sep de la Carga Radar.
+              elija: <span className="font-medium">May–Jul</span>, Radar de mayo a julio (÷ 63 días
+              hábiles); <span className="font-medium">Ago–Sep</span>, Radar de agosto y septiembre (÷ 43);{" "}
+              <span className="font-medium">Jul–Sep</span>, julio más agosto–septiembre (÷ 66). La Harina PAN de Radar sale de los reportes del menú Radar 3 Meses.
               Cada promedio se divide entre los días hábiles de su rango. <span className="font-medium">Ajustada</span>{" "}
               quita de los dos lados la ampliación de los 7 franquiciados de Cumaná (~975 PDV, 08-09).{" "}
               <span className="font-medium">Solo foco</span> deja solo los segmentos foco, tanto en Panquecitas como en
@@ -1525,7 +1525,7 @@ export function DiennDashboardClient({
                   title={
                     key === "facturado"
                       ? "Panquecitas y Harina PAN del reporte Pedidos y Facturado (gráfico y tarjetas)"
-                      : "Panquecitas y Harina PAN de la Carga Radar y del reporte de 3 meses (gráfico y tarjetas)"
+                      : "Panquecitas de la Carga Radar y Harina PAN de los reportes de Radar 3 Meses (gráfico y tarjetas)"
                   }
                   className={`px-3 py-1.5 transition-colors ${
                     fuenteBaseline === key ? "bg-indigo-700 text-white" : "bg-white text-slate-500 hover:bg-slate-50"
@@ -1543,10 +1543,10 @@ export function DiennDashboardClient({
                   onClick={() => setBaselinePan(key)}
                   title={
                     key === "mayJul"
-                      ? "Promedio de PAN del reporte Radar últimos 3 Meses (mayo–julio)"
+                      ? "Promedio de PAN de mayo a julio"
                       : key === "agoSep"
-                      ? "Promedio de PAN de la Carga Radar del piloto, del 03-08 al 30-09"
-                      : "Promedio de PAN de julio (reporte de 3 meses) + agosto–septiembre (Carga Radar)"
+                      ? "Promedio de PAN de agosto y septiembre"
+                      : "Promedio de PAN de julio + agosto–septiembre"
                   }
                   className={`px-3 py-1.5 transition-colors ${
                     baselinePan === key ? "bg-amber-700 text-white" : "bg-white text-slate-500 hover:bg-slate-50"
@@ -1727,7 +1727,7 @@ export function DiennDashboardClient({
                     <p className="text-xs mt-1">
                       {fuenteBaseline === "facturado"
                         ? "Falta cargar la Harina PAN facturada de ese período (menú \"Facturado Harina PAN\")."
-                        : "May–Jul y julio salen del reporte \"Radar últimos 3 Meses\"; ago–sep, de la Carga Radar."}
+                        : "Falta cargar ese período de Harina PAN en el menú \"Radar 3 Meses\"."}
                     </p>
                   </>
                 )}

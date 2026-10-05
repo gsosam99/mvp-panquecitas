@@ -1611,15 +1611,18 @@ export async function getRendimiento3MFocoRecompra(
 // Mismo gráfico que 4d/4e —venta diaria de Panquecitas contra un promedio
 // diario de Harina PAN y su 4%—, pero con el período de referencia de PAN a
 // elegir (DIENN, 05-10-2026). Botones independientes:
-//   - Fuente (FuenteVolumen): "radar" (Carga Radar + reporte de 3 meses) o
-//     "facturado" (reporte Pedidos y Facturado, Panquecitas y Harina PAN).
+//   - Fuente (FuenteVolumen): "radar" o "facturado" (reporte Pedidos y
+//     Facturado, Panquecitas y Harina PAN). En Radar, Panquecitas sale de la
+//     Carga Radar y la Harina PAN de TODOS los meses, de los reportes que se
+//     suben en "Radar 3 Meses" (radar_3m_ventas_dia): mayo–julio y
+//     agosto–septiembre (DIENN, 05-10-2026). Ya no de la Carga Radar.
 //   - Baseline (BaselinePan):
-//       · "mayJul": mayo–julio ÷ DIAS_HABILES_3M (63). En Radar es el reporte
-//         "Radar últimos 3 Meses" completo, el mismo promedio que 4d y 4e.
-//       · "agoSep": del 03-08 (arranque, HPM_RADAR_DESDE) al 30-09, ÷ sus días
-//         hábiles.
+//       · "mayJul": mayo–julio ÷ DIAS_HABILES_3M (63), el mismo promedio que
+//         4d y 4e.
+//       · "agoSep": agosto–septiembre ÷ sus días hábiles (43: el 1 y 2 de
+//         agosto son fin de semana).
 //       · "julSep": julio + agosto–septiembre, ÷ los días hábiles de julio más
-//         los de ago–sep. En Radar, julio sale del reporte de 3 meses.
+//         los de ago–sep.
 //   - Cartera (CarteraBaseline): "completa", o "ajustada" sin la tanda
 //     "Indirecto Cumaná 2": sus ~975 PDV y, en facturado, también lo
 //     facturado a sus 7 franquiciadas.
@@ -1667,17 +1670,21 @@ export interface RendimientoBaselineResult {
   tarjetas: Record<FuenteVolumen, Record<BaselinePan, TarjetaTramo[]>>;
 }
 
-/** Tramo de ago–sep que entra en los baselines. */
-const BASELINE_AGOSEP_DESDE = HPM_RADAR_DESDE;
+/**
+ * Agosto–septiembre completos. El 1 y 2 de agosto son fin de semana, así que
+ * el divisor es el mismo que desde el arranque del piloto (03-08): 43.
+ */
+const BASELINE_AGOSEP_DESDE = "2026-08-01";
 const BASELINE_AGOSEP_HASTA = "2026-09-30";
-/** Mayo–julio, para el baseline de facturado (el de Radar es el reporte completo). */
-const BASELINE_MAYJUL_DESDE = "2026-05-01";
-const BASELINE_MAYJUL_HASTA = "2026-07-31";
+/** Mayo–julio: el período de los 63 días (PERIODO_3M en business-days). */
+const BASELINE_MAYJUL_DESDE = PERIODO_3M_DESDE;
+const BASELINE_MAYJUL_HASTA = PERIODO_3M_HASTA;
 /** Julio, el mes que se suma en "julSep". */
 const BASELINE_JULIO = "2026-07";
 
+// Las tarjetas arrancan con el piloto: antes del 03-08 no hay Panquecitas.
 const TRAMOS_TARJETAS: { label: string; desde: string; hasta: string }[] = [
-  { label: "Agosto", desde: BASELINE_AGOSEP_DESDE, hasta: "2026-08-31" },
+  { label: "Agosto", desde: RENDIMIENTO_DIARIO_DESDE, hasta: "2026-08-31" },
   { label: "1–15 Sep", desde: "2026-09-01", hasta: "2026-09-15" },
   { label: "16–30 Sep", desde: "2026-09-16", hasta: BASELINE_AGOSEP_HASTA },
 ];
@@ -1837,22 +1844,22 @@ export async function getRendimientoBaselinePan(sector?: Sector): Promise<Rendim
 
   const supabase = createSupabaseServiceClient();
   const [pan3MData, radarData, facturadoPanqData, facturadoPanData, todasLocations] = await Promise.all([
-    // Todas las filas del reporte de 3 meses, como en 4d.
+    // Harina PAN de Radar de mayo a septiembre: todas las filas de los reportes
+    // subidos en "Radar 3 Meses", como en 4d.
     fetchAllRows<{ sap_code: string; quantity_kg: number; date_of_sale: string }>(() =>
       supabase
         .from("radar_3m_ventas_dia")
         .select("sap_code, quantity_kg, date_of_sale")
         .eq("product_id", PRODUCT_IDS.HARINA_PAN)
-        .gte("date_of_sale", PERIODO_3M_DESDE)
-        .lte("date_of_sale", PERIODO_3M_HASTA)
+        .gte("date_of_sale", BASELINE_MAYJUL_DESDE)
+        .lte("date_of_sale", BASELINE_AGOSEP_HASTA)
     ),
-    // Carga Radar de los dos productos. Harina PAN solo cuenta desde el
-    // arranque (HPM_RADAR_DESDE): se filtra abajo con esHpmVigente.
-    fetchAllRows<{ location_id: string; product_id: string; quantity_kg: number; date_of_sale: string }>(() =>
+    // Panquecitas de la Carga Radar.
+    fetchAllRows<{ location_id: string; quantity_kg: number; date_of_sale: string }>(() =>
       supabase
         .from("sap_sell_in_records")
-        .select("location_id, product_id, quantity_kg, date_of_sale")
-        .in("product_id", [PRODUCT_IDS.PANQUECITAS, PRODUCT_IDS.HARINA_PAN])
+        .select("location_id, quantity_kg, date_of_sale")
+        .eq("product_id", PRODUCT_IDS.PANQUECITAS)
     ),
     // Panquecitas facturadas (Pedidos y Facturado).
     fetchAllRows<{ location_id: string; cantidad_facturada_kg: number; fecha: string }>(() =>
@@ -1880,28 +1887,27 @@ export async function getRendimientoBaselinePan(sector?: Sector): Promise<Rendim
   const enRango = (fecha: string, desde: string, hasta: string) => fecha >= desde && fecha <= hasta;
 
   // ── Radar ──
-  // El reporte de 3 meses se resuelve por SAP_CODE contra la cartera de hoy,
+  // Los reportes de Radar se resuelven por SAP_CODE contra la cartera de hoy,
   // igual que en 4d.
   const locIdBySapCode = new Map(universoTotal.map((l) => [l.sap_code.trim(), l.id]));
-  const radar3M: FilaKg[] = [];
+  const radarPan: FilaKg[] = [];
   for (const r of pan3MData) {
     const locId = locIdBySapCode.get(r.sap_code.trim());
-    if (locId) radar3M.push({ locId, fecha: r.date_of_sale.slice(0, 10), kg: Number(r.quantity_kg) });
+    if (locId) radarPan.push({ locId, fecha: r.date_of_sale.slice(0, 10), kg: Number(r.quantity_kg) });
   }
-  const radarPanq: FilaKg[] = [];
-  const radarAgoSep: FilaKg[] = [];
-  for (const r of radarData) {
-    const fila = { locId: r.location_id, fecha: r.date_of_sale.slice(0, 10), kg: Number(r.quantity_kg) };
-    if (r.product_id === PRODUCT_IDS.PANQUECITAS) radarPanq.push(fila);
-    else if (esHpmVigente(r.product_id, fila.fecha) && enRango(fila.fecha, BASELINE_AGOSEP_DESDE, BASELINE_AGOSEP_HASTA))
-      radarAgoSep.push(fila);
-  }
+  const radarMayJul = radarPan.filter((r) => enRango(r.fecha, BASELINE_MAYJUL_DESDE, BASELINE_MAYJUL_HASTA));
+  const radarAgoSep = radarPan.filter((r) => enRango(r.fecha, BASELINE_AGOSEP_DESDE, BASELINE_AGOSEP_HASTA));
+  const radarPanq: FilaKg[] = radarData.map((r) => ({
+    locId: r.location_id,
+    fecha: r.date_of_sale.slice(0, 10),
+    kg: Number(r.quantity_kg),
+  }));
   const radar: DatosFuente = {
     panq: radarPanq,
     pan: {
-      mayJul: radar3M,
+      mayJul: radarMayJul,
       agoSep: radarAgoSep,
-      julSep: [...radar3M.filter((r) => r.fecha.startsWith(BASELINE_JULIO)), ...radarAgoSep],
+      julSep: [...radarMayJul.filter((r) => r.fecha.startsWith(BASELINE_JULIO)), ...radarAgoSep],
     },
     panAgoSep: radarAgoSep,
     ultimoDia: ultimoDiaDe(radarPanq),

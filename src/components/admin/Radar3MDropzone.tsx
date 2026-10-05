@@ -297,7 +297,8 @@ export function Radar3MDropzone() {
           <AlertDescription>
             Esta carga <span className="font-medium">reemplaza solo los meses que trae el archivo</span> (
             {meses.join(", ")}); los otros meses ya cargados se quedan, así que puedes subir el período en varios
-            archivos. Los promedios usan solo mayo–julio. No toca la Carga Radar del piloto.
+            archivos. Los gráficos de 3 meses usan mayo–julio; el de baseline de PAN, también agosto–septiembre. No toca la
+            Carga Radar del piloto.
             {mesesSinVolumen.length > 0 && (
               <>
                 {" "}
