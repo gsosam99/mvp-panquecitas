@@ -31,8 +31,17 @@ import {
   type PanComparisonGranularity,
   type TimeGranularity,
 } from "@/lib/date-buckets";
-import { estabaIncorporado, sinAmpliacionFranquiciados, vigentesAl } from "@/lib/cohortes";
-import { DISTRIBUIDORAS_INTERMEDIARIAS_SAP_CODES, FRANQUICIADAS_INDIRECTO_SAP_CODES } from "@/lib/sectors";
+import {
+  COHORTE_AMPLIACION_FRANQUICIADOS_CUMANA,
+  estabaIncorporado,
+  sinAmpliacionFranquiciados,
+  vigentesAl,
+} from "@/lib/cohortes";
+import {
+  DISTRIBUIDORAS_INTERMEDIARIAS_SAP_CODES,
+  FRANQUICIADAS_CUMANA_2_SAP_CODES,
+  FRANQUICIADAS_INDIRECTO_SAP_CODES,
+} from "@/lib/sectors";
 import { esSegmentoSinAlimentos, SEGMENTO_SIN_DATO } from "@/lib/segmentos";
 import type { Location, LocationType } from "@/types";
 
@@ -1593,42 +1602,224 @@ export async function getRendimiento3MFocoRecompra(
 }
 
 // ── 4f. Rendimiento diario vs. baseline de Harina PAN a elegir ─────
-// Mismo gráfico que 4d/4e —venta diaria de Panquecitas (Carga Radar) contra
-// un promedio diario de Harina PAN y su 4%—, pero con el período de
-// referencia de PAN a elegir (DIENN, 05-10-2026). Botones independientes:
+// Mismo gráfico que 4d/4e —venta diaria de Panquecitas contra un promedio
+// diario de Harina PAN y su 4%—, pero con el período de referencia de PAN a
+// elegir (DIENN, 05-10-2026). Botones independientes:
+//   - Fuente (FuenteVolumen): "radar" (Carga Radar + reporte de 3 meses) o
+//     "facturado" (reporte Pedidos y Facturado, Panquecitas y Harina PAN).
 //   - Baseline (BaselinePan):
-//       · "mayJul": el reporte "Radar últimos 3 Meses" completo (todas sus
-//         filas) ÷ DIAS_HABILES_3M — el mismo promedio que 4d y 4e.
-//       · "agoSep": Harina PAN de la Carga Radar del piloto, del 03-08 (arranque,
-//         HPM_RADAR_DESDE) al 30-09, ÷ sus días hábiles.
-//       · "julSep": julio del reporte de 3 meses + agosto–septiembre de la
-//         Carga Radar, ÷ los días hábiles de julio más los de ago–sep.
+//       · "mayJul": mayo–julio ÷ DIAS_HABILES_3M (63). En Radar es el reporte
+//         "Radar últimos 3 Meses" completo, el mismo promedio que 4d y 4e.
+//       · "agoSep": del 03-08 (arranque, HPM_RADAR_DESDE) al 30-09, ÷ sus días
+//         hábiles.
+//       · "julSep": julio + agosto–septiembre, ÷ los días hábiles de julio más
+//         los de ago–sep. En Radar, julio sale del reporte de 3 meses.
 //   - Cartera (CarteraBaseline): "completa", o "ajustada" sin la tanda
-//     "Indirecto Cumaná 2" (los ~975 PDV de los 7 franquiciados de Cumaná).
-//   - Segmento: "foco" recorta a los segmentos foco TANTO la serie de
-//     Panquecitas como el promedio de PAN; "todos", cualquier segmento.
-// El promedio de PAN es la suma de la cartera vigente hoy en el rango ÷ los
-// días hábiles del rango, sin prorratear a los clientes que entraron a mitad
-// del rango (decisión del usuario, 05-10-2026). Panquecitas son siempre las
-// totales, desde RENDIMIENTO_DIARIO_DESDE y con el fin de semana sumado al
-// lunes; los PDV fuera de cartera suman su volumen, igual que en 4e.
+//     "Indirecto Cumaná 2": sus ~975 PDV y, en facturado, también lo
+//     facturado a sus 7 franquiciadas.
+//   - Segmento: "foco" recorta TANTO la serie de Panquecitas como el promedio
+//     de PAN. Solo en Radar: lo facturado a una franquiciada no se puede
+//     separar por segmento del PDV (DIENN, 05-10-2026).
+// El promedio de PAN es la suma de la población en el rango ÷ los días hábiles
+// del rango, sin prorratear a los clientes que entraron a mitad del rango
+// (decisión del usuario, 05-10-2026). Panquecitas son siempre las totales,
+// desde RENDIMIENTO_DIARIO_DESDE y con el fin de semana sumado al lunes. En
+// Radar los PDV fuera de cartera suman su volumen, igual que en 4e.
+//
+// Las TARJETAS (TarjetaTramo) van debajo del gráfico y son fijas: cartera
+// ajustada, todos los segmentos, Global. Solo cambian con la fuente. Una
+// fila por baseline y una tarjeta por tramo (agosto, 1–15 sep, 16–30 sep):
+//   - Fila "agoSep": Panquecitas del tramo ÷ Harina PAN del MISMO tramo.
+//   - Filas "julSep" y "mayJul": Panquecitas del tramo ÷ (promedio diario de
+//     PAN del baseline × días hábiles del tramo) — el ratio acumulado del
+//     gráfico, leído en ese tramo.
+// El acumulado de cada tarjeta es lo mismo desde el 03-08 hasta el cierre del
+// tramo, para ver la evolución de una tarjeta a la siguiente.
 
 export type BaselinePan = "mayJul" | "agoSep" | "julSep";
 
 export type CarteraBaseline = "completa" | "ajustada";
 
-/** Tramo de la Carga Radar que entra en los baselines de ago–sep. */
-const BASELINE_RADAR_DESDE = HPM_RADAR_DESDE;
-const BASELINE_RADAR_HASTA = "2026-09-30";
-/** Julio, el mes del reporte de 3 meses que se suma en "julSep". */
+export type FuenteVolumen = "radar" | "facturado";
+
+export interface TarjetaTramo {
+  /** Nombre del tramo ("Agosto", "1–15 Sep", "16–30 Sep"). */
+  label: string;
+  desde: string;
+  hasta: string;
+  /** Toneladas de Panquecitas del tramo. */
+  panquecitasTon: number;
+  /** null si no hay Harina PAN con que comparar (p. ej. falta el reporte). */
+  ratioPct: number | null;
+  /** Mismo ratio, desde el 03-08 hasta el cierre del tramo. */
+  ratioAcumPct: number | null;
+}
+
+export interface RendimientoBaselineResult {
+  radar: Record<CarteraBaseline, Record<BaselinePan, Record<SegmentoRecompra, Rendimiento3MResult>>>;
+  facturado: Record<CarteraBaseline, Record<BaselinePan, Rendimiento3MResult>>;
+  tarjetas: Record<FuenteVolumen, Record<BaselinePan, TarjetaTramo[]>>;
+}
+
+/** Tramo de ago–sep que entra en los baselines. */
+const BASELINE_AGOSEP_DESDE = HPM_RADAR_DESDE;
+const BASELINE_AGOSEP_HASTA = "2026-09-30";
+/** Mayo–julio, para el baseline de facturado (el de Radar es el reporte completo). */
+const BASELINE_MAYJUL_DESDE = "2026-05-01";
+const BASELINE_MAYJUL_HASTA = "2026-07-31";
+/** Julio, el mes que se suma en "julSep". */
 const BASELINE_JULIO = "2026-07";
 
-export async function getRendimientoBaselinePan(
-  sector?: Sector
-): Promise<Record<CarteraBaseline, Record<BaselinePan, Record<SegmentoRecompra, Rendimiento3MResult>>>> {
+const TRAMOS_TARJETAS: { label: string; desde: string; hasta: string }[] = [
+  { label: "Agosto", desde: BASELINE_AGOSEP_DESDE, hasta: "2026-08-31" },
+  { label: "1–15 Sep", desde: "2026-09-01", hasta: "2026-09-15" },
+  { label: "16–30 Sep", desde: "2026-09-16", hasta: BASELINE_AGOSEP_HASTA },
+];
+
+/** Una fila de kg ya resuelta a su cliente. `fecha` es la fecha real (sin mover al lunes). */
+type FilaKg = { locId: string; fecha: string; kg: number };
+
+/** Los datos de una fuente, listos para armar el gráfico y las tarjetas. */
+interface DatosFuente {
+  panq: FilaKg[];
+  /** Harina PAN de cada baseline. */
+  pan: Record<BaselinePan, FilaKg[]>;
+  /** Harina PAN de ago–sep, para la fila de tarjetas que compara contra el mismo tramo. */
+  panAgoSep: FilaKg[];
+  /** Último día hábil con venta de Panquecitas: cierre de la serie diaria. */
+  ultimoDia: string;
+}
+
+const DIAS_BASELINE: Record<BaselinePan, number> = {
+  mayJul: DIAS_HABILES_3M,
+  agoSep: contarDiasHabiles(BASELINE_AGOSEP_DESDE, BASELINE_AGOSEP_HASTA),
+  julSep:
+    contarDiasHabiles(`${BASELINE_JULIO}-01`, ultimoDiaDelMes(BASELINE_JULIO)) +
+    contarDiasHabiles(BASELINE_AGOSEP_DESDE, BASELINE_AGOSEP_HASTA),
+};
+
+/** Día hábil al que se imputa la fila, o null si es anterior al arranque del piloto. */
+function diaPiloto(fecha: string): string | null {
+  return fecha < RENDIMIENTO_DIARIO_DESDE ? null : siguienteDiaHabil(fecha);
+}
+
+function sumaKg(filas: FilaKg[], ids: Set<string>, desde: string, hasta: string): number {
+  let kg = 0;
+  for (const r of filas) {
+    if (!ids.has(r.locId)) continue;
+    const dia = diaPiloto(r.fecha);
+    if (dia && dia >= desde && dia <= hasta) kg += r.kg;
+  }
+  return kg;
+}
+
+/**
+ * Serie diaria + promedio de PAN de un grupo. `idsPan` es la población del
+ * promedio; `idsPanq` la de la serie de Panquecitas (puede sumar PDV fuera de
+ * cartera, que se reportan aparte en `idsFuera`).
+ */
+function armarBaseline(
+  datos: DatosFuente,
+  baseline: BaselinePan,
+  idsPan: Set<string>,
+  idsPanq: Set<string>,
+  idsFuera: Set<string>
+): Rendimiento3MResult {
+  if (idsPan.size === 0) return RENDIMIENTO_3M_VACIO;
+  const dias = DIAS_BASELINE[baseline];
+  const filasPan = datos.pan[baseline].filter((r) => idsPan.has(r.locId));
+  if (filasPan.length === 0) return RENDIMIENTO_3M_VACIO;
+  const totalPanKg = filasPan.reduce((s, r) => s + r.kg, 0);
+  const promedio = totalPanKg / dias;
+  if (promedio <= 0) return RENDIMIENTO_3M_VACIO;
+
+  const kgPorDia = new Map<string, number>();
+  let fueraKg = 0;
+  for (const r of datos.panq) {
+    if (!idsPanq.has(r.locId)) continue;
+    const dia = diaPiloto(r.fecha);
+    if (!dia) continue;
+    kgPorDia.set(dia, (kgPorDia.get(dia) ?? 0) + r.kg);
+    if (idsFuera.has(r.locId)) fueraKg += r.kg;
+  }
+
+  const fechasPan = filasPan.map((r) => r.fecha).sort();
+  const puntos: Rendimiento3MPunto[] = diasHabilesEntre(RENDIMIENTO_DIARIO_DESDE, datos.ultimoDia).map((dia) => {
+    const kg = kgPorDia.get(dia) ?? 0;
+    return {
+      dia,
+      label: bucketLabelFor(dia, "day"),
+      panquecitasKg: Math.round(kg * 10) / 10,
+      ratioPct: Math.round((kg / promedio) * 100 * 10) / 10,
+    };
+  });
+
+  return {
+    promedio3M: Math.round(promedio * 10) / 10,
+    meta4Pct: Math.round(promedio * 0.04 * 10) / 10,
+    diasPeriodo: dias,
+    // El rango que de verdad trajeron los datos, para poder auditarlo.
+    desde: fechasPan[0],
+    hasta: fechasPan[fechasPan.length - 1],
+    totalPanKg: Math.round(totalPanKg * 10) / 10,
+    clientesPan: new Set(filasPan.map((r) => r.locId)).size,
+    clientesPoblacion: idsPan.size,
+    panquecitasFueraKg: Math.round(fueraKg * 10) / 10,
+    puntos,
+  };
+}
+
+/** Las tarjetas de una fuente, por baseline. Ver el encabezado de la sección. */
+function armarTarjetas(
+  datos: DatosFuente,
+  idsPan: Set<string>,
+  idsPanq: Set<string>
+): Record<BaselinePan, TarjetaTramo[]> {
+  const pct = (panq: number, pan: number) => (pan > 0 ? Math.round((panq / pan) * 1000) / 10 : null);
+  const promedioDe = (b: BaselinePan) =>
+    datos.pan[b].filter((r) => idsPan.has(r.locId)).reduce((s, r) => s + r.kg, 0) / DIAS_BASELINE[b];
+
+  // Contra qué Harina PAN se compara un rango: la real del mismo rango (agoSep)
+  // o el promedio diario del baseline por los días hábiles del rango.
+  const panDe = (b: BaselinePan, desde: string, hasta: string) =>
+    b === "agoSep"
+      ? sumaKg(datos.panAgoSep, idsPan, desde, hasta)
+      : promedioDe(b) * contarDiasHabiles(desde, hasta);
+
+  const fila = (b: BaselinePan): TarjetaTramo[] =>
+    TRAMOS_TARJETAS.map((t) => {
+      const panq = sumaKg(datos.panq, idsPanq, t.desde, t.hasta);
+      const panqAcum = sumaKg(datos.panq, idsPanq, RENDIMIENTO_DIARIO_DESDE, t.hasta);
+      return {
+        ...t,
+        panquecitasTon: Math.round((panq / 1000) * 100) / 100,
+        ratioPct: pct(panq, panDe(b, t.desde, t.hasta)),
+        ratioAcumPct: pct(panqAcum, panDe(b, RENDIMIENTO_DIARIO_DESDE, t.hasta)),
+      };
+    });
+
+  return { mayJul: fila("mayJul"), agoSep: fila("agoSep"), julSep: fila("julSep") };
+}
+
+function ultimoDiaDe(filas: FilaKg[]): string {
+  let ultimo = "";
+  for (const r of filas) {
+    const dia = diaPiloto(r.fecha);
+    if (dia && dia > ultimo) ultimo = dia;
+  }
+  return ultimo;
+}
+
+export async function getRendimientoBaselinePan(sector?: Sector): Promise<RendimientoBaselineResult> {
   const vacioSegmento = { foco: RENDIMIENTO_3M_VACIO, todos: RENDIMIENTO_3M_VACIO };
-  const vacioBaseline = { mayJul: vacioSegmento, agoSep: vacioSegmento, julSep: vacioSegmento };
-  const vacio = { completa: vacioBaseline, ajustada: vacioBaseline };
+  const vacioRadar = { mayJul: vacioSegmento, agoSep: vacioSegmento, julSep: vacioSegmento };
+  const vacioFacturado = { mayJul: RENDIMIENTO_3M_VACIO, agoSep: RENDIMIENTO_3M_VACIO, julSep: RENDIMIENTO_3M_VACIO };
+  const vacioTarjetas = { mayJul: [], agoSep: [], julSep: [] };
+  const vacio: RendimientoBaselineResult = {
+    radar: { completa: vacioRadar, ajustada: vacioRadar },
+    facturado: { completa: vacioFacturado, ajustada: vacioFacturado },
+    tarjetas: { radar: vacioTarjetas, facturado: vacioTarjetas },
+  };
 
   const delSector = (ls: Location[]) => (sector ? ls.filter((l) => sectorGroup(l.oficina_venta) === sector) : ls);
   const universoTotal = await getUniverseLocations();
@@ -1639,7 +1830,7 @@ export async function getRendimientoBaselinePan(
   );
 
   const supabase = createSupabaseServiceClient();
-  const [pan3MData, panRadarData, panqData] = await Promise.all([
+  const [pan3MData, radarData, facturadoData, todasLocations] = await Promise.all([
     // Todas las filas del reporte de 3 meses, como en 4d.
     fetchAllRows<{ sap_code: string; quantity_kg: number; date_of_sale: string }>(() =>
       supabase
@@ -1647,126 +1838,130 @@ export async function getRendimientoBaselinePan(
         .select("sap_code, quantity_kg, date_of_sale")
         .eq("product_id", PRODUCT_IDS.HARINA_PAN)
     ),
-    // Harina PAN de la Carga Radar desde el arranque; el tope del 30-09 se
-    // aplica abajo sobre la fecha pura (date_of_sale puede traer hora).
-    fetchAllRows<{ location_id: string; quantity_kg: number; date_of_sale: string }>(() =>
+    // Carga Radar de los dos productos. Harina PAN solo cuenta desde el
+    // arranque (HPM_RADAR_DESDE): se filtra abajo con esHpmVigente.
+    fetchAllRows<{ location_id: string; product_id: string; quantity_kg: number; date_of_sale: string }>(() =>
       supabase
         .from("sap_sell_in_records")
-        .select("location_id, quantity_kg, date_of_sale")
-        .eq("product_id", PRODUCT_IDS.HARINA_PAN)
-        .gte("date_of_sale", BASELINE_RADAR_DESDE)
+        .select("location_id, product_id, quantity_kg, date_of_sale")
+        .in("product_id", [PRODUCT_IDS.PANQUECITAS, PRODUCT_IDS.HARINA_PAN])
     ),
-    fetchAllRows<{ location_id: string; quantity_kg: number; date_of_sale: string }>(() =>
+    // Pedidos y Facturado de los dos productos. Si todavía no se cargó la
+    // Harina PAN facturada, la fuente "facturado" queda sin promedio.
+    fetchAllRows<{ location_id: string; product_id: string; cantidad_facturada_kg: number; fecha: string }>(() =>
       supabase
-        .from("sap_sell_in_records")
-        .select("location_id, quantity_kg, date_of_sale")
-        .eq("product_id", PRODUCT_IDS.PANQUECITAS)
+        .from("sap_pedidos_facturados")
+        .select("location_id, product_id, cantidad_facturada_kg, fecha")
+        .in("product_id", [PRODUCT_IDS.PANQUECITAS, PRODUCT_IDS.HARINA_PAN])
+    ),
+    // Lo facturado se acota por TODAS las locations (franquiciadas y
+    // distribuidoras incluidas), igual que getTotalFacturadoToneladas.
+    fetchAllRows<{ id: string; sap_code: string | null; oficina_venta: string | null; cohorte: string | null }>(() =>
+      supabase.from("locations").select("id, sap_code, oficina_venta, cohorte")
     ),
   ]);
 
-  // Filas de PAN por cliente, con el cliente ya resuelto. El reporte de 3
-  // meses se resuelve por SAP_CODE contra la cartera de hoy, igual que en 4d.
-  type FilaPan = { locId: string; fecha: string; kg: number };
+  const enRango = (fecha: string, desde: string, hasta: string) => fecha >= desde && fecha <= hasta;
+
+  // ── Radar ──
+  // El reporte de 3 meses se resuelve por SAP_CODE contra la cartera de hoy,
+  // igual que en 4d.
   const locIdBySapCode = new Map(universoTotal.map((l) => [l.sap_code.trim(), l.id]));
-  const filas3M: FilaPan[] = [];
+  const radar3M: FilaKg[] = [];
   for (const r of pan3MData) {
     const locId = locIdBySapCode.get(r.sap_code.trim());
-    if (locId) filas3M.push({ locId, fecha: r.date_of_sale.slice(0, 10), kg: Number(r.quantity_kg) });
+    if (locId) radar3M.push({ locId, fecha: r.date_of_sale.slice(0, 10), kg: Number(r.quantity_kg) });
   }
-  const filasAgoSep: FilaPan[] = [];
-  for (const r of panRadarData) {
-    const fecha = r.date_of_sale.slice(0, 10);
-    if (fecha < BASELINE_RADAR_DESDE || fecha > BASELINE_RADAR_HASTA) continue;
-    filasAgoSep.push({ locId: r.location_id, fecha, kg: Number(r.quantity_kg) });
+  const radarPanq: FilaKg[] = [];
+  const radarAgoSep: FilaKg[] = [];
+  for (const r of radarData) {
+    const fila = { locId: r.location_id, fecha: r.date_of_sale.slice(0, 10), kg: Number(r.quantity_kg) };
+    if (r.product_id === PRODUCT_IDS.PANQUECITAS) radarPanq.push(fila);
+    else if (esHpmVigente(r.product_id, fila.fecha) && enRango(fila.fecha, BASELINE_AGOSEP_DESDE, BASELINE_AGOSEP_HASTA))
+      radarAgoSep.push(fila);
   }
-
-  const diasAgoSep = contarDiasHabiles(BASELINE_RADAR_DESDE, BASELINE_RADAR_HASTA);
-  const diasJulio = contarDiasHabiles(`${BASELINE_JULIO}-01`, ultimoDiaDelMes(BASELINE_JULIO));
-  const baselines: Record<BaselinePan, { filas: FilaPan[]; dias: number }> = {
-    mayJul: { filas: filas3M, dias: DIAS_HABILES_3M },
-    agoSep: { filas: filasAgoSep, dias: diasAgoSep },
-    julSep: {
-      filas: [...filas3M.filter((r) => r.fecha.startsWith(BASELINE_JULIO)), ...filasAgoSep],
-      dias: diasJulio + diasAgoSep,
+  const radar: DatosFuente = {
+    panq: radarPanq,
+    pan: {
+      mayJul: radar3M,
+      agoSep: radarAgoSep,
+      julSep: [...radar3M.filter((r) => r.fecha.startsWith(BASELINE_JULIO)), ...radarAgoSep],
     },
+    panAgoSep: radarAgoSep,
+    ultimoDia: ultimoDiaDe(radarPanq),
   };
 
-  // Mismo cierre de rango que 4d, leído de TODO el piloto.
-  let ultimoDiaReportado = "";
-  for (const r of panqData) {
-    const fecha = r.date_of_sale.slice(0, 10);
-    if (fecha < RENDIMIENTO_DIARIO_DESDE) continue;
-    const dia = siguienteDiaHabil(fecha);
-    if (dia > ultimoDiaReportado) ultimoDiaReportado = dia;
+  // ── Facturado ──
+  const factPanq: FilaKg[] = [];
+  const factPan: FilaKg[] = [];
+  for (const r of facturadoData) {
+    const fila = { locId: r.location_id, fecha: r.fecha.slice(0, 10), kg: Number(r.cantidad_facturada_kg) };
+    (r.product_id === PRODUCT_IDS.PANQUECITAS ? factPanq : factPan).push(fila);
   }
+  const factMayJul = factPan.filter((r) => enRango(r.fecha, BASELINE_MAYJUL_DESDE, BASELINE_MAYJUL_HASTA));
+  const factAgoSep = factPan.filter((r) => enRango(r.fecha, BASELINE_AGOSEP_DESDE, BASELINE_AGOSEP_HASTA));
+  const facturado: DatosFuente = {
+    panq: factPanq,
+    pan: {
+      mayJul: factMayJul,
+      agoSep: factAgoSep,
+      julSep: [...factMayJul.filter((r) => r.fecha.startsWith(BASELINE_JULIO)), ...factAgoSep],
+    },
+    panAgoSep: factAgoSep,
+    ultimoDia: ultimoDiaDe(factPanq),
+  };
 
+  // ── Poblaciones ──
   type Cliente = (typeof vigentes)[number];
   const esFoco = (l: Cliente) => !esSegmentoSinAlimentos(l.segmento_cliente);
+  const ids = (ls: Cliente[]) => new Set(ls.map((l) => l.id));
+  const carteraDe = (c: CarteraBaseline) => sinAmpliacionFranquiciados(vigentes, c === "ajustada");
 
-  const armar = (clientes: Cliente[], fuera: Cliente[], baseline: BaselinePan): Rendimiento3MResult => {
-    if (clientes.length === 0) return RENDIMIENTO_3M_VACIO;
-    const idsPan = new Set(clientes.map((l) => l.id));
-    const idsFuera = new Set(fuera.map((l) => l.id));
-    const { filas, dias } = baselines[baseline];
-
-    const filasPan = filas.filter((r) => idsPan.has(r.locId));
-    if (filasPan.length === 0) return RENDIMIENTO_3M_VACIO;
-    const totalPanKg = filasPan.reduce((s, r) => s + r.kg, 0);
-    const promedio = totalPanKg / dias;
-    if (promedio <= 0) return RENDIMIENTO_3M_VACIO;
-
-    const kgPorDia = new Map<string, number>();
-    let fueraKg = 0;
-    for (const r of panqData) {
-      const deFuera = idsFuera.has(r.location_id);
-      if (!deFuera && !idsPan.has(r.location_id)) continue;
-      const fecha = r.date_of_sale.slice(0, 10);
-      if (fecha < RENDIMIENTO_DIARIO_DESDE) continue;
-      const dia = siguienteDiaHabil(fecha);
-      kgPorDia.set(dia, (kgPorDia.get(dia) ?? 0) + Number(r.quantity_kg));
-      if (deFuera) fueraKg += Number(r.quantity_kg);
-    }
-
-    const fechasPan = filasPan.map((r) => r.fecha).sort();
-    const puntos: Rendimiento3MPunto[] = diasHabilesEntre(RENDIMIENTO_DIARIO_DESDE, ultimoDiaReportado).map((dia) => {
-      const kg = kgPorDia.get(dia) ?? 0;
+  const radarPorCartera = (c: CarteraBaseline) => {
+    const porSegmento = (b: BaselinePan) => {
+      const armar = (clientes: Cliente[], fuera: Cliente[]) =>
+        armarBaseline(radar, b, ids(clientes), new Set([...ids(clientes), ...ids(fuera)]), ids(fuera));
       return {
-        dia,
-        label: bucketLabelFor(dia, "day"),
-        panquecitasKg: Math.round(kg * 10) / 10,
-        ratioPct: Math.round((kg / promedio) * 100 * 10) / 10,
+        foco: armar(carteraDe(c).filter(esFoco), fueraDeCartera.filter(esFoco)),
+        todos: armar(carteraDe(c), fueraDeCartera),
       };
-    });
-
-    return {
-      promedio3M: Math.round(promedio * 10) / 10,
-      meta4Pct: Math.round(promedio * 0.04 * 10) / 10,
-      diasPeriodo: dias,
-      // El rango que de verdad trajeron los datos, para poder auditarlo.
-      desde: fechasPan[0],
-      hasta: fechasPan[fechasPan.length - 1],
-      totalPanKg: Math.round(totalPanKg * 10) / 10,
-      clientesPan: new Set(filasPan.map((r) => r.locId)).size,
-      clientesPoblacion: idsPan.size,
-      panquecitasFueraKg: Math.round(fueraKg * 10) / 10,
-      puntos,
     };
-  };
-
-  const porBaseline = (
-    clientes: Cliente[],
-    fuera: Cliente[]
-  ): Record<BaselinePan, Record<SegmentoRecompra, Rendimiento3MResult>> => {
-    const porSegmento = (b: BaselinePan) => ({
-      foco: armar(clientes.filter(esFoco), fuera.filter(esFoco), b),
-      todos: armar(clientes, fuera, b),
-    });
     return { mayJul: porSegmento("mayJul"), agoSep: porSegmento("agoSep"), julSep: porSegmento("julSep") };
   };
 
+  // Facturado: todas las locations del sector, o todas en Global, igual que
+  // getTotalFacturadoToneladas. "Ajustada" saca a las 7 franquiciadas de la
+  // segunda tanda y a los PDV de esa tanda.
+  const franquiciadasCumana2 = new Set<string>(FRANQUICIADAS_CUMANA_2_SAP_CODES);
+  const idsFacturado = (c: CarteraBaseline) =>
+    new Set(
+      todasLocations
+        .filter((l) => !sector || sectorGroup(l.oficina_venta) === sector)
+        .filter(
+          (l) =>
+            c === "completa" ||
+            (!franquiciadasCumana2.has((l.sap_code ?? "").trim()) &&
+              (l.cohorte ?? "").trim() !== COHORTE_AMPLIACION_FRANQUICIADOS_CUMANA)
+        )
+        .map((l) => l.id)
+    );
+  const facturadoPorCartera = (c: CarteraBaseline) => {
+    const idsFact = idsFacturado(c);
+    const armar = (b: BaselinePan) => armarBaseline(facturado, b, idsFact, idsFact, new Set());
+    return { mayJul: armar("mayJul"), agoSep: armar("agoSep"), julSep: armar("julSep") };
+  };
+
+  // Tarjetas: fijas en cartera ajustada y todos los segmentos.
+  const ajustada = carteraDe("ajustada");
+  const idsFactAjustada = idsFacturado("ajustada");
+
   return {
-    completa: porBaseline(vigentes, fueraDeCartera),
-    ajustada: porBaseline(sinAmpliacionFranquiciados(vigentes, true), fueraDeCartera),
+    radar: { completa: radarPorCartera("completa"), ajustada: radarPorCartera("ajustada") },
+    facturado: { completa: facturadoPorCartera("completa"), ajustada: facturadoPorCartera("ajustada") },
+    tarjetas: {
+      radar: armarTarjetas(radar, ids(ajustada), new Set([...ids(ajustada), ...ids(fueraDeCartera)])),
+      facturado: armarTarjetas(facturado, idsFactAjustada, idsFactAjustada),
+    },
   };
 }
 // ── 5. Cobertura y Comunicación por sector (semanal) ───────────────

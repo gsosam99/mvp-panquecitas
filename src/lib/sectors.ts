@@ -84,13 +84,12 @@ export const DISTRIBUIDORAS_INTERMEDIARIAS_SAP_CODES = [
 // y cuántos PDV atiende, para poder cuadrar la tanda: las 7 suman los 975.
 // Ojo, esas dos columnas están en AE/AF, fuera del rango con filtro del Excel
 // (A:AD), así que no aparecen si solo se mira la tabla filtrada.
-export const FRANQUICIADAS_INDIRECTO_SAP_CODES = [
-  "22401000", // COMERCIAL VELIZ SUCRE, C.A.
-  "22403226", // KEYKA, C.A.
-  "22403689", // DISTRIBUIDORA NURCARLYS, C.A.
-  "22405444", // DISTRIBUIDORA RCY 85, C.A.
-  "22405792", // INVERSIONES C.C., C.A.
-  // ── Segunda tanda, 08-09-2026 ──
+/**
+ * Las 7 franquiciadas de la segunda tanda (08-09-2026). Aparte porque la
+ * cartera "ajustada" del gráfico de baseline de PAN las saca de lo facturado,
+ * igual que saca a sus ~975 PDV del Radar.
+ */
+export const FRANQUICIADAS_CUMANA_2_SAP_CODES = [
   "22403033", // DISTRIBUIDORA TRES REIS C.A. (V0411A, 130 PDV)
   "22401861", // DISTRIBUIDORA BLANCO SALAZAR, S.A. (V1471A, 122 PDV)
   "22403700", // INVERSIONES KODSO, C.A. (V1463A, 164 PDV)
@@ -98,6 +97,16 @@ export const FRANQUICIADAS_INDIRECTO_SAP_CODES = [
   "22405973", // DISTRIBUIDORA MARGON 2024, C.A. (V1468A, 233 PDV)
   "22406051", // DISTRIBUIDORA LOS GONZALEZ ZZ CA (V1461A, 84 PDV)
   "22406064", // HERMANOS BENITEZ RAMOS, C.A (V1464A, 98 PDV)
+] as const;
+
+export const FRANQUICIADAS_INDIRECTO_SAP_CODES = [
+  "22401000", // COMERCIAL VELIZ SUCRE, C.A.
+  "22403226", // KEYKA, C.A.
+  "22403689", // DISTRIBUIDORA NURCARLYS, C.A.
+  "22405444", // DISTRIBUIDORA RCY 85, C.A.
+  "22405792", // INVERSIONES C.C., C.A.
+  // ── Segunda tanda, 08-09-2026 ──
+  ...FRANQUICIADAS_CUMANA_2_SAP_CODES,
 ] as const;
 
 const EXCLUDED_DISTRIBUIDOR_SAP_CODES = new Set<string>([

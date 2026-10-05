@@ -93,6 +93,9 @@ import type {
   SeriePanq,
   BaselinePan,
   CarteraBaseline,
+  FuenteVolumen,
+  RendimientoBaselineResult,
+  TarjetaTramo,
 } from "@/lib/dienn-queries";
 import type { MotivoNoVentaRow } from "@/lib/efectividad-queries";
 import type { Sector } from "@/lib/sectors";
@@ -141,8 +144,8 @@ export interface SectorBundle {
   rendimiento3M: Record<Pan3MPoblacion, Rendimiento3MResult>;
   /** Rendimiento diario vs. promedio 3M por grupo de clientes (cartera × segmento × compra): sus Panquecitas vs. su PAN. */
   rendimiento3MFocoRecompra: Record<AlcanceCartera, Record<SegmentoRecompra, Record<BasePan, Record<SeriePanq, Rendimiento3MResult>>>>;
-  /** Rendimiento diario vs. promedio de Harina PAN con baseline a elegir (cartera × baseline × segmento). */
-  rendimientoBaselinePan: Record<CarteraBaseline, Record<BaselinePan, Record<SegmentoRecompra, Rendimiento3MResult>>>;
+  /** Rendimiento diario vs. promedio de Harina PAN con baseline a elegir, en Radar y Facturado, más las tarjetas por tramo. */
+  rendimientoBaselinePan: RendimientoBaselineResult;
   /** Rendimiento diario de Panquecitas vs. promedio histórico de Margarina/Mayonesa (Mavesa), por categoría. */
   rendimientoVsMavesa: Record<MavesaCategoria, RendimientoVsMavesaResult>;
   /** Los mismos ratios sin la tanda "Indirecto Cumaná 2" (ampliación de franquiciados, 08-09). */
@@ -163,6 +166,22 @@ const BASELINE_PAN_LABEL: Record<BaselinePan, string> = {
   agoSep: "Ago–Sep",
   julSep: "Jul–Sep",
 };
+
+/** El corte elegido del gráfico de baseline de PAN. Facturado no tiene corte por segmento. */
+function baselineDe(
+  b: SectorBundle,
+  fuente: FuenteVolumen,
+  cartera: CarteraBaseline,
+  baseline: BaselinePan,
+  segmento: SegmentoRecompra
+): Rendimiento3MResult {
+  return fuente === "facturado"
+    ? b.rendimientoBaselinePan.facturado[cartera][baseline]
+    : b.rendimientoBaselinePan.radar[cartera][baseline][segmento];
+}
+
+/** Filas de tarjetas debajo del gráfico de baseline: arriba ago–sep, en medio jul–sep, abajo may–jul. */
+const FILAS_TARJETAS_BASELINE: BaselinePan[] = ["agoSep", "julSep", "mayJul"];
 
 const PAN_POBLACION_OPTIONS: { key: PanComparisonPoblacion; label: string }[] = [
   { key: "clientes", label: "PAN Clientes" },
@@ -435,6 +454,8 @@ export function DiennDashboardClient({
   const [ciudadFocoRec, setCiudadFocoRec] = useState<"TOTAL" | Sector>("TOTAL");
   // Gráfico de baseline de PAN a elegir: estado propio, sus botones son
   // independientes entre sí y de los otros gráficos de ratios.
+  // Radar o Facturado: el único botón que también mueve las tarjetas.
+  const [fuenteBaseline, setFuenteBaseline] = useState<FuenteVolumen>("radar");
   const [baselinePan, setBaselinePan] = useState<BaselinePan>("mayJul");
   const [carteraBaseline, setCarteraBaseline] = useState<CarteraBaseline>("completa");
   const [segmentoBaseline, setSegmentoBaseline] = useState<SegmentoRecompra>("todos");
@@ -811,20 +832,31 @@ export function DiennDashboardClient({
   // Gráfico de baseline de PAN a elegir. Mismas definiciones que el de arriba:
   // ratio acumulado = promedio de los ratios diarios, y por ciudad contra su
   // propio promedio de PAN.
+  // Facturado no se puede cortar por segmento (DIENN, 05-10-2026): con esa
+  // fuente el corte es siempre "todos", sin perder lo elegido para Radar.
+  const segmentoBaselineEfectivo: SegmentoRecompra = fuenteBaseline === "facturado" ? "todos" : segmentoBaseline;
   const baselineData = useMemo(
     () =>
       conDias(
-        (ciudadBaseline === "TOTAL" ? bundle : bundles[ciudadBaseline]).rendimientoBaselinePan[carteraBaseline][
-          baselinePan
-        ][segmentoBaseline],
+        baselineDe(
+          ciudadBaseline === "TOTAL" ? bundle : bundles[ciudadBaseline],
+          fuenteBaseline,
+          carteraBaseline,
+          baselinePan,
+          segmentoBaselineEfectivo
+        ),
         diasFiltro
       ),
-    [bundle, bundles, ciudadBaseline, carteraBaseline, baselinePan, segmentoBaseline, diasFiltro]
+    [bundle, bundles, ciudadBaseline, fuenteBaseline, carteraBaseline, baselinePan, segmentoBaselineEfectivo, diasFiltro]
   );
   const etiquetaBaseline = BASELINE_PAN_LABEL[baselinePan];
-  const etiquetaClientesBaseline = `${segmentoBaseline === "foco" ? "de segmentos foco" : "de todos los segmentos"}${
-    carteraBaseline === "ajustada" ? ", sin la ampliación de franquiciados de Cumaná" : ""
-  }`;
+  const etiquetaFuenteBaseline = fuenteBaseline === "facturado" ? "facturado" : "Radar";
+  const etiquetaClientesBaseline = `${
+    segmentoBaselineEfectivo === "foco" ? "de segmentos foco" : "de todos los segmentos"
+  }${carteraBaseline === "ajustada" ? ", sin la ampliación de franquiciados de Cumaná" : ""}`;
+  // Tarjetas: fijas en Global (cartera ajustada, todos los segmentos); solo
+  // cambian con la fuente.
+  const tarjetasBaseline = bundles.TOTAL.rendimientoBaselinePan.tarjetas[fuenteBaseline];
 
   const ratioAcumuladoBaseline = useMemo(() => {
     const puntos = baselineData.puntos;
@@ -838,7 +870,9 @@ export function DiennDashboardClient({
     if (base.length === 0) return [];
     const porDia = (s: Sector) =>
       new Map(
-        bundles[s].rendimientoBaselinePan[carteraBaseline][baselinePan][segmentoBaseline].puntos.map((p) => [p.dia, p])
+        baselineDe(bundles[s], fuenteBaseline, carteraBaseline, baselinePan, segmentoBaselineEfectivo).puntos.map(
+          (p) => [p.dia, p]
+        )
       );
     const c = porDia("cumana");
     const b = porDia("barquisimeto_este");
@@ -864,7 +898,7 @@ export function DiennDashboardClient({
         ratioCabudareAcum: bDias > 0 ? Math.round((bSuma / bDias) * 10) / 10 : null,
       };
     });
-  }, [baselineData, bundles, carteraBaseline, baselinePan, segmentoBaseline]);
+  }, [baselineData, bundles, fuenteBaseline, carteraBaseline, baselinePan, segmentoBaselineEfectivo]);
 
   // Mismo patrón que el gráfico de 3M de PAN, pero para Margarina/Mayonesa
   // (sección "Rendimiento vs. Margarina/Mayonesa"): no hay distinción
@@ -1471,10 +1505,36 @@ export function DiennDashboardClient({
               quita de los dos lados la ampliación de los 7 franquiciados de Cumaná (~975 PDV, 08-09).{" "}
               <span className="font-medium">Solo foco</span> deja solo los segmentos foco, tanto en Panquecitas como en
               el promedio de PAN. La línea continua es el promedio y la punteada su 4%; el porcentaje sobre cada punto
-              es el ratio del día.
+              es el ratio del día. <span className="font-medium">Facturado</span> hace lo mismo con el reporte Pedidos y
+              Facturado (Panquecitas y Harina PAN), sin corte por segmento; en Ajustada también quita lo facturado a
+              las 7 franquiciadas.
             </p>
           </div>
           <div className="flex flex-wrap items-center gap-2 print:hidden">
+            {/* Fuente del volumen: mueve el gráfico y las tarjetas. */}
+            <div className="flex rounded-lg border border-slate-200 overflow-hidden text-xs font-medium">
+              {(
+                [
+                  ["radar", "Radar"],
+                  ["facturado", "Facturado"],
+                ] as const
+              ).map(([key, label]) => (
+                <button
+                  key={key}
+                  onClick={() => setFuenteBaseline(key)}
+                  title={
+                    key === "facturado"
+                      ? "Panquecitas y Harina PAN del reporte Pedidos y Facturado (gráfico y tarjetas)"
+                      : "Panquecitas y Harina PAN de la Carga Radar y del reporte de 3 meses (gráfico y tarjetas)"
+                  }
+                  className={`px-3 py-1.5 transition-colors ${
+                    fuenteBaseline === key ? "bg-indigo-700 text-white" : "bg-white text-slate-500 hover:bg-slate-50"
+                  }`}
+                >
+                  {label}
+                </button>
+              ))}
+            </div>
             {/* Período del que sale el promedio de PAN. */}
             <div className="flex rounded-lg border border-slate-200 overflow-hidden text-xs font-medium">
               {(["mayJul", "agoSep", "julSep"] as const).map((key) => (
@@ -1531,13 +1591,18 @@ export function DiennDashboardClient({
                 <button
                   key={key}
                   onClick={() => setSegmentoBaseline(key)}
+                  disabled={fuenteBaseline === "facturado" && key === "foco"}
                   title={
-                    key === "foco"
+                    fuenteBaseline === "facturado" && key === "foco"
+                      ? "No disponible en Facturado: lo facturado a una franquiciada no se puede separar por segmento"
+                      : key === "foco"
                       ? "Panquecitas y promedio de PAN solo de clientes de segmentos foco"
                       : "Clientes de cualquier segmento"
                   }
-                  className={`px-3 py-1.5 transition-colors ${
-                    segmentoBaseline === key ? "bg-slate-900 text-white" : "bg-white text-slate-500 hover:bg-slate-50"
+                  className={`px-3 py-1.5 transition-colors disabled:cursor-not-allowed disabled:opacity-40 ${
+                    segmentoBaselineEfectivo === key
+                      ? "bg-slate-900 text-white"
+                      : "bg-white text-slate-500 hover:bg-slate-50"
                   }`}
                 >
                   {label}
@@ -1586,15 +1651,15 @@ export function DiennDashboardClient({
               Ratio acum. por ciudad
             </button>
             <ExportExcelButton
-              filename={`Rendimiento diario vs baseline PAN ${etiquetaBaseline} — ${
+              filename={`Rendimiento diario vs baseline PAN ${etiquetaBaseline} — ${etiquetaFuenteBaseline} — ${
                 carteraBaseline === "ajustada" ? "ajustada" : "cartera completa"
-              } — ${segmentoBaseline === "foco" ? "solo foco" : "todos los segmentos"} — ${
+              } — ${segmentoBaselineEfectivo === "foco" ? "solo foco" : "todos los segmentos"} — ${
                 ciudadBaseline === "TOTAL" ? "Global" : sectorLabels[ciudadBaseline]
               }`}
               rows={baselineData.puntos}
               columns={[
                 { header: "Día", value: (r) => r.dia, width: 14 },
-                { header: "Panquecitas totales (kg)", value: (r) => r.panquecitasKg, width: 26 },
+                { header: `Panquecitas totales ${etiquetaFuenteBaseline} (kg)`, value: (r) => r.panquecitasKg, width: 30 },
                 { header: `Ratio vs promedio PAN ${etiquetaBaseline} (%)`, value: (r) => r.ratioPct, width: 30 },
               ]}
             />
@@ -1629,7 +1694,7 @@ export function DiennDashboardClient({
                 />
               </div>
               <p className="text-xs text-slate-400 mt-2">
-                Promedio PAN {etiquetaBaseline} de los clientes {etiquetaClientesBaseline}:{" "}
+                Promedio PAN {etiquetaBaseline} ({etiquetaFuenteBaseline}) de los clientes {etiquetaClientesBaseline}:{" "}
                 <span className="font-medium text-slate-600">
                   {baselineData.promedio3M.toLocaleString("es-VE", { maximumFractionDigits: 1 })} kg/día
                 </span>{" "}
@@ -1656,15 +1721,76 @@ export function DiennDashboardClient({
                   </>
                 ) : (
                   <>
-                    <p>Sin promedio de PAN {etiquetaBaseline} para este grupo de clientes.</p>
+                    <p>
+                      Sin promedio de PAN {etiquetaBaseline} ({etiquetaFuenteBaseline}) para este grupo de clientes.
+                    </p>
                     <p className="text-xs mt-1">
-                      May–Jul y julio salen del reporte &quot;Radar últimos 3 Meses&quot;; ago–sep, de la Carga Radar.
+                      {fuenteBaseline === "facturado"
+                        ? "Falta cargar el reporte Pedidos y Facturado de Harina PAN para ese período."
+                        : "May–Jul y julio salen del reporte \"Radar últimos 3 Meses\"; ago–sep, de la Carga Radar."}
                     </p>
                   </>
                 )}
               </div>
             </div>
           )}
+
+          {/* Tarjetas por tramo: fijas en Global, cartera ajustada y todos los
+              segmentos. Solo cambian con Radar / Facturado. */}
+          <div className="mt-6 border-t border-slate-100 pt-4">
+            <p className="text-sm font-semibold text-slate-700">
+              Ratio por tramo — {etiquetaFuenteBaseline}, Global, sin la ampliación de franquiciados de Cumaná
+            </p>
+            <p className="text-xs text-slate-400 mt-1 mb-3">
+              Fila Ago–Sep: Panquecitas del tramo ÷ Harina PAN del mismo tramo. Filas Jul–Sep y May–Jul: Panquecitas del
+              tramo ÷ (promedio diario de PAN del baseline × días hábiles del tramo). El acumulado va desde el 03-08 hasta
+              el cierre de cada tarjeta.
+            </p>
+            <div className="space-y-3">
+              {FILAS_TARJETAS_BASELINE.map((b) => (
+                <div key={b}>
+                  <p className="text-xs font-medium uppercase tracking-wide text-slate-500 mb-1.5">
+                    Baseline PAN {BASELINE_PAN_LABEL[b]}
+                  </p>
+                  <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">
+                    {tarjetasBaseline[b].map((t: TarjetaTramo) => (
+                      <div key={t.label} className="rounded-lg border border-slate-200 bg-white px-4 py-3">
+                        <p className="text-xs text-slate-500">
+                          {t.label}{" "}
+                          <span className="text-slate-400">
+                            ({t.desde.slice(8, 10)}/{t.desde.slice(5, 7)}–{t.hasta.slice(8, 10)}/{t.hasta.slice(5, 7)})
+                          </span>
+                        </p>
+                        <p
+                          className={`text-2xl font-bold leading-tight ${
+                            t.ratioPct != null && t.ratioPct >= 4 ? "text-emerald-700" : "text-slate-900"
+                          }`}
+                        >
+                          {t.ratioPct != null
+                            ? `${t.ratioPct.toLocaleString("es-VE", { maximumFractionDigits: 1 })}%`
+                            : "Sin PAN"}
+                        </p>
+                        <p className="text-xs text-slate-500">
+                          Panquecitas:{" "}
+                          <span className="font-medium text-slate-700">
+                            {t.panquecitasTon.toLocaleString("es-VE", { maximumFractionDigits: 2 })} Ton
+                          </span>
+                        </p>
+                        <p className="text-xs text-slate-500 mt-1 border-t border-slate-100 pt-1">
+                          Acumulado al {t.hasta.slice(8, 10)}/{t.hasta.slice(5, 7)}:{" "}
+                          <span className="font-semibold text-slate-700">
+                            {t.ratioAcumPct != null
+                              ? `${t.ratioAcumPct.toLocaleString("es-VE", { maximumFractionDigits: 1 })}%`
+                              : "—"}
+                          </span>
+                        </p>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              ))}
+            </div>
+          </div>
         </CardContent>
       </Card>
 

@@ -121,6 +121,12 @@ export const SAP_RADAR_MAVESA_MATERIAL_PRODUCT_MAP: Record<string, string> = {
 export const SAP_MATERIAL_PRODUCT_MAP: Record<string, string> = {
   "CR/Q147": PRODUCT_IDS.PANQUECITAS, // PRIMOR MEZCLA DE HARINAS BOLSA 400Gx16UN
   "CR/Q148": PRODUCT_IDS.PANQUECITAS, // PRIMOR MEZCLA DE HARINAS BOLSA 800Gx12UN
+  // Harina PAN facturada, para el gráfico de baseline de PAN en "Facturado"
+  // (DIENN, 05-10-2026). Es el mismo reporte corrido para Harina PAN; se
+  // asumen los mismos códigos que en el Radar. Sin variante: el Mix de
+  // Producto es solo de Panquecitas.
+  "H187": PRODUCT_IDS.HARINA_PAN, // PAN HPM BLANCO GLUTEN FREE 1KGX20UN VE
+  "H439": PRODUCT_IDS.HARINA_PAN, // PAN HARINA MAIZ GF 2KGx9UNID BOPP
 };
 
 // Misma tabla de materiales, pero a nivel de presentación: alimenta el

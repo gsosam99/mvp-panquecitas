@@ -1,3 +1,4 @@
+import { PRODUCT_IDS } from "@/data/catalog";
 import { fetchAllRowsChunked } from "@/lib/supabase/fetch-all";
 import { createSupabaseServiceClient } from "@/lib/supabase/server";
 import { hasDashboardSession } from "@/lib/session";
@@ -75,6 +76,8 @@ export async function POST(req: Request) {
     const { data: facturado, error: factError } = await supabase
       .from("sap_pedidos_facturados")
       .select("location_id")
+      // Solo Panquecitas: la tabla también guarda Harina PAN facturada.
+      .eq("product_id", PRODUCT_IDS.PANQUECITAS)
       .gt("cantidad_facturada_kg", 0);
     if (factError) throw factError;
     const facturadoSet = new Set(
