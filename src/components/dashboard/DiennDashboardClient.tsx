@@ -1499,8 +1499,8 @@ export function DiennDashboardClient({
             <p className="text-xs text-slate-400 mt-1">
               Venta diaria de Panquecitas (Carga Radar) contra el promedio diario de Harina PAN del período que se
               elija: <span className="font-medium">May–Jul</span>, Radar de mayo a julio (÷ 63 días
-              hábiles); <span className="font-medium">Ago–Sep</span>, Radar de agosto y septiembre (÷ 43);{" "}
-              <span className="font-medium">Jul–Sep</span>, julio más agosto–septiembre (÷ 66). La Harina PAN de Radar sale de los reportes del menú Radar 3 Meses.
+              hábiles); <span className="font-medium">Ago–Sep</span>, Radar de agosto y septiembre (÷ 42);{" "}
+              <span className="font-medium">Jul–Sep</span>, julio más agosto–septiembre (÷ 65). La Harina PAN de Radar sale de los reportes del menú Radar 3 Meses.
               Cada promedio se divide entre los días hábiles de su rango. <span className="font-medium">Ajustada</span>{" "}
               quita de los dos lados la ampliación de los 7 franquiciados de Cumaná (~975 PDV, 08-09).{" "}
               <span className="font-medium">Solo foco</span> deja solo los segmentos foco, tanto en Panquecitas como en

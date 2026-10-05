@@ -1619,10 +1619,10 @@ export async function getRendimiento3MFocoRecompra(
 //   - Baseline (BaselinePan):
 //       · "mayJul": mayo–julio ÷ DIAS_HABILES_3M (63), el mismo promedio que
 //         4d y 4e.
-//       · "agoSep": agosto–septiembre ÷ sus días hábiles (43: el 1 y 2 de
-//         agosto son fin de semana).
+//       · "agoSep": agosto–septiembre ÷ DIAS_HABILES_AGOSEP (42, como el Excel
+//         de validación de DIENN).
 //       · "julSep": julio + agosto–septiembre, ÷ los días hábiles de julio más
-//         los de ago–sep.
+//         esos 42.
 //   - Cartera (CarteraBaseline): "completa", o "ajustada" sin la tanda
 //     "Indirecto Cumaná 2": sus ~975 PDV y, en facturado, también lo
 //     facturado a sus 7 franquiciadas.
@@ -1703,13 +1703,33 @@ interface DatosFuente {
   ultimoDia: string;
 }
 
+/**
+ * Días hábiles de agosto–septiembre: 42, como el Excel de validación de DIENN
+ * (05-10-2026), y no los 43 que da contar de lunes a viernes. Es una
+ * CONSTANTE, igual que DIAS_HABILES_3M (63). Divide el promedio de PAN de
+ * ago–sep y es la cantidad de días del piloto contra la que se miden las
+ * Panquecitas en las tarjetas: (Panquecitas ÷ 42) ÷ (PAN ÷ 63).
+ */
+const DIAS_HABILES_AGOSEP = 42;
+
 const DIAS_BASELINE: Record<BaselinePan, number> = {
   mayJul: DIAS_HABILES_3M,
-  agoSep: contarDiasHabiles(BASELINE_AGOSEP_DESDE, BASELINE_AGOSEP_HASTA),
-  julSep:
-    contarDiasHabiles(`${BASELINE_JULIO}-01`, ultimoDiaDelMes(BASELINE_JULIO)) +
-    contarDiasHabiles(BASELINE_AGOSEP_DESDE, BASELINE_AGOSEP_HASTA),
+  agoSep: DIAS_HABILES_AGOSEP,
+  julSep: contarDiasHabiles(`${BASELINE_JULIO}-01`, ultimoDiaDelMes(BASELINE_JULIO)) + DIAS_HABILES_AGOSEP,
 };
+
+/**
+ * Días hábiles de un rango del piloto (dentro de 03-08 → 30-09), a la escala de
+ * DIAS_HABILES_AGOSEP: los días de lunes a viernes del rango × 42/43. Así los
+ * tres tramos de las tarjetas suman exactamente 42, como en el Excel, sin
+ * tener que elegir qué día hábil queda fuera.
+ */
+function diasHabilesPiloto(desde: string, hasta: string): number {
+  return (
+    (contarDiasHabiles(desde, hasta) * DIAS_HABILES_AGOSEP) /
+    contarDiasHabiles(RENDIMIENTO_DIARIO_DESDE, BASELINE_AGOSEP_HASTA)
+  );
+}
 
 /** Día hábil al que se imputa la fila, o null si es anterior al arranque del piloto. */
 function diaPiloto(fecha: string): string | null {
@@ -1793,11 +1813,12 @@ function armarTarjetas(
     datos.pan[b].filter((r) => idsPan.has(r.locId)).reduce((s, r) => s + r.kg, 0) / DIAS_BASELINE[b];
 
   // Contra qué Harina PAN se compara un rango: la real del mismo rango (agoSep)
-  // o el promedio diario del baseline por los días hábiles del rango.
+  // o el promedio diario del baseline por los días hábiles del rango, a la
+  // escala de 42 (ver diasHabilesPiloto).
   const panDe = (b: BaselinePan, desde: string, hasta: string) =>
     b === "agoSep"
       ? sumaKg(datos.panAgoSep, idsPan, desde, hasta)
-      : promedioDe(b) * contarDiasHabiles(desde, hasta);
+      : promedioDe(b) * diasHabilesPiloto(desde, hasta);
 
   const fila = (b: BaselinePan): TarjetaTramo[] =>
     TRAMOS_TARJETAS.map((t) => {
