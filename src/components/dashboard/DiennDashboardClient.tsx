@@ -1753,11 +1753,11 @@ export function DiennDashboardClient({
                     Baseline PAN {BASELINE_PAN_LABEL[b]}
                   </p>
                   <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">
+                    {/* Los ratios se muestran redondeados a entero; el valor exacto, al pasar el mouse. */}
                     {tarjetasBaseline[b].map((t: TarjetaTramo) => (
                       <div
                         key={t.label}
                         className="rounded-lg border border-slate-200 bg-white px-4 py-3"
-                        // Los ratios se muestran redondeados a entero; el valor exacto, al pasar el mouse.
                         title={`Ratio del tramo: ${
                           t.ratioPct != null ? `${t.ratioPct.toLocaleString("es-VE", { maximumFractionDigits: 1 })}%` : "—"
                         } · Acumulado: ${
