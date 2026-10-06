@@ -851,7 +851,10 @@ export function DiennDashboardClient({
     () =>
       conDias(
         baselineDe(
-          ciudadBaseline === "TOTAL" ? bundle : bundles[ciudadBaseline],
+          // "Global" es SIEMPRE el total de las dos ciudades (bundles.TOTAL), no el
+          // corte del filtro de ciudad de arriba: con ese filtro en Cumaná, Global y
+          // Cumaná salían iguales.
+          bundles[ciudadBaseline],
           fuenteBaseline,
           carteraBaseline,
           baselinePan,
@@ -859,7 +862,7 @@ export function DiennDashboardClient({
         ),
         diasFiltro
       ),
-    [bundle, bundles, ciudadBaseline, fuenteBaseline, carteraBaseline, baselinePan, segmentoBaselineEfectivo, diasFiltro]
+    [bundles, ciudadBaseline, fuenteBaseline, carteraBaseline, baselinePan, segmentoBaselineEfectivo, diasFiltro]
   );
   const etiquetaBaseline = BASELINE_PAN_LABEL[baselinePan];
   const etiquetaFuenteBaseline = fuenteBaseline === "facturado" ? "facturado" : "Radar";
@@ -1706,7 +1709,11 @@ export function DiennDashboardClient({
                 />
               </div>
               <p className="text-xs text-slate-400 mt-2">
-                Promedio PAN {etiquetaBaseline} ({etiquetaFuenteBaseline}) de los clientes {etiquetaClientesBaseline}:{" "}
+                Promedio PAN {etiquetaBaseline} ({etiquetaFuenteBaseline}) —{" "}
+                <span className="font-medium text-slate-600">
+                  {ciudadBaseline === "TOTAL" ? "Global" : sectorLabels[ciudadBaseline]}
+                </span>{" "}
+                — de los clientes {etiquetaClientesBaseline}:{" "}
                 <span className="font-medium text-slate-600">
                   {baselineData.promedio3M.toLocaleString("es-VE", { maximumFractionDigits: 1 })} kg/día
                 </span>{" "}
