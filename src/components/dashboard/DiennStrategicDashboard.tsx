@@ -75,6 +75,7 @@ async function getBundle(sector?: Sector): Promise<SectorBundle> {
     rendimiento3MFocoRecompraSinAmpl,
     rendimientoVsMargarinaSinAmpl,
     rendimientoVsMayonesaSinAmpl,
+    ventaRecompraActivacionSinAmpl,
     rendimientoBaselinePan,
   ] = await Promise.all([
     getTotalToneladas(sector),
@@ -107,6 +108,7 @@ async function getBundle(sector?: Sector): Promise<SectorBundle> {
     getRendimiento3MFocoRecompra(sector, true),
     getRendimientoVsMavesa("margarina", sector, true),
     getRendimientoVsMavesa("mayonesa", sector, true),
+    getVentaRecompraActivacion(sector, true),
     getRendimientoBaselinePan(sector),
   ]);
 
@@ -137,6 +139,7 @@ async function getBundle(sector?: Sector): Promise<SectorBundle> {
       rendimiento3MUniverso: rendimiento3MUniversoSinAmpl,
       rendimiento3MFocoRecompra: rendimiento3MFocoRecompraSinAmpl,
       rendimientoVsMavesa: { margarina: rendimientoVsMargarinaSinAmpl, mayonesa: rendimientoVsMayonesaSinAmpl },
+      ventaRecompraActivacion: ventaRecompraActivacionSinAmpl,
     },
   };
 }

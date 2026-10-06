@@ -153,6 +153,7 @@ export interface SectorBundle {
     rendimiento3MUniverso: Rendimiento3MResult;
     rendimiento3MFocoRecompra: SectorBundle["rendimiento3MFocoRecompra"];
     rendimientoVsMavesa: Record<MavesaCategoria, RendimientoVsMavesaResult>;
+    ventaRecompraActivacion: Record<TimeGranularity, VentaRecompraActivacionPoint[]>;
   };
   /** Conversión de degustaciones (tickets recibidos ÷ entregados) de la ciudad/sector. */
   conversionDegustaciones: { samples: number; conversions: number; rate: number };
@@ -1102,7 +1103,9 @@ export function DiennDashboardClient({
     return { meses, desde: universo.desde, hasta: universo.hasta, con, sin, total };
   }, [bundle.rendimiento3M]);
 
-  const comboPointsTodos = bundle.ventaRecompraActivacion[comboGranularity];
+  const comboPointsTodos = (sinAmpliacion ? bundle.ratiosSinAmpliacion : bundle).ventaRecompraActivacion[
+    comboGranularity
+  ];
   // Filtro de fechas: solo recorta puntos diarios; los acumulados siguen siendo desde el arranque.
   const comboPoints = filtrarPorDias(comboPointsTodos, (p) => p.bucket, diasFiltro);
   const demandaPoints = filtrarPorDias(bundle.demandaInsatisfecha[granularity], (p) => p.bucket, diasFiltro);
@@ -2443,6 +2446,7 @@ export function DiennDashboardClient({
             >
               Recompra foco
             </button>
+            {botonSinAmpliacion}
             <ExportExcelButton
               filename="datos_venta_recompra_activacion"
               rows={comboPoints}

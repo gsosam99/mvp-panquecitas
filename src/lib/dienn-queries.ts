@@ -1052,10 +1052,16 @@ function computeVentaRecompraActivacionPoints(
 }
 
 export async function getVentaRecompraActivacion(
-  sector?: Sector
+  sector?: Sector,
+  /**
+   * Sin la ampliación de franquiciados de Cumaná (tanda + los 38 previos),
+   * botón de los gráficos de ratios. Salen de las tasas y también de las
+   * barras: sus ventas quedan fuera del alcance del gráfico.
+   */
+  excluirAmpliacion = false
 ): Promise<Record<TimeGranularity, VentaRecompraActivacionPoint[]>> {
   const empty = { day: [], week: [], month: [] };
-  const universo = await getUniverseLocations();
+  const universo = sinAmpliacionFranquiciados(await getUniverseLocations(), excluirAmpliacion);
   const universoFiltrado = sector ? universo.filter((l) => sectorGroup(l.oficina_venta) === sector) : universo;
   if (universoFiltrado.length === 0) return empty;
   const incorporacionPorId = new Map(universoFiltrado.map((l) => [l.id, l.fecha_incorporacion ?? null]));
