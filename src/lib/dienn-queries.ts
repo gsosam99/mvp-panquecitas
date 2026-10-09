@@ -1641,8 +1641,9 @@ export async function getRendimiento3MFocoRecompra(
 // desde RENDIMIENTO_DIARIO_DESDE y con el fin de semana sumado al lunes. En
 // Radar los PDV fuera de cartera suman su volumen, igual que en 4e.
 //
-// Las TARJETAS (TarjetaTramo) van debajo del gráfico y son fijas: cartera
-// ajustada, todos los segmentos, Global. Solo cambian con la fuente. Una
+// Las TARJETAS (TarjetaTramo) van debajo del gráfico y son fijas en cartera
+// ajustada y todos los segmentos. Cambian con la fuente y con el sector
+// (cada bundle de ciudad trae las suyas; Global = las dos ciudades). Una
 // fila por baseline y una tarjeta por tramo (agosto, 1–15 sep, 16–30 sep):
 //   - Fila "agoSep": Panquecitas del tramo ÷ Harina PAN del MISMO tramo.
 //   - Filas "julSep" y "mayJul": Panquecitas del tramo ÷ (promedio diario de

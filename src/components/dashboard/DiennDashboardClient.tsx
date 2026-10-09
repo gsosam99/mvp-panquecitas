@@ -870,9 +870,9 @@ export function DiennDashboardClient({
   const etiquetaClientesBaseline = `${
     segmentoBaselineEfectivo === "foco" ? "de segmentos foco" : "de todos los segmentos"
   }${carteraBaseline === "ajustada" ? ", sin la ampliación de franquiciados de Cumaná" : ""}`;
-  // Tarjetas: fijas en Global (cartera ajustada, todos los segmentos); solo
-  // cambian con la fuente.
-  const tarjetasBaseline = bundles.TOTAL.rendimientoBaselinePan.tarjetas[fuenteBaseline];
+  // Tarjetas: fijas en cartera ajustada y todos los segmentos; cambian con la
+  // fuente y con la ciudad del gráfico (Global = total de las dos ciudades).
+  const tarjetasBaseline = bundles[ciudadBaseline].rendimientoBaselinePan.tarjetas[fuenteBaseline];
 
   const ratioAcumuladoBaseline = useMemo(() => {
     const puntos = baselineData.puntos;
@@ -1757,11 +1757,13 @@ export function DiennDashboardClient({
             </div>
           )}
 
-          {/* Tarjetas por tramo: fijas en Global, cartera ajustada y todos los
-              segmentos. Solo cambian con Radar / Facturado. */}
+          {/* Tarjetas por tramo: fijas en cartera ajustada y todos los segmentos.
+              Cambian con Radar / Facturado y con la ciudad. */}
           <div className="mt-6 border-t border-slate-100 pt-4">
             <p className="text-sm font-semibold text-slate-700">
-              Ratio por tramo — {etiquetaFuenteBaseline}, Global, sin la ampliación de franquiciados de Cumaná
+              Ratio por tramo — {etiquetaFuenteBaseline},{" "}
+              {ciudadBaseline === "TOTAL" ? "Global" : sectorLabels[ciudadBaseline]}, sin la ampliación de
+              franquiciados de Cumaná
             </p>
             <p className="text-xs text-slate-400 mt-1 mb-3">
               Fila Ago–Sep: Panquecitas del tramo ÷ Harina PAN del mismo tramo. Filas Jul–Sep y May–Jul: Panquecitas del
