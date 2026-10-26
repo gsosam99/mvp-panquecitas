@@ -1,3 +1,4 @@
+import type { ReactNode } from "react";
 import { Card, CardContent } from "@/components/ui/card";
 
 type ProductBadge = "pan" | "panquecitas" | "both";
@@ -12,6 +13,8 @@ interface KpiCardProps {
   critical?: boolean;
   trend?: "up" | "down" | "neutral";
   product?: ProductBadge;
+  /** Control al pie de la tarjeta (p. ej. un botón de exportar). */
+  action?: ReactNode;
 }
 
 function ProductPill({ product }: { product: ProductBadge }) {
@@ -41,7 +44,7 @@ function ProductPill({ product }: { product: ProductBadge }) {
   );
 }
 
-export function KpiCard({ title, value, subtitle, annotation, highlight, critical, trend, product }: KpiCardProps) {
+export function KpiCard({ title, value, subtitle, annotation, highlight, critical, trend, product, action }: KpiCardProps) {
   const inverted = highlight || critical;
   return (
     <Card
@@ -79,6 +82,7 @@ export function KpiCard({ title, value, subtitle, annotation, highlight, critica
             {subtitle}
           </p>
         )}
+        {action && <div className="mt-3">{action}</div>}
       </CardContent>
     </Card>
   );

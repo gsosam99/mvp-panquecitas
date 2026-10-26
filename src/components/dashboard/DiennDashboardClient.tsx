@@ -96,6 +96,8 @@ import type {
   FuenteVolumen,
   RendimientoBaselineResult,
   TarjetaTramo,
+  ConversionDegustaciones,
+  DegustacionDetalle,
 } from "@/lib/dienn-queries";
 import type { MotivoNoVentaRow } from "@/lib/efectividad-queries";
 import type { Sector } from "@/lib/sectors";
@@ -156,9 +158,73 @@ export interface SectorBundle {
     ventaRecompraActivacion: Record<TimeGranularity, VentaRecompraActivacionPoint[]>;
   };
   /** Conversión de degustaciones (tickets recibidos ÷ entregados) de la ciudad/sector. */
-  conversionDegustaciones: { samples: number; conversions: number; rate: number };
+  conversionDegustaciones: ConversionDegustaciones;
   /** Inactivos por segmento, cuántos venden PAN, y la activación sin los PDV no alcanzables. */
   activacionAjustada: ActivacionAjustadaResult;
+}
+
+interface DegustacionesResumenFila {
+  modelo: string;
+  degustaciones: number;
+  entregados: number;
+  recibidos: number;
+}
+
+/**
+ * Excel de la tarjeta de degustaciones: una hoja con la conversión por modelo
+ * (Directo / Indirecto, Mixto cuenta como Directo) y otra con el detalle.
+ */
+function degustacionesSheets(detalle: DegustacionDetalle[]): ExcelSheetSpec<unknown>[] {
+  const resumen = (["Directo", "Indirecto", "Sin dato"] as const)
+    .map((modelo): DegustacionesResumenFila => {
+      const filas = detalle.filter((d) => d.modelo === modelo);
+      return {
+        modelo,
+        degustaciones: filas.length,
+        entregados: filas.reduce((s, d) => s + d.entregados, 0),
+        recibidos: filas.reduce((s, d) => s + d.recibidos, 0),
+      };
+    })
+    .filter((r) => r.modelo !== "Sin dato" || r.degustaciones > 0);
+  resumen.push({
+    modelo: "Total",
+    degustaciones: detalle.length,
+    entregados: detalle.reduce((s, d) => s + d.entregados, 0),
+    recibidos: detalle.reduce((s, d) => s + d.recibidos, 0),
+  });
+  const conversion = (recibidos: number, entregados: number) =>
+    entregados > 0 ? Math.round((recibidos / entregados) * 1000) / 10 : 0;
+
+  const resumenSheet: ExcelSheetSpec<DegustacionesResumenFila> = {
+    sheetName: "Por modelo",
+    rows: resumen,
+    columns: [
+      { header: "Modelo", value: (r) => r.modelo, width: 14 },
+      { header: "Degustaciones", value: (r) => r.degustaciones, width: 16 },
+      { header: "Tickets entregados", value: (r) => r.entregados, width: 18 },
+      { header: "Tickets recibidos", value: (r) => r.recibidos, width: 18 },
+      { header: "Conversión (%)", value: (r) => conversion(r.recibidos, r.entregados), width: 16 },
+    ],
+  };
+  const detalleSheet: ExcelSheetSpec<DegustacionDetalle> = {
+    sheetName: "Detalle",
+    rows: detalle,
+    columns: [
+      { header: "Fecha", value: (r) => r.fecha, width: 12 },
+      { header: "Promotora", value: (r) => r.promotora, width: 26 },
+      { header: "Cédula", value: (r) => r.cedula, width: 14 },
+      { header: "Código SAP", value: (r) => r.sapCode ?? "", width: 14 },
+      { header: "Cliente", value: (r) => r.cliente, width: 34 },
+      { header: "Ciudad", value: (r) => r.ciudad, width: 20 },
+      { header: "Modelo", value: (r) => r.modelo, width: 12 },
+      { header: "Esquema de atención (SAP)", value: (r) => r.esquemaAtencion, width: 24 },
+      { header: "Tickets entregados", value: (r) => r.entregados, width: 18 },
+      { header: "Tickets recibidos", value: (r) => r.recibidos, width: 18 },
+      { header: "Tickets intactos", value: (r) => r.intactos, width: 16 },
+      { header: "Conversión (%)", value: (r) => conversion(r.recibidos, r.entregados), width: 16 },
+    ],
+  };
+  return [resumenSheet, detalleSheet] as unknown as ExcelSheetSpec<unknown>[];
 }
 
 /** Nombre corto de cada baseline de PAN: botones, línea del promedio, pie y Excel. */
@@ -2843,6 +2909,13 @@ export function DiennDashboardClient({
           ]}
           subtitle={`Tickets entregados vs. recibidos — ${filtroTexto}`}
           product="panquecitas"
+          action={
+            <ExportExcelMultiButton
+              filename={`Degustaciones — ${filtroTexto}`}
+              label={`Exportar a Excel (${bundle.conversionDegustaciones.detalle.length})`}
+              sheets={degustacionesSheets(bundle.conversionDegustaciones.detalle)}
+            />
+          }
         />
         <KpiCard
           title="Días de Inventario en Calle"

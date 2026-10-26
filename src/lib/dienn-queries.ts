@@ -2316,20 +2316,51 @@ export async function getDetalleClientesPorSegmento(sector?: Sector): Promise<De
 // Ver migración 004: samples_given/conversions_tracked se renombraron a
 // tickets_entregados/tickets_recibidos (sistema de tickets físicos).
 
+/** Una degustación (cierre de jornada de una promotora en un PDV), para el Excel. */
+export interface DegustacionDetalle {
+  fecha: string;
+  promotora: string;
+  cedula: string;
+  sapCode: string | null;
+  cliente: string;
+  ciudad: string;
+  /** Esquema de atención tal como viene de SAP (Directo / Mixto / Indirecto). */
+  esquemaAtencion: string;
+  /** Directo / Indirecto, con Mixto como Directo (mismo criterio que el resto del dashboard). */
+  modelo: "Directo" | "Indirecto" | "Sin dato";
+  entregados: number;
+  recibidos: number;
+  intactos: number;
+}
+
 export interface ConversionDegustaciones {
   samples: number;
   conversions: number;
   rate: number;
+  /** Las mismas degustaciones que suman arriba, una por fila, más recientes primero. */
+  detalle: DegustacionDetalle[];
 }
 
 export async function getConversionDegustaciones(sector?: Sector): Promise<ConversionDegustaciones> {
   const supabase = createSupabaseServiceClient();
 
-  const { data } = await supabase
-    .from("promotion_activities")
-    .select("location_id, tickets_entregados, tickets_recibidos");
-
-  let rows = (data ?? []) as { location_id: string; tickets_entregados: number; tickets_recibidos: number }[];
+  // Paginado: una fila por promotora y día, crece con la campaña (ver fetch-all.ts).
+  let rows = await fetchAllRows<{
+    location_id: string;
+    report_date: string;
+    worker_first_name: string | null;
+    worker_last_name: string | null;
+    worker_cedula: string | null;
+    tickets_entregados: number;
+    tickets_recibidos: number;
+    tickets_intactos: number;
+  }>(() =>
+    supabase
+      .from("promotion_activities")
+      .select(
+        "location_id, report_date, worker_first_name, worker_last_name, worker_cedula, tickets_entregados, tickets_recibidos, tickets_intactos"
+      )
+  );
   // Por ciudad: solo las degustaciones de PDV del universo de ese sector.
   if (sector) {
     const ids = await getUniverseLocationIds(sector);
@@ -2338,10 +2369,46 @@ export async function getConversionDegustaciones(sector?: Sector): Promise<Conve
   const samples = rows.reduce((sum, r) => sum + r.tickets_entregados, 0);
   const conversions = rows.reduce((sum, r) => sum + r.tickets_recibidos, 0);
 
+  // Datos del PDV para el detalle. Se buscan por id (no desde el universo) para
+  // que en el total no queden sin nombre las degustaciones de PDV fuera de cartera.
+  const locIds = Array.from(new Set(rows.map((r) => r.location_id)));
+  const locs = await fetchAllRowsChunked<{
+    id: string;
+    sap_code: string | null;
+    name: string;
+    oficina_venta: string | null;
+    esquema_atencion: string | null;
+  }>(
+    (lote) => supabase.from("locations").select("id, sap_code, name, oficina_venta, esquema_atencion").in("id", lote),
+    locIds
+  );
+  const locById = new Map(locs.map((l) => [l.id, l]));
+
+  const detalle: DegustacionDetalle[] = rows
+    .map((r) => {
+      const loc = locById.get(r.location_id);
+      const ciudad = sectorGroup(loc?.oficina_venta);
+      return {
+        fecha: r.report_date,
+        promotora: [r.worker_first_name, r.worker_last_name].filter(Boolean).join(" "),
+        cedula: r.worker_cedula ?? "",
+        sapCode: loc?.sap_code ?? null,
+        cliente: loc?.name ?? "PDV no encontrado",
+        ciudad: ciudad ? SECTOR_LABELS[ciudad] : loc?.oficina_venta ?? "",
+        esquemaAtencion: loc?.esquema_atencion ?? "",
+        modelo: !loc?.esquema_atencion ? "Sin dato" : esModeloIndirecto(loc) ? "Indirecto" : "Directo",
+        entregados: r.tickets_entregados,
+        recibidos: r.tickets_recibidos,
+        intactos: r.tickets_intactos,
+      } satisfies DegustacionDetalle;
+    })
+    .sort((a, b) => b.fecha.localeCompare(a.fecha) || a.cliente.localeCompare(b.cliente));
+
   return {
     samples,
     conversions,
     rate: samples > 0 ? Math.round((conversions / samples) * 100 * 10) / 10 : 0,
+    detalle,
   };
 }
 
