@@ -252,7 +252,9 @@ function baselineDe(
  * redondeo SUBE (2,7 → "3%"); si bajaría (3,4 → 3) se muestra con su decimal
  * ("3,4%"). Pedido del usuario, 05-10-2026.
  */
-function formatoRatioBaseline(pct: number): string {
+function formatoRatioBaseline(pct: number, sincerado = false): string {
+  // "Sincerado": el valor con su decimal, sin subirlo a entero.
+  if (sincerado) return `${pct.toLocaleString("es-VE", { maximumFractionDigits: 1 })}%`;
   const entero = Math.round(pct);
   return entero >= pct
     ? `${entero.toLocaleString("es-VE")}%`
@@ -555,6 +557,9 @@ export function DiennDashboardClient({
   // 15-09 o solo agosto (el ratio acumulado, el ratio por ciudad y la
   // descarga siguen el corte).
   const [corteBaseline, setCorteBaseline] = useState<CorteBaseline>("todo");
+  // "Sincerado": ratios del gráfico de baseline y sus tarjetas con su decimal,
+  // sin el redondeo hacia arriba de formatoRatioBaseline.
+  const [sinceradoBaseline, setSinceradoBaseline] = useState(false);
   // Gráfico "Rendimiento vs. Margarina/Mayonesa": misma mecánica que el de 3M
   // de PAN, pero sin distinción clientes/universo (las tablas de Mavesa ya
   // son solo-cartera) y con selector de categoría.
@@ -1780,6 +1785,17 @@ export function DiennDashboardClient({
                 </button>
               ))}
             </div>
+            <button
+              onClick={() => setSinceradoBaseline((v) => !v)}
+              title="Muestra el ratio acumulado y los de las tarjetas con su decimal, sin redondear hacia arriba"
+              className={`px-3 py-1.5 rounded-lg border text-xs font-medium transition-colors ${
+                sinceradoBaseline
+                  ? "border-emerald-700 bg-emerald-700 text-white"
+                  : "border-slate-200 bg-white text-slate-500 hover:bg-slate-50"
+              }`}
+            >
+              Sincerado
+            </button>
             <ExportExcelButton
               filename={`Rendimiento diario vs baseline PAN ${etiquetaBaseline} — ${etiquetaFuenteBaseline} — ${
                 carteraBaseline === "ajustada" ? "ajustada" : "cartera completa"
@@ -1812,7 +1828,7 @@ export function DiennDashboardClient({
                         ratioAcumuladoBaseline.pct >= 4 ? "text-emerald-700" : "text-slate-900"
                       }`}
                     >
-                      {formatoRatioBaseline(ratioAcumuladoBaseline.pct)}
+                      {formatoRatioBaseline(ratioAcumuladoBaseline.pct, sinceradoBaseline)}
                       <span className="text-sm font-medium text-slate-500"> · meta 4%</span>
                     </p>
                   </div>
@@ -1916,7 +1932,7 @@ export function DiennDashboardClient({
                           }`}
                         >
                           {t.ratioPct != null
-                            ? formatoRatioBaseline(t.ratioPct)
+                            ? formatoRatioBaseline(t.ratioPct, sinceradoBaseline)
                             : "Sin PAN"}
                         </p>
                         <p className="text-xs text-slate-500">
@@ -1929,7 +1945,7 @@ export function DiennDashboardClient({
                           Acumulado al {t.hasta.slice(8, 10)}/{t.hasta.slice(5, 7)}:{" "}
                           <span className="font-semibold text-slate-700">
                             {t.ratioAcumPct != null
-                              ? formatoRatioBaseline(t.ratioAcumPct)
+                              ? formatoRatioBaseline(t.ratioAcumPct, sinceradoBaseline)
                               : "—"}
                           </span>
                         </p>
