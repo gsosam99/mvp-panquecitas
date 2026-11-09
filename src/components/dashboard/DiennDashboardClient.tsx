@@ -232,6 +232,7 @@ const BASELINE_PAN_LABEL: Record<BaselinePan, string> = {
   mayJul: "May–Jul",
   agoSep: "Ago–Sep",
   julSep: "Jul–Sep",
+  ago: "Ago",
 };
 
 /** El corte elegido del gráfico de baseline de PAN. Facturado no tiene corte por segmento. */
@@ -1612,7 +1613,8 @@ export function DiennDashboardClient({
               Venta diaria de Panquecitas (Carga Radar) contra el promedio diario de Harina PAN del período que se
               elija: <span className="font-medium">May–Jul</span>, Radar de mayo a julio (÷ 63 días
               hábiles); <span className="font-medium">Ago–Sep</span>, Radar de agosto y septiembre (÷ 42);{" "}
-              <span className="font-medium">Jul–Sep</span>, julio más agosto–septiembre (÷ 65). La Harina PAN de Radar sale de los reportes del menú Radar 3 Meses.
+              <span className="font-medium">Jul–Sep</span>, julio más agosto–septiembre (÷ 65);{" "}
+              <span className="font-medium">Ago</span>, solo agosto, sin septiembre (÷ 21). La Harina PAN de Radar sale de los reportes del menú Radar 3 Meses.
               Cada promedio se divide entre los días hábiles de su rango. <span className="font-medium">Ajustada</span>{" "}
               quita de los dos lados la ampliación de los 7 franquiciados de Cumaná (~975 PDV, 08-09, incluidos 38 clientes previos que pasaron a ellos).{" "}
               <span className="font-medium">Solo foco</span> deja solo los segmentos foco, tanto en Panquecitas como en
@@ -1651,7 +1653,7 @@ export function DiennDashboardClient({
             </div>
             {/* Período del que sale el promedio de PAN. */}
             <div className="flex rounded-lg border border-slate-200 overflow-hidden text-xs font-medium">
-              {(["mayJul", "agoSep", "julSep"] as const).map((key) => (
+              {(["mayJul", "agoSep", "julSep", "ago"] as const).map((key) => (
                 <button
                   key={key}
                   onClick={() => setBaselinePan(key)}
@@ -1660,7 +1662,9 @@ export function DiennDashboardClient({
                       ? "Promedio de PAN de mayo a julio"
                       : key === "agoSep"
                       ? "Promedio de PAN de agosto y septiembre"
-                      : "Promedio de PAN de julio + agosto–septiembre"
+                      : key === "julSep"
+                      ? "Promedio de PAN de julio + agosto–septiembre"
+                      : "Promedio de PAN solo de agosto, sin septiembre"
                   }
                   className={`px-3 py-1.5 transition-colors ${
                     baselinePan === key ? "bg-amber-700 text-white" : "bg-white text-slate-500 hover:bg-slate-50"

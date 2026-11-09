@@ -1629,6 +1629,8 @@ export async function getRendimiento3MFocoRecompra(
 //         de validación de DIENN).
 //       · "julSep": julio + agosto–septiembre, ÷ los días hábiles de julio más
 //         esos 42.
+//       · "ago": solo agosto, sin nada de septiembre, ÷ los días hábiles de
+//         lunes a viernes de agosto (21).
 //   - Cartera (CarteraBaseline): "completa", o "ajustada" sin la tanda
 //     "Indirecto Cumaná 2": sus ~975 PDV y, en facturado, también lo
 //     facturado a sus 7 franquiciadas.
@@ -1652,7 +1654,7 @@ export async function getRendimiento3MFocoRecompra(
 // El acumulado de cada tarjeta es lo mismo desde el 03-08 hasta el cierre del
 // tramo, para ver la evolución de una tarjeta a la siguiente.
 
-export type BaselinePan = "mayJul" | "agoSep" | "julSep";
+export type BaselinePan = "mayJul" | "agoSep" | "julSep" | "ago";
 
 export type CarteraBaseline = "completa" | "ajustada";
 
@@ -1688,6 +1690,8 @@ const BASELINE_MAYJUL_DESDE = PERIODO_3M_DESDE;
 const BASELINE_MAYJUL_HASTA = PERIODO_3M_HASTA;
 /** Julio, el mes que se suma en "julSep". */
 const BASELINE_JULIO = "2026-07";
+/** Agosto, el único mes del baseline "ago". */
+const BASELINE_AGOSTO = "2026-08";
 
 // Las tarjetas arrancan con el piloto: antes del 03-08 no hay Panquecitas.
 const TRAMOS_TARJETAS: { label: string; desde: string; hasta: string }[] = [
@@ -1723,6 +1727,7 @@ const DIAS_BASELINE: Record<BaselinePan, number> = {
   mayJul: DIAS_HABILES_3M,
   agoSep: DIAS_HABILES_AGOSEP,
   julSep: contarDiasHabiles(`${BASELINE_JULIO}-01`, ultimoDiaDelMes(BASELINE_JULIO)) + DIAS_HABILES_AGOSEP,
+  ago: contarDiasHabiles(`${BASELINE_AGOSTO}-01`, ultimoDiaDelMes(BASELINE_AGOSTO)),
 };
 
 /**
@@ -1839,7 +1844,7 @@ function armarTarjetas(
       };
     });
 
-  return { mayJul: fila("mayJul"), agoSep: fila("agoSep"), julSep: fila("julSep") };
+  return { mayJul: fila("mayJul"), agoSep: fila("agoSep"), julSep: fila("julSep"), ago: fila("ago") };
 }
 
 function ultimoDiaDe(filas: FilaKg[]): string {
@@ -1853,9 +1858,14 @@ function ultimoDiaDe(filas: FilaKg[]): string {
 
 export async function getRendimientoBaselinePan(sector?: Sector): Promise<RendimientoBaselineResult> {
   const vacioSegmento = { foco: RENDIMIENTO_3M_VACIO, todos: RENDIMIENTO_3M_VACIO };
-  const vacioRadar = { mayJul: vacioSegmento, agoSep: vacioSegmento, julSep: vacioSegmento };
-  const vacioFacturado = { mayJul: RENDIMIENTO_3M_VACIO, agoSep: RENDIMIENTO_3M_VACIO, julSep: RENDIMIENTO_3M_VACIO };
-  const vacioTarjetas = { mayJul: [], agoSep: [], julSep: [] };
+  const vacioRadar = { mayJul: vacioSegmento, agoSep: vacioSegmento, julSep: vacioSegmento, ago: vacioSegmento };
+  const vacioFacturado = {
+    mayJul: RENDIMIENTO_3M_VACIO,
+    agoSep: RENDIMIENTO_3M_VACIO,
+    julSep: RENDIMIENTO_3M_VACIO,
+    ago: RENDIMIENTO_3M_VACIO,
+  };
+  const vacioTarjetas = { mayJul: [], agoSep: [], julSep: [], ago: [] };
   const vacio: RendimientoBaselineResult = {
     radar: { completa: vacioRadar, ajustada: vacioRadar },
     facturado: { completa: vacioFacturado, ajustada: vacioFacturado },
@@ -1939,6 +1949,7 @@ export async function getRendimientoBaselinePan(sector?: Sector): Promise<Rendim
       mayJul: radarMayJul,
       agoSep: radarAgoSep,
       julSep: [...radarMayJul.filter((r) => r.fecha.startsWith(BASELINE_JULIO)), ...radarAgoSep],
+      ago: radarAgoSep.filter((r) => r.fecha.startsWith(BASELINE_AGOSTO)),
     },
     panAgoSep: radarAgoSep,
     ultimoDia: ultimoDiaDe(radarPanq),
@@ -1968,6 +1979,7 @@ export async function getRendimientoBaselinePan(sector?: Sector): Promise<Rendim
       mayJul: factMayJul,
       agoSep: factAgoSep,
       julSep: [...factMayJul.filter((r) => r.fecha.startsWith(BASELINE_JULIO)), ...factAgoSep],
+      ago: factAgoSep.filter((r) => r.fecha.startsWith(BASELINE_AGOSTO)),
     },
     panAgoSep: factAgoSep,
     ultimoDia: ultimoDiaDe(factPanq),
@@ -1988,7 +2000,12 @@ export async function getRendimientoBaselinePan(sector?: Sector): Promise<Rendim
         todos: armar(carteraDe(c), fueraDeCartera),
       };
     };
-    return { mayJul: porSegmento("mayJul"), agoSep: porSegmento("agoSep"), julSep: porSegmento("julSep") };
+    return {
+      mayJul: porSegmento("mayJul"),
+      agoSep: porSegmento("agoSep"),
+      julSep: porSegmento("julSep"),
+      ago: porSegmento("ago"),
+    };
   };
 
   // Facturado: todas las locations del sector, o todas en Global, igual que
@@ -2009,7 +2026,7 @@ export async function getRendimientoBaselinePan(sector?: Sector): Promise<Rendim
   const facturadoPorCartera = (c: CarteraBaseline) => {
     const idsFact = idsFacturado(c);
     const armar = (b: BaselinePan) => armarBaseline(facturado, b, idsFact, idsFact, new Set());
-    return { mayJul: armar("mayJul"), agoSep: armar("agoSep"), julSep: armar("julSep") };
+    return { mayJul: armar("mayJul"), agoSep: armar("agoSep"), julSep: armar("julSep"), ago: armar("ago") };
   };
 
   // Tarjetas: fijas en cartera ajustada y todos los segmentos.
