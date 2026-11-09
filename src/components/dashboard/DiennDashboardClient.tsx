@@ -346,8 +346,16 @@ const SECTOR_ACUM_COLUMNS: ExcelColumn<CarteraTotalDiaPunto>[] = [
 // mes o trimestre pasa igual, así que con otra granularidad el gráfico no cambia.
 type DiasFiltro = ReadonlySet<string> | null;
 const ES_DIA = /^\d{4}-\d{2}-\d{2}$/;
-/** Último día del corte "Hasta 15 sep" del gráfico de baseline de PAN. */
-const CORTE_15_SEP = "2026-09-15";
+/**
+ * Cortes de días del gráfico de baseline de PAN: último día que se muestra
+ * (null = todos los días).
+ */
+type CorteBaseline = "todo" | "hasta15Sep" | "agosto";
+const CORTE_BASELINE_HASTA: Record<CorteBaseline, string | null> = {
+  todo: null,
+  hasta15Sep: "2026-09-15",
+  agosto: "2026-08-31",
+};
 
 function filtrarPorDias<T>(puntos: T[], clave: (p: T) => string, dias: DiasFiltro): T[] {
   if (dias === null) return puntos;
@@ -543,9 +551,10 @@ export function DiennDashboardClient({
   const [ciudadBaseline, setCiudadBaseline] = useState<"TOTAL" | Sector>("TOTAL");
   const [showPanDiarioBaseline, setShowPanDiarioBaseline] = useState(true);
   const [ratioPorCiudadBaseline, setRatioPorCiudadBaseline] = useState(false);
-  // Corte opcional del gráfico de baseline de PAN: solo días hasta el 15-09
-  // (el ratio acumulado, el ratio por ciudad y la descarga siguen el corte).
-  const [hasta15SepBaseline, setHasta15SepBaseline] = useState(false);
+  // Corte opcional del gráfico de baseline de PAN: todos los días, hasta el
+  // 15-09 o solo agosto (el ratio acumulado, el ratio por ciudad y la
+  // descarga siguen el corte).
+  const [corteBaseline, setCorteBaseline] = useState<CorteBaseline>("todo");
   // Gráfico "Rendimiento vs. Margarina/Mayonesa": misma mecánica que el de 3M
   // de PAN, pero sin distinción clientes/universo (las tablas de Mavesa ya
   // son solo-cartera) y con selector de categoría.
@@ -933,7 +942,8 @@ export function DiennDashboardClient({
       ),
       diasFiltro
     );
-    return hasta15SepBaseline ? { ...r, puntos: r.puntos.filter((p) => p.dia <= CORTE_15_SEP) } : r;
+    const hasta = CORTE_BASELINE_HASTA[corteBaseline];
+    return hasta ? { ...r, puntos: r.puntos.filter((p) => p.dia <= hasta) } : r;
   }, [
     bundles,
     ciudadBaseline,
@@ -942,7 +952,7 @@ export function DiennDashboardClient({
     baselinePan,
     segmentoBaselineEfectivo,
     diasFiltro,
-    hasta15SepBaseline,
+    corteBaseline,
   ]);
   const etiquetaBaseline = BASELINE_PAN_LABEL[baselinePan];
   const etiquetaFuenteBaseline = fuenteBaseline === "facturado" ? "facturado" : "Radar";
@@ -1605,7 +1615,8 @@ export function DiennDashboardClient({
               es el ratio del día. <span className="font-medium">Facturado</span> hace lo mismo con el reporte Pedidos y
               Facturado (Panquecitas y Harina PAN), sin corte por segmento; en Ajustada también quita lo facturado a
               las 7 franquiciadas. <span className="font-medium">Hasta 15 sep</span> deja solo los días hasta el
-              15-09; el ratio acumulado se recalcula con esos días.
+              15-09 y <span className="font-medium">Solo agosto</span>, solo los de agosto; el ratio acumulado se
+              recalcula con esos días.
             </p>
           </div>
           <div className="flex flex-wrap items-center gap-2 print:hidden">
@@ -1748,23 +1759,35 @@ export function DiennDashboardClient({
             >
               Ratio acum. por ciudad
             </button>
-            <button
-              onClick={() => setHasta15SepBaseline((v) => !v)}
-              title="Muestra solo los días hasta el 15 de septiembre; el ratio acumulado y la descarga siguen el corte"
-              className={`px-3 py-1.5 rounded-lg border text-xs font-medium transition-colors ${
-                hasta15SepBaseline
-                  ? "border-violet-700 bg-violet-700 text-white"
-                  : "border-slate-200 bg-white text-slate-500 hover:bg-slate-50"
-              }`}
-            >
-              Hasta 15 sep
-            </button>
+            {/* Corte de días: el ratio acumulado y la descarga siguen el corte. */}
+            <div className="flex rounded-lg border border-slate-200 overflow-hidden text-xs font-medium">
+              {(
+                [
+                  ["todo", "Todos los días", "Todos los días desde el inicio del piloto"],
+                  ["hasta15Sep", "Hasta 15 sep", "Solo los días hasta el 15 de septiembre"],
+                  ["agosto", "Solo agosto", "Solo los días de agosto, sin nada de septiembre"],
+                ] as const
+              ).map(([key, label, ayuda]) => (
+                <button
+                  key={key}
+                  onClick={() => setCorteBaseline(key)}
+                  title={ayuda}
+                  className={`px-3 py-1.5 transition-colors ${
+                    corteBaseline === key ? "bg-violet-700 text-white" : "bg-white text-slate-500 hover:bg-slate-50"
+                  }`}
+                >
+                  {label}
+                </button>
+              ))}
+            </div>
             <ExportExcelButton
               filename={`Rendimiento diario vs baseline PAN ${etiquetaBaseline} — ${etiquetaFuenteBaseline} — ${
                 carteraBaseline === "ajustada" ? "ajustada" : "cartera completa"
               } — ${segmentoBaselineEfectivo === "foco" ? "solo foco" : "todos los segmentos"} — ${
                 ciudadBaseline === "TOTAL" ? "Global" : sectorLabels[ciudadBaseline]
-              }${hasta15SepBaseline ? " — hasta 15 sep" : ""}`}
+              }${
+                corteBaseline === "hasta15Sep" ? " — hasta 15 sep" : corteBaseline === "agosto" ? " — solo agosto" : ""
+              }`}
               rows={baselineData.puntos}
               columns={[
                 { header: "Día", value: (r) => r.dia, width: 14 },
